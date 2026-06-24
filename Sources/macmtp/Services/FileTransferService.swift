@@ -312,10 +312,13 @@ public final class FileTransferService: ObservableObject {
             
             // Check for pause
             while pauseRequested && !cancelRequested {
-                try? await Task.sleep(nanoseconds: 100_000_000) // Sleep 100ms
+                try? await Task.sleep(nanoseconds: 100_000_000)
             }
             
             if cancelRequested { break }
+            
+            // Keep progress view in sync with current item
+            batch.currentItemIndex = index
             
             var item = batch.items[index]
             if item.status == .skipped {

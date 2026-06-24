@@ -122,6 +122,7 @@ struct ContentView: View {
                         isLocal: true,
                         isDisabled: false,
                         files: $localFiles,
+                        isActivePane: activePane == .local,
                         clipboardManager: ClipboardManager.shared,
                         onFilesDropped: { files, destination in
                             handleFilesDropped(files: files, destination: destination, isLocal: true)
@@ -150,6 +151,7 @@ struct ContentView: View {
                         isLocal: false,
                         isDisabled: !isMTPConnected,
                         files: $mtpFiles,
+                        isActivePane: activePane == .mtp,
                         clipboardManager: ClipboardManager.shared,
                         onFilesDropped: { files, destination in
                             handleFilesDropped(files: files, destination: destination, isLocal: false)
@@ -320,45 +322,61 @@ struct ContentView: View {
     /// This catches Cmd+key combinations that SwiftUI doesn't natively support
     private func installKeyboardMonitor() {
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let hasCmd = event.modifierFlags.contains(.command)
+            let hasShift = event.modifierFlags.contains(.shift)
+            let modifiersOnly = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+
             // Escape to clear selection
             if event.keyCode == 53 {
-                switch activePane {
-                case .local: selectedLocalItems.removeAll()
-                case .mtp: selectedMTPItems.removeAll()
+                switch self.activePane {
+                case .local: self.selectedLocalItems.removeAll()
+                case .mtp: self.selectedMTPItems.removeAll()
                 }
                 return nil
             }
 
-            guard event.modifierFlags.contains(.command) else { return event }
+            // Enter (keyCode 36) — open selected item
+            if event.keyCode == 36 && !hasCmd && modifiersOnly == [] {
+                self.handleEnter()
+                return nil
+            }
+
+            // Cmd+Up (keyCode 126) — navigate to parent
+            if event.keyCode == 126 && hasCmd && !hasShift {
+                self.handleNavigateUp()
+                return nil
+            }
+
+            guard hasCmd else { return event }
 
             let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
 
             switch key {
             case "c":
-                handleCopy()
+                self.handleCopy()
                 return nil
             case "x":
-                handleCut()
+                self.handleCut()
                 return nil
             case "v":
-                handlePaste()
+                self.handlePaste()
                 return nil
             case "a":
-                handleSelectAll()
+                self.handleSelectAll()
                 return nil
             case "n":
-                handleNewFolder()
+                self.handleNewFolder()
                 return nil
             case "r":
-                handleRefresh()
+                self.handleRefresh()
                 return nil
             default:
                 break
             }
 
             // Cmd+Backspace for delete
-            if event.keyCode == 51 && event.modifierFlags.contains(.command) {
-                handleDelete()
+            if event.keyCode == 51 && hasCmd {
+                self.handleDelete()
                 return nil
             }
 
@@ -483,6 +501,40 @@ struct ContentView: View {
     func handleNewFolder() {
         newFolderName = "New Folder"
         showNewFolderDialog = true
+    }
+
+    func handleEnter() {
+        switch activePane {
+        case .local:
+            guard let first = selectedLocalItems.first,
+                  let node = localFiles.first(where: { $0.path == first })
+            else { return }
+            if node.isDirectory {
+                currentLocalPath = node.path
+            } else {
+                NSWorkspace.shared.open(URL(fileURLWithPath: node.path))
+            }
+        case .mtp:
+            guard let first = selectedMTPItems.first,
+                  let node = mtpFiles.first(where: { $0.path == first }),
+                  node.isDirectory
+            else { return }
+            currentMTPPath = node.path
+            Task { await MTPDeviceManager.shared.navigateTo(path: node.path) }
+        }
+    }
+
+    func handleNavigateUp() {
+        switch activePane {
+        case .local:
+            let parent = URL(fileURLWithPath: currentLocalPath).deletingLastPathComponent().path
+            if parent != currentLocalPath { currentLocalPath = parent }
+        case .mtp:
+            let parent = URL(fileURLWithPath: currentMTPPath).deletingLastPathComponent().path
+            guard parent != currentMTPPath else { return }
+            currentMTPPath = parent
+            Task { await MTPDeviceManager.shared.navigateTo(path: parent) }
+        }
     }
 
     func handleRefresh() {

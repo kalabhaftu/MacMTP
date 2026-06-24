@@ -117,11 +117,6 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
             runLoopSource = nil
         }
         
-        if let port = notificationPort {
-            IONotificationPortDestroy(port)
-            notificationPort = nil
-        }
-        
         if addedIterator != 0 {
             IOObjectRelease(addedIterator)
             addedIterator = 0
@@ -130,6 +125,11 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         if removedIterator != 0 {
             IOObjectRelease(removedIterator)
             removedIterator = 0
+        }
+        
+        if let port = notificationPort {
+            IONotificationPortDestroy(port)
+            notificationPort = nil
         }
         
         isWatching = false

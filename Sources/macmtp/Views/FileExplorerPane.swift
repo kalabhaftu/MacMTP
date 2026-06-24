@@ -94,6 +94,8 @@ struct FileExplorerPane: View {
 
     @Binding var files: [FileNode]
 
+    var isActivePane: Bool = false
+
     var clipboardManager: ClipboardManager?
 
     var onFilesDropped: (([DroppedFile], String) -> Void)?
@@ -200,6 +202,15 @@ struct FileExplorerPane: View {
         }
         .onChange(of: sortDirection) { _, _ in
             applyFilterAndSort()
+        }
+        .background(
+            KeyboardLetterNav(
+                onKeyPress: { key in handleKeyPress(key) },
+                isActive: isDisabled ? false : isActivePane
+            )
+        )
+        .onChange(of: isActivePane) { _, active in
+            if active { lastKeyTime = Date.distantPast }
         }
         .sheet(isPresented: $showProperties) {
             if let file = propertiesFile {
@@ -490,11 +501,6 @@ struct FileExplorerPane: View {
                 }
             }
             .listStyle(.inset(alternatesRowBackgrounds: true))
-            .background(
-                KeyboardShortcutHandler(onKeyPress: { key in
-                    handleKeyPress(key, scrollProxy: scrollProxy)
-                })
-            )
             .onDrop(of: [.fileURL, .utf8PlainText], isTargeted: $isDropTargeted) { providers in
                 handleDrop(providers: providers)
             }
@@ -969,7 +975,6 @@ struct FileExplorerPane: View {
                 }
             }
         } else {
-            applyFilterAndSort()
             loadingState = .loading
         }
     }
@@ -1120,40 +1125,22 @@ struct FileExplorerPane: View {
         }
     }
 
-    // MARK: - Keyboard Handling
+    // MARK: - Keyboard Letter Navigation
 
-    private func handleKeyPress(_ key: String, scrollProxy: ScrollViewProxy) {
+    private func handleKeyPress(_ key: String) {
         guard !key.isEmpty, !displayedFiles.isEmpty else { return }
 
         let now = Date()
         let timeDiff = now.timeIntervalSince(lastKeyTime)
         lastKeyTime = now
 
-        let char = key.lowercased()
-
-        // Only handle alphabetic characters for letter selection
-        guard char.rangeOfCharacter(from: .letters) != nil else { return }
-
-        if timeDiff < 1.0 && char == keySearchBuffer {
-            // Cycle to the next file starting with this letter
-            cycleSelection(startingWith: char, scrollProxy: scrollProxy)
+        if timeDiff < 1.0 {
+            keySearchBuffer += key.lowercased()
         } else {
-            // New search
-            keySearchBuffer = char
-            selectFirstMatch(startingWith: char, scrollProxy: scrollProxy)
+            keySearchBuffer = key.lowercased()
         }
-    }
 
-    private func selectFirstMatch(startingWith prefix: String, scrollProxy: ScrollViewProxy) {
-        if let match = displayedFiles.first(where: { $0.name.lowercased().hasPrefix(prefix) }) {
-            selectedItems = [match.path]
-            lastClickedItemID = match.path
-            scrollProxy.scrollTo(match.id, anchor: .center)
-        }
-    }
-
-    private func cycleSelection(startingWith char: String, scrollProxy: ScrollViewProxy) {
-        let matches = displayedFiles.filter { $0.name.lowercased().hasPrefix(char) }
+        let matches = displayedFiles.filter { $0.name.lowercased().hasPrefix(keySearchBuffer) }
         guard !matches.isEmpty else { return }
 
         let selectedMatch = matches.first { selectedItems.contains($0.path) }
@@ -1163,12 +1150,10 @@ struct FileExplorerPane: View {
             let next = matches[nextIndex]
             selectedItems = [next.path]
             lastClickedItemID = next.path
-            scrollProxy.scrollTo(next.id, anchor: .center)
         } else {
             let first = matches[0]
             selectedItems = [first.path]
             lastClickedItemID = first.path
-            scrollProxy.scrollTo(first.id, anchor: .center)
         }
     }
 
@@ -1202,6 +1187,7 @@ struct FileExplorerPane: View {
     private func handleDrop(providers: [NSItemProvider]) -> Bool {
         let collectedFiles = ThreadSafeArray<DroppedFile>()
         let group = DispatchGroup()
+        let dropDestination = currentPath
 
         for provider in providers {
             let suggestedName = provider.suggestedName ?? ""
@@ -1237,7 +1223,7 @@ struct FileExplorerPane: View {
         group.notify(queue: .main) {
             let files = collectedFiles.all
             if !files.isEmpty {
-                onFilesDropped?(files, currentPath)
+                onFilesDropped?(files, dropDestination)
             }
         }
 
@@ -1261,57 +1247,61 @@ struct FileExplorerPane: View {
     }
 }
 
-// MARK: - Keyboard Shortcut Handler (NSViewRepresentable)
+// MARK: - Keyboard Letter Navigation (NSViewRepresentable)
 
-struct KeyboardShortcutHandler: NSViewRepresentable {
+    struct KeyboardLetterNav: NSViewRepresentable {
     var onKeyPress: (String) -> Void
-
-    class Coordinator: NSObject {
-        var onKeyPress: (String) -> Void
-
-        init(onKeyPress: @escaping (String) -> Void) {
-            self.onKeyPress = onKeyPress
-        }
-
-        @objc func handleKeyDown(_ event: NSEvent) {
-            // Skip events with modifier keys (Cmd, Ctrl, Option) — those are shortcuts
-            if event.modifierFlags.contains(.command) || event.modifierFlags.contains(.control) {
-                return
-            }
-            if let chars = event.charactersIgnoringModifiers, !chars.isEmpty {
-                onKeyPress(chars)
-            }
-        }
-    }
+    var isActive: Bool
 
     func makeCoordinator() -> Coordinator {
         Coordinator(onKeyPress: onKeyPress)
     }
 
     func makeNSView(context: Context) -> NSView {
-        let view = KeyInterceptingView()
-        view.onKeyDown = context.coordinator.handleKeyDown
+        let view = NSView()
+        context.coordinator.installMonitor()
         return view
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {}
-}
-
-class KeyInterceptingView: NSView {
-    var onKeyDown: ((NSEvent) -> Void)?
-
-    override var acceptsFirstResponder: Bool { true }
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        // Don't aggressively steal focus; let the List handle it naturally
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.onKeyPress = onKeyPress
+        context.coordinator.isActive = isActive
     }
 
-    override func keyDown(with event: NSEvent) {
-        if let onKeyDown = onKeyDown {
-            onKeyDown(event)
-        } else {
-            super.keyDown(with: event)
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.removeMonitor()
+    }
+
+    class Coordinator: NSObject {
+        var onKeyPress: (String) -> Void
+        var isActive: Bool = false
+        private var monitor: Any?
+
+        init(onKeyPress: @escaping (String) -> Void) {
+            self.onKeyPress = onKeyPress
+        }
+
+        func installMonitor() {
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self = self, self.isActive else { return event }
+                let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+                guard modifiers == [] else { return event }
+                guard let chars = event.charactersIgnoringModifiers?.lowercased(), !chars.isEmpty else { return event }
+                guard chars.rangeOfCharacter(from: .letters) != nil else { return event }
+                self.onKeyPress(chars)
+                return event
+            }
+        }
+
+        func removeMonitor() {
+            if let m = monitor {
+                NSEvent.removeMonitor(m)
+                monitor = nil
+            }
+        }
+
+        deinit {
+            removeMonitor()
         }
     }
 }
