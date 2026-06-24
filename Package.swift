@@ -1,17 +1,59 @@
 // swift-tools-version: 6.1
-// The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
+import Foundation
+
+let packageDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
 
 let package = Package(
     name: "macmtp",
     platforms: [
-        .macOS(.v13)
+        .macOS(.v14)
     ],
     targets: [
-        // Targets are the basic building blocks of a package, defining a module or a test suite.
-        // Targets can depend on other targets in this package and products from dependencies.
+        // C target that exposes the Go Kalam static library headers
+        .target(
+            name: "CKalam",
+            path: "Sources/CKalam",
+            sources: ["shim.c", "early_init.c"],
+            publicHeadersPath: "include",
+            cSettings: [
+                .headerSearchPath("include")
+            ],
+            linkerSettings: [
+                .unsafeFlags([
+                    "-L\(packageDir)/Sources/CKalam",
+                    "-lkalam",
+                ]),
+                .unsafeFlags([
+                    "-L/usr/local/lib",
+                    "-L/opt/homebrew/lib",
+                    "-lusb-1.0",
+                ]),
+                .linkedFramework("CoreFoundation"),
+                .linkedFramework("Security"),
+                .linkedFramework("IOKit"),
+            ]
+        ),
+
+        // Main macOS application target
         .executableTarget(
-            name: "macmtp"),
+            name: "macmtp",
+            dependencies: ["CKalam"],
+            path: "Sources/macmtp",
+
+            linkerSettings: [
+                .unsafeFlags([
+                    "-L\(packageDir)/Sources/CKalam",
+                    "-lkalam",
+                    "-L/usr/local/lib",
+                    "-L/opt/homebrew/lib",
+                    "-lusb-1.0",
+                ]),
+                .linkedFramework("CoreFoundation"),
+                .linkedFramework("Security"),
+                .linkedFramework("IOKit"),
+            ]
+        ),
     ]
 )

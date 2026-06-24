@@ -1,0 +1,7 @@
+module CKalam {
+    header "kalam.h"
+    link "kalam"
+    link "usb-1.0"
+    link "resolv"
+    export *
+}

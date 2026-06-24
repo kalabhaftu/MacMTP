@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleExecutable</key>
+    <string>macMTP</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.macmtp.app</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleName</key>
+    <string>macMTP</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSHumanReadableCopyright</key>
+    <string>© 2024 macMTP Contributors</string>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>NSSystemAdministrationUsageDescription</key>
+    <string>macMTP needs access to USB devices to communicate with your Android device.</string>
+    <key>LSEnvironment</key>
+    <dict>
+        <key>GODEBUG</key>
+        <string>asyncpreemptoff=1</string>
+        <key>GOTRACEBACK</key>
+        <string>none</string>
+    </dict>
+</dict>
+</plist>

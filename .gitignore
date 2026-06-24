@@ -1,12 +1,32 @@
+# macOS
 .DS_Store
-/.build
-/Packages
+*.swp
+*.swo
+*~
+
+# Swift Package Manager
+.build/
+Package.resolved
+
+# Xcode
 xcuserdata/
+*.xcworkspace/
 DerivedData/
-.swiftpm/configuration/registries.json
-.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
-.netrc
-/*.app
-/macmtp
-/macmtp_test
+
+# Build artifacts
+macMTP.app/
+release/
+
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# Temporary files
+tmp/
+*.log
+
+# AI agent config
+.opencode/
 
