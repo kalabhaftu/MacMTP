@@ -13,8 +13,8 @@ APP_NAME="macMTP"
 VERSION="${1:-1.0.0}"
 RELEASE_DIR="$PROJECT_ROOT/release"
 APP_BUNDLE="$PROJECT_ROOT/$APP_NAME.app"
-ARCH="universal"
-BUILD_ARGS="--universal"
+ARCH=$(uname -m)
+BUILD_ARGS=""
 
 # Parse options
 while [[ $# -gt 0 ]]; do
