@@ -76,14 +76,20 @@ echo "  Creating DMG installer..."
 
 cd "$RELEASE_DIR"
 if command -v create-dmg &> /dev/null; then
-    create-dmg "$APP_BUNDLE" || true
+    create-dmg \
+      --volname "macMTP" \
+      --window-pos 200 120 \
+      --window-size 600 400 \
+      --icon-size 100 \
+      --icon "$APP_NAME.app" 150 190 \
+      --hide-extension "$APP_NAME.app" \
+      --app-drop-link 450 190 \
+      "$DMG_NAME" \
+      "$APP_BUNDLE" || true
 else
     npx create-dmg "$APP_BUNDLE" || true
+    mv "$RELEASE_DIR"/*.dmg "$RELEASE_DIR/$DMG_NAME" 2>/dev/null || true
 fi
-
-# The resulting DMG is usually named something like macMTP 1.0.0.dmg in the release folder
-# Let's rename it to our expected DMG_NAME
-mv "$RELEASE_DIR"/*.dmg "$RELEASE_DIR/$DMG_NAME" 2>/dev/null || true
 
 echo "  ✓ $DMG_NAME created"
 

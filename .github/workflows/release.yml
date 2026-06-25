@@ -7,7 +7,10 @@ on:
 
 jobs:
   build:
-    runs-on: macos-latest
+    strategy:
+      matrix:
+        os: [macos-latest, macos-13]
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: write
 
@@ -37,8 +40,7 @@ jobs:
 
     - name: Install dependencies
       run: |
-        brew install pkg-config libusb
-        npm install -g create-dmg
+        brew install pkg-config libusb create-dmg
         
     - name: Build and Package
       run: |
