@@ -80,12 +80,14 @@ else
     (
         cd "$KALAM_DIR"
         
+        SYSROOT=$(xcrun --show-sdk-path)
+        
         if [ "$BUILD_UNIVERSAL" = true ]; then
             echo "    Building libkalam for amd64..."
-            CGO_ENABLED=1 GOARCH=amd64 GOOS=darwin CGO_CFLAGS="-mmacosx-version-min=14.0" CGO_LDFLAGS="-mmacosx-version-min=14.0" go build -tags nosigsegv -buildmode=c-archive -o "$KALAM_OUTPUT/libkalam_amd64.a" ./*.go
+            CGO_ENABLED=1 GOARCH=amd64 GOOS=darwin CGO_CFLAGS="-mmacosx-version-min=14.0 -isysroot $SYSROOT" CGO_LDFLAGS="-mmacosx-version-min=14.0 -isysroot $SYSROOT" go build -tags nosigsegv -buildmode=c-archive -o "$KALAM_OUTPUT/libkalam_amd64.a" ./*.go
             
             echo "    Building libkalam for arm64..."
-            CGO_ENABLED=1 GOARCH=arm64 GOOS=darwin CGO_CFLAGS="-mmacosx-version-min=14.0" CGO_LDFLAGS="-mmacosx-version-min=14.0" go build -tags nosigsegv -buildmode=c-archive -o "$KALAM_OUTPUT/libkalam_arm64.a" ./*.go
+            CGO_ENABLED=1 GOARCH=arm64 GOOS=darwin CGO_CFLAGS="-mmacosx-version-min=14.0 -isysroot $SYSROOT" CGO_LDFLAGS="-mmacosx-version-min=14.0 -isysroot $SYSROOT" go build -tags nosigsegv -buildmode=c-archive -o "$KALAM_OUTPUT/libkalam_arm64.a" ./*.go
             
             echo "    Creating universal libkalam.a..."
             lipo -create -output "$KALAM_OUTPUT/libkalam.a" "$KALAM_OUTPUT/libkalam_amd64.a" "$KALAM_OUTPUT/libkalam_arm64.a"
@@ -94,8 +96,8 @@ else
             CGO_ENABLED=1 \
             GOARCH="${GOARCH:-amd64}" \
             GOOS=darwin \
-            CGO_CFLAGS="-mmacosx-version-min=14.0" \
-            CGO_LDFLAGS="-mmacosx-version-min=14.0" \
+            CGO_CFLAGS="-mmacosx-version-min=14.0 -isysroot $SYSROOT" \
+            CGO_LDFLAGS="-mmacosx-version-min=14.0 -isysroot $SYSROOT" \
             go build -tags nosigsegv -buildmode=c-archive \
                 -o "$KALAM_OUTPUT/libkalam.a" \
                 ./*.go
