@@ -181,29 +181,32 @@ extension FileNode {
 
 extension FileNode {
 
-    public static func calculateDirectorySize(path: String, isLocal: Bool, storageId: UInt32?) async -> Int64 {
+    public static func calculateDirectorySize(path: String, isLocal: Bool, storageId: UInt32?) async -> Int64? {
         if isLocal {
-            let fileManager = FileManager.default
-            guard let enumerator = fileManager.enumerator(
-                at: URL(fileURLWithPath: path),
-                includingPropertiesForKeys: [.fileSizeKey, .isDirectoryKey]
-            ) else { return 0 }
-            var total: Int64 = 0
-            while let fileURL = enumerator.nextObject() as? URL {
-                guard let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .isDirectoryKey]),
-                      let isDir = values.isDirectory,
-                      !isDir,
-                      let fileSize = values.fileSize else { continue }
-                total += Int64(fileSize)
-            }
-            return total
+            return await Task.detached {
+                let fileManager = FileManager.default
+                guard let enumerator = fileManager.enumerator(
+                    at: URL(fileURLWithPath: path),
+                    includingPropertiesForKeys: [.fileSizeKey, .isDirectoryKey]
+                ) else { return nil }
+                var total: Int64 = 0
+                while let fileURL = enumerator.nextObject() as? URL {
+                    guard let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .isDirectoryKey]),
+                          let isDir = values.isDirectory,
+                          !isDir,
+                          let fileSize = values.fileSize else { continue }
+                    total += Int64(fileSize)
+                }
+                return total
+            }.value
         } else {
-            guard let storageId = storageId else { return 0 }
+            guard let storageId = storageId else { return nil }
             do {
                 let files = try await KalamBridge.shared.listDirectory(storageId: storageId, path: path, recursive: true)
                 return files.reduce(0) { $0 + $1.size }
             } catch {
-                return 0
+                print("Failed to calculate MTP directory size for \(path): \(error)")
+                return nil
             }
         }
     }

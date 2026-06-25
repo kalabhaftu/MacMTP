@@ -196,13 +196,14 @@ public final class FileTransferService: ObservableObject {
             return
         }
         
-        // Set total file count for conflict summary
-        self.totalFileCount = expandedItems.count
+        // Set total file count for conflict summary (files only; directories created by ensureDirectoryExists)
+        self.totalFileCount = expandedItems.filter { !$0.isDirectory }.count
         
         // 2. Conflict Scan: Compare source and destination files
-        print("FileTransferService: Scanning for conflicts...")
+        let fileItems = expandedItems.filter { !$0.isDirectory }
+        print("FileTransferService: Scanning for conflicts over \(fileItems.count) files...")
         let conflicts = try await scanForConflicts(
-            items: expandedItems,
+            items: fileItems,
             destinationDir: destinationDir,
             direction: direction,
             storageId: mStorageId
@@ -245,9 +246,9 @@ public final class FileTransferService: ObservableObject {
             }
         }
         
-        // 4. Build final transfer items queue
+        // 4. Build final transfer items queue (files only; directories created by ensureDirectoryExists)
         var transferQueue: [TransferItem] = []
-        for item in expandedItems {
+        for item in fileItems {
             let relativePath = item.relativePath
             let destPath = (destinationDir as NSString).appendingPathComponent(relativePath)
             

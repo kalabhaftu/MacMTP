@@ -8,6 +8,7 @@ struct DroppedFile {
     let path: String
     let isLocal: Bool
     let name: String
+    let isDirectory: Bool
 }
 
 final class ThreadSafeArray<T>: @unchecked Sendable {
@@ -140,6 +141,8 @@ struct FileExplorerPane: View {
 
     @State private var lastClickedItemID: String? = nil
 
+    @State private var directorySizes: [String: Int64] = [:]
+
     // MARK: - File Operations Enum
 
     enum FileOperation {
@@ -171,7 +174,6 @@ struct FileExplorerPane: View {
             contentArea
         }
         .background(Color(NSColor.controlBackgroundColor))
-        .overlay(dropTargetOverlay)
         .onAppear {
             if !isDisabled {
                 navigateTo(path: currentPath)
@@ -181,6 +183,9 @@ struct FileExplorerPane: View {
             if !isDisabled && pathHistory.last != newPath {
                 loadDirectory()
             }
+        }
+        .onChange(of: files) { _, newFiles in
+            applyFilterAndSort(using: newFiles)
         }
         .onChange(of: isDisabled) { _, disabled in
             if !disabled {
@@ -193,6 +198,11 @@ struct FileExplorerPane: View {
             loadingState = newFiles.isEmpty
                 ? (MTPDeviceManager.shared.errorMessage == nil ? .empty : .error(MTPDeviceManager.shared.errorMessage!))
                 : .loaded
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .localDirectoryNeedsRefresh)) { _ in
+            if isLocal {
+                loadDirectory()
+            }
         }
         .onChange(of: filterText) { _, _ in
             applyFilterAndSort()
@@ -462,7 +472,7 @@ struct FileExplorerPane: View {
                 emptyStateView
             default:
                 if viewMode == .list {
-                    fileListView
+                    listView
                 } else {
                     iconGridView
                 }
@@ -470,80 +480,58 @@ struct FileExplorerPane: View {
         }
     }
 
-    // MARK: - File List View
-
-    private var fileListView: some View {
-        ScrollViewReader { scrollProxy in
-            List(selection: $selectedItems) {
-                ForEach(displayedFiles) { file in
-                    fileRow(for: file)
-                        .id(file.id)
-                        .tag(file.path)
-                        .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
-                        .contextMenu { contextMenuItems(for: file) }
-                        .onTapGesture(count: 2) {
-                            handleDoubleClick(file: file)
-                        }
-                        .simultaneousGesture(
-                            TapGesture(count: 1)
-                                .modifiers(.command)
-                                .onEnded { _ in
-                                    handleCommandClick(file: file)
-                                }
-                        )
-                        .simultaneousGesture(
-                            TapGesture(count: 1)
-                                .modifiers(.shift)
-                                .onEnded { _ in
-                                    handleShiftClick(file: file)
-                                }
-                        )
+    private var listView: some View {
+        List(displayedFiles, selection: $selectedItems) { file in
+            fileRow(for: file)
+                .contextMenu { contextMenuItems(for: file) }
+                .listRowSeparator(.visible)
+                .onTapGesture {
+                    handleSingleClick(file: file)
                 }
-            }
-            .listStyle(.inset(alternatesRowBackgrounds: true))
-            .onDrop(of: [.fileURL, .utf8PlainText], isTargeted: $isDropTargeted) { providers in
-                handleDrop(providers: providers)
-            }
+                .gesture(
+                    TapGesture(count: 2).onEnded {
+                        handleDoubleClick(file: file)
+                    }
+                )
+        }
+        .listStyle(.inset)
+        .overlay(
+            RoundedRectangle(cornerRadius: 0)
+                .stroke(isDropTargeted ? Color.accentColor : Color.clear, lineWidth: 2)
+        )
+        .onDrop(of: [.fileURL, .utf8PlainText], isTargeted: $isDropTargeted) { providers in
+            handleDrop(providers: providers)
         }
     }
 
-    // MARK: - Icon Grid View
-
     private var iconGridView: some View {
         let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: viewMode == .largeIcons ? 4 : 7)
-        return ScrollView {
-            LazyVGrid(columns: columns, spacing: 8) {
-                ForEach(displayedFiles) { file in
-                        iconGridItem(for: file)
-                            .id(file.id)
-                            .contextMenu { contextMenuItems(for: file) }
-                            .simultaneousGesture(
-                            TapGesture(count: 1)
-                                .modifiers(.command)
-                                .onEnded { _ in
-                                    handleCommandClick(file: file)
-                                }
-                        )
-                        .simultaneousGesture(
-                            TapGesture(count: 1)
-                                .modifiers(.shift)
-                                .onEnded { _ in
-                                    handleShiftClick(file: file)
-                                }
-                        )
+        return GeometryReader { scrollGeo in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    LazyVGrid(columns: columns, spacing: 8) {
+                        ForEach(displayedFiles) { file in
+                            gridItemWithPreference(for: file)
+                        }
+                    }
+                    Spacer()
                 }
+                .padding(12)
+                .frame(minWidth: scrollGeo.size.width, minHeight: scrollGeo.size.height, alignment: .topLeading)
             }
-            .padding(12)
         }
         .background(Color(NSColor.controlBackgroundColor))
-        .contentShape(Rectangle())
+        .overlay(
+            RoundedRectangle(cornerRadius: 0)
+                .stroke(isDropTargeted ? Color.accentColor : Color.clear, lineWidth: 2)
+        )
         .onTapGesture { selectedItems.removeAll() }
         .onDrop(of: [.fileURL, .utf8PlainText], isTargeted: $isDropTargeted) { providers in
             handleDrop(providers: providers)
         }
     }
 
-    private func iconGridItem(for file: FileNode) -> some View {
+    private func gridItemWithPreference(for file: FileNode) -> some View {
         let isSelected = selectedItems.contains(file.path)
         let iconSize: CGFloat = viewMode == .largeIcons ? 48 : 28
 
@@ -561,7 +549,7 @@ struct FileExplorerPane: View {
                 .frame(maxWidth: viewMode == .largeIcons ? 80 : 60)
 
             if viewMode == .largeIcons {
-                Text(file.formattedSize)
+                Text(fileSizeDisplay(for: file))
                     .font(.system(size: 8))
                     .foregroundColor(.secondary)
                     .monospacedDigit()
@@ -579,20 +567,17 @@ struct FileExplorerPane: View {
             RoundedRectangle(cornerRadius: 6)
                 .stroke(isSelected ? Color.accentColor.opacity(0.5) : Color.clear, lineWidth: 1.5)
         )
-        .gesture(
-            TapGesture(count: 2).onEnded {
+        .onTapGesture {
+            if let event = NSApp.currentEvent, event.clickCount == 2 {
                 handleDoubleClick(file: file)
+            } else {
+                handleSingleClick(file: file)
             }
-            .exclusively(before:
-                TapGesture(count: 1).onEnded {
-                    if selectedItems.contains(file.path) && selectedItems.count == 1 {
-                        selectedItems.removeAll()
-                    } else {
-                        selectedItems = [file.path]
-                    }
-                }
-            )
-        )
+        }
+        .onDrag { dragProvider(for: file) }
+        .onDrop(of: file.isDirectory ? [.fileURL, .utf8PlainText] : [], isTargeted: nil) { providers in
+            handleDrop(providers: providers, targetDirectory: file.path)
+        }
     }
 
     // MARK: - File Row
@@ -627,7 +612,7 @@ struct FileExplorerPane: View {
             .frame(minWidth: 180, maxWidth: .infinity)
 
             // Size column
-            Text(file.formattedSize)
+            Text(fileSizeDisplay(for: file))
                 .font(.system(size: 11))
                 .foregroundColor(.secondary)
                 .monospacedDigit()
@@ -649,23 +634,9 @@ struct FileExplorerPane: View {
                 .padding(.horizontal, 8)
         }
         .padding(.vertical, 2)
-        .onDrag {
-            let items: [FileNode] = selectedItems.isEmpty
-                ? [file]
-                : displayedFiles.filter { selectedItems.contains($0.path) }
-            let provider = NSItemProvider()
-            if isLocal, let firstLocal = items.first {
-                let url = URL(fileURLWithPath: firstLocal.path)
-                provider.registerObject(url as NSURL, visibility: .all)
-            }
-            provider.registerDataRepresentation(for: .utf8PlainText, visibility: .all) { completion in
-                let payloads = items.map { "\(isLocal ? "local:" : "mtp:")\($0.path)" }.joined(separator: "\n")
-                let data = payloads.data(using: .utf8)
-                completion(data, nil)
-                return nil
-            }
-            provider.suggestedName = items.first?.name ?? file.name
-            return provider
+        .onDrag { dragProvider(for: file) }
+        .onDrop(of: file.isDirectory ? [.fileURL, .utf8PlainText] : [], isTargeted: nil) { providers in
+            handleDrop(providers: providers, targetDirectory: file.path)
         }
     }
 
@@ -850,32 +821,7 @@ struct FileExplorerPane: View {
         .background(Color(NSColor.controlBackgroundColor))
     }
 
-    // MARK: - Drop Target Overlay
 
-    private var dropTargetOverlay: some View {
-        Group {
-            if isDropTargeted {
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.accentColor, lineWidth: 3)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color.accentColor.opacity(0.08))
-                    )
-                    .padding(4)
-                    .overlay(
-                        VStack(spacing: 8) {
-                            Image(systemName: "arrow.down.doc.fill")
-                                .font(.system(size: 32))
-                                .foregroundColor(.accentColor)
-                            Text("Drop files here")
-                                .font(.headline)
-                                .foregroundColor(.accentColor)
-                        }
-                    )
-                    .allowsHitTesting(false)
-            }
-        }
-    }
 
     // MARK: - Navigation
 
@@ -967,6 +913,7 @@ struct FileExplorerPane: View {
                     if case .failure(let error) = result {
                         self.loadingState = .error(error.localizedDescription)
                     } else if case .success(let items) = result {
+                        self.directorySizes.removeAll()
                         self.files = items
                         self.applyFilterAndSort()
                         self.loadingState = self.files.isEmpty ? .empty : .loaded
@@ -1018,18 +965,19 @@ struct FileExplorerPane: View {
         let currentFiles = files
         Task {
             for i in currentFiles.indices where currentFiles[i].isDirectory {
+                let isStale = await MainActor.run { self.localSizeGen != gen }
+                if isStale { break }
+
                 let size = await FileNode.calculateDirectorySize(
                     path: currentFiles[i].path,
                     isLocal: true,
                     storageId: nil
                 )
-                await MainActor.run {
-                    guard self.localSizeGen == gen,
-                          i < self.files.count,
-                          self.files[i].path == currentFiles[i].path else { return }
-                    var updatedFiles = self.files
-                    updatedFiles[i].calculatedSize = size
-                    self.files = updatedFiles
+                if let size = size {
+                    await MainActor.run {
+                        guard self.localSizeGen == gen else { return }
+                        self.directorySizes[currentFiles[i].path] = size
+                    }
                 }
             }
         }
@@ -1098,6 +1046,39 @@ struct FileExplorerPane: View {
         } else if isLocal {
             NSWorkspace.shared.open(URL(fileURLWithPath: file.path))
         }
+    }
+
+    private func handleSingleClick(file: FileNode) {
+        let flags = NSEvent.modifierFlags
+        if flags.contains(.command) {
+            handleCommandClick(file: file)
+        } else if flags.contains(.shift) {
+            handleShiftClick(file: file)
+        } else {
+            selectedItems = [file.path]
+            lastClickedItemID = file.path
+        }
+    }
+
+    // Removed updateSelectionForMarquee
+
+    private func dragProvider(for file: FileNode) -> NSItemProvider {
+        let items: [FileNode] = selectedItems.isEmpty
+            ? [file]
+            : displayedFiles.filter { selectedItems.contains($0.path) }
+        let provider = NSItemProvider()
+        if isLocal, let firstLocal = items.first {
+            let url = URL(fileURLWithPath: firstLocal.path)
+            provider.registerObject(url as NSURL, visibility: .all)
+        }
+        provider.registerDataRepresentation(for: .utf8PlainText, visibility: .all) { completion in
+            let payloads = items.map { "\(isLocal ? "local" : "mtp"):\($0.isDirectory ? "dir" : "file"):\($0.path)" }.joined(separator: "\n")
+            let data = payloads.data(using: .utf8)
+            completion(data, nil)
+            return nil
+        }
+        provider.suggestedName = items.first?.name ?? file.name
+        return provider
     }
 
     private func handleCommandClick(file: FileNode) {
@@ -1184,10 +1165,10 @@ struct FileExplorerPane: View {
 
     // MARK: - Drag & Drop
 
-    private func handleDrop(providers: [NSItemProvider]) -> Bool {
+    private func handleDrop(providers: [NSItemProvider], targetDirectory: String? = nil) -> Bool {
         let collectedFiles = ThreadSafeArray<DroppedFile>()
         let group = DispatchGroup()
-        let dropDestination = currentPath
+        let dropDestination = targetDirectory ?? currentPath
 
         for provider in providers {
             let suggestedName = provider.suggestedName ?? ""
@@ -1195,7 +1176,11 @@ struct FileExplorerPane: View {
                 group.enter()
                 _ = provider.loadObject(ofClass: URL.self) { url, _ in
                     if let url {
-                        collectedFiles.append(DroppedFile(path: url.path, isLocal: true, name: suggestedName.isEmpty ? url.lastPathComponent : suggestedName))
+                        var isDir: ObjCBool = false
+                        let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
+                        let isDirectory = exists && isDir.boolValue
+                        let name = suggestedName.isEmpty ? url.lastPathComponent : suggestedName
+                        collectedFiles.append(DroppedFile(path: url.path, isLocal: true, name: name, isDirectory: isDirectory))
                     }
                     group.leave()
                 }
@@ -1205,13 +1190,15 @@ struct FileExplorerPane: View {
                     if let data, let str = String(data: data, encoding: .utf8) {
                         let lines = str.split(separator: "\n", omittingEmptySubsequences: true)
                         for line in lines {
-                            let parts = line.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
-                            if parts.count == 2 {
+                            let parts = line.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
+                            if parts.count == 3 {
                                 let prefix = String(parts[0])
-                                let path = String(parts[1])
+                                let type = String(parts[1])
+                                let path = String(parts[2])
                                 let isMTP = prefix == "mtp"
-                                let name = suggestedName.isEmpty ? (path as NSString).lastPathComponent : suggestedName
-                                collectedFiles.append(DroppedFile(path: path, isLocal: !isMTP, name: name))
+                                let isDirectory = type == "dir"
+                                let name = (path as NSString).lastPathComponent
+                                collectedFiles.append(DroppedFile(path: path, isLocal: !isMTP, name: name, isDirectory: isDirectory))
                             }
                         }
                     }
@@ -1237,6 +1224,19 @@ struct FileExplorerPane: View {
         formatter.allowedUnits = [.useAll]
         formatter.countStyle = .file
         return formatter.string(fromByteCount: bytes)
+    }
+
+    private func fileSizeDisplay(for file: FileNode) -> String {
+        if file.isDirectory {
+            if let size = directorySizes[file.path] {
+                return formatBytes(size)
+            }
+            if let calculatedSize = file.calculatedSize {
+                return formatBytes(calculatedSize)
+            }
+            return "—"
+        }
+        return formatBytes(file.size)
     }
 
     private func formatDate(_ date: Date) -> String {
@@ -1376,3 +1376,5 @@ struct FilePropertiesView: View {
         .padding(.vertical, 6)
     }
 }
+
+// Removed ItemFramePreferenceKey

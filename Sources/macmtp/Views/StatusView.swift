@@ -16,11 +16,11 @@ struct StatusView: View {
     var isTransferring: Bool = false
     var transferProgress: Double = 0
     var transferFileName: String = ""
-    var mtpTotalSpace: String = "--"
-    var mtpFreeSpace: String = "--"
+    var mtpTotalBytes: Int64 = 0
+    var mtpFreeBytes: Int64 = 0
     
-    @State private var localTotalSpace: String = "--"
-    @State private var localFreeSpace: String = "--"
+    @State private var localTotalBytes: Int64 = 0
+    @State private var localFreeBytes: Int64 = 0
     
     var body: some View {
         HStack(spacing: 0) {
@@ -86,9 +86,9 @@ struct StatusView: View {
             // Disk capacity
             HStack(spacing: 4) {
                 // Mini capacity bar
-                capacityBar(free: localFreeSpace, total: localTotalSpace)
+                capacityBar(free: localFreeBytes, total: localTotalBytes)
 
-                Text("\(localFreeSpace) free")
+                Text("\(formatBytes(localFreeBytes)) free")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundColor(.secondary)
             }
@@ -103,11 +103,11 @@ struct StatusView: View {
             // Disk capacity
             if isMTPConnected {
                 HStack(spacing: 4) {
-                    Text("\(mtpFreeSpace) free")
+                    Text("\(formatBytes(mtpFreeBytes)) free")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundColor(.secondary)
 
-                    capacityBar(free: mtpFreeSpace, total: mtpTotalSpace)
+                    capacityBar(free: mtpFreeBytes, total: mtpTotalBytes)
                 }
             }
 
@@ -165,14 +165,23 @@ struct StatusView: View {
     
     // MARK: - Capacity Bar
     
-    private func capacityBar(free: String, total: String) -> some View {
-        RoundedRectangle(cornerRadius: 2)
+    private func capacityBar(free: Int64, total: Int64) -> some View {
+        let ratio: Double
+        if total > 0 {
+            let used = Double(total - free)
+            ratio = max(0, min(1, used / Double(total)))
+        } else {
+            ratio = 0
+        }
+        return RoundedRectangle(cornerRadius: 2)
             .fill(Color.secondary.opacity(0.2))
             .frame(width: 40, height: 4)
             .overlay(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(Color.accentColor.opacity(0.7))
-                    .frame(width: 28, height: 4) // Approximate usage
+                GeometryReader { geo in
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color.accentColor.opacity(0.7))
+                        .frame(width: geo.size.width * CGFloat(ratio), height: 4)
+                }
             }
     }
     
@@ -192,8 +201,8 @@ struct StatusView: View {
         do {
             let values = try url.resourceValues(forKeys: [.volumeTotalCapacityKey, .volumeAvailableCapacityKey])
             if let total = values.volumeTotalCapacity, let available = values.volumeAvailableCapacity {
-                localTotalSpace = formatBytes(Int64(total))
-                localFreeSpace = formatBytes(Int64(available))
+                localTotalBytes = Int64(total)
+                localFreeBytes = Int64(available)
             }
         } catch {
             print("[StatusView] Error reading disk capacity for \(path): \(error)")

@@ -60,8 +60,8 @@ struct ContentView: View {
 
     // MARK: - MTP Storage Info
 
-    @State private var mtpTotalSpace: String = "--"
-    @State private var mtpFreeSpace: String = "--"
+    @State private var mtpTotalBytes: Int64 = 0
+    @State private var mtpFreeBytes: Int64 = 0
 
     // MARK: - Alert State
 
@@ -209,8 +209,8 @@ struct ContentView: View {
                 isTransferring: statusIsTransferring,
                 transferProgress: statusTransferProgress,
                 transferFileName: statusTransferFileName,
-                mtpTotalSpace: mtpTotalSpace,
-                mtpFreeSpace: mtpFreeSpace
+                mtpTotalBytes: mtpTotalBytes,
+                mtpFreeBytes: mtpFreeBytes
             )
         }
         .frame(minWidth: 960, minHeight: 600)
@@ -272,8 +272,8 @@ struct ContentView: View {
         .onReceive(MTPDeviceManager.shared.$storages) { storages in
             let total = storages.reduce(0) { $0 + $1.totalCapacity }
             let free = storages.reduce(0) { $0 + $1.freeSpace }
-            mtpTotalSpace = FormatUtils.formatBytes(Int64(total))
-            mtpFreeSpace = FormatUtils.formatBytes(Int64(free))
+            mtpTotalBytes = Int64(total)
+            mtpFreeBytes = Int64(free)
         }
         // Observe FileTransferService for showing transfer progress and status bar
         .onReceive(FileTransferService.shared.$activeBatch) { batch in
@@ -304,16 +304,6 @@ struct ContentView: View {
         }
         .onReceive(FileTransferService.shared.$conflictingFiles) { files in
             conflictingFiles = files
-        }
-        // Observe local directory refresh notifications from transfers
-        .onReceive(NotificationCenter.default.publisher(for: .localDirectoryNeedsRefresh)
-            .debounce(for: .seconds(0.3), scheduler: DispatchQueue.main)
-        ) { _ in
-            let path = currentLocalPath
-            currentLocalPath = ""
-            DispatchQueue.main.async {
-                self.currentLocalPath = path
-            }
         }
     }
 
@@ -421,10 +411,20 @@ struct ContentView: View {
         }
     }
 
-    /// Detects conflicts and shows the conflict dialog if any exist.
     func handlePaste() {
-        print("[Paste] hasContent=\(ClipboardManager.shared.hasContent) sourceIsLocal=\(ClipboardManager.shared.sourceIsLocal) activePane=\(activePane)")
-        guard ClipboardManager.shared.hasContent else { print("[Paste] No clipboard content"); return }
+        if !ClipboardManager.shared.hasContent {
+            let pasteboard = NSPasteboard.general
+            if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
+                let items = urls.map { FileNode(name: $0.lastPathComponent, path: $0.path, isDirectory: $0.hasDirectoryPath, size: 0, modificationDate: Date()) }
+                if !items.isEmpty {
+                    ClipboardManager.shared.copyItems(items: items, from: "Finder", isLocal: true)
+                } else {
+                    return
+                }
+            } else {
+                return
+            }
+        }
 
         let destinationPath: String
         let isDestLocal: Bool
@@ -438,7 +438,6 @@ struct ContentView: View {
             destinationPath = currentMTPPath
             isDestLocal = false
         }
-        print("[Paste] destPath=\(destinationPath) isDestLocal=\(isDestLocal)")
 
         // Check for conflicts
         if ClipboardManager.shared.sourceIsLocal && isDestLocal {
@@ -450,27 +449,35 @@ struct ContentView: View {
             if !conflicts.isEmpty {
                 conflictingFiles = conflicts
                 showConflictDialog = true
-                print("[Paste] Conflicts detected, showing dialog")
                 return
             }
         }
 
         // Perform paste operation
         if ClipboardManager.shared.sourceIsLocal && isDestLocal {
-            print("[Paste] Local-to-local paste")
             performLocalPaste(items: ClipboardManager.shared.items, destination: destinationPath, isCut: ClipboardManager.shared.isCutOperation)
             ClipboardManager.shared.clear()
             handleRefresh()
+        } else if !ClipboardManager.shared.sourceIsLocal && !isDestLocal {
+            if ClipboardManager.shared.isCutOperation {
+                let sources = ClipboardManager.shared.items
+                Task {
+                    for s in sources {
+                        try? await KalamBridge.shared.renameFile(
+                            storageId: MTPDeviceManager.shared.selectedStorageId ?? 0,
+                            path: s.path,
+                            newName: destinationPath + "/" + s.name
+                        )
+                    }
+                    await MTPDeviceManager.shared.refreshFiles()
+                }
+            }
+            ClipboardManager.shared.clear()
         } else {
             // Cross-device transfer (local ↔ MTP) via FileTransferService.
-            // handleRefresh here would race with transfer's MTP operations.
             let direction: TransferDirection = isDestLocal ? .mtpToLocal : .localToMTP
             let storageId = MTPDeviceManager.shared.selectedStorageId ?? 0
             let sources = ClipboardManager.shared.items
-            print("[Paste] Starting cross-device transfer: direction=\(direction) items=\(sources.count) storageId=\(storageId)")
-            for s in sources {
-                print("[Paste]   source: name=\(s.name) path=\(s.path) isDir=\(s.isDirectory)")
-            }
             FileTransferService.shared.initiateTransfer(
                 sources: sources,
                 destinationDir: destinationPath,
@@ -479,7 +486,6 @@ struct ContentView: View {
                 isCut: ClipboardManager.shared.isCutOperation
             )
             ClipboardManager.shared.clear()
-            print("[Paste] Transfer initiated, clipboard cleared")
         }
     }
 
@@ -540,11 +546,7 @@ struct ContentView: View {
     func handleRefresh() {
         switch activePane {
         case .local:
-            let path = currentLocalPath
-            currentLocalPath = ""
-            DispatchQueue.main.async {
-                self.currentLocalPath = path
-            }
+            NotificationCenter.default.post(name: .localDirectoryNeedsRefresh, object: nil)
         case .mtp:
             Task {
                 await MTPDeviceManager.shared.refreshFiles()
@@ -613,20 +615,25 @@ struct ContentView: View {
         if isLocal {
             // Dropping onto local pane
             if !localSources.isEmpty {
+                var didCopy = false
                 for file in localSources {
                     let url = URL(fileURLWithPath: file.path)
                     let destURL = URL(fileURLWithPath: destination).appendingPathComponent(file.name)
+                    if url == destURL || url.deletingLastPathComponent().path == URL(fileURLWithPath: destination).path {
+                        continue
+                    }
                     do {
                         try FileManager.default.copyItem(at: url, to: destURL)
+                        didCopy = true
                     } catch {
                         print("Drop copy failed for \(file.name): \(error.localizedDescription)")
                     }
                 }
-                handleRefresh()
+                if didCopy { handleRefresh() }
             }
             if !mtpSources.isEmpty {
                 // MTP files dropped onto local — initiate download
-                let nodes = mtpSources.map { FileNode(name: $0.name, path: $0.path, isDirectory: false, size: 0, modificationDate: Date()) }
+                let nodes = mtpSources.map { FileNode(name: $0.name, path: $0.path, isDirectory: $0.isDirectory, size: 0, modificationDate: Date()) }
                 FileTransferService.shared.initiateTransfer(
                     sources: nodes,
                     destinationDir: destination,
@@ -637,7 +644,7 @@ struct ContentView: View {
         } else {
             // Dropping onto MTP pane — upload local files
             if !localSources.isEmpty {
-                let nodes = localSources.map { FileNode(name: $0.name, path: $0.path, isDirectory: false, size: 0, modificationDate: Date()) }
+                let nodes = localSources.map { FileNode(name: $0.name, path: $0.path, isDirectory: $0.isDirectory, size: 0, modificationDate: Date()) }
                 FileTransferService.shared.initiateTransfer(
                     sources: nodes,
                     destinationDir: destination,

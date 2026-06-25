@@ -5,6 +5,8 @@ enum FormatUtils {
 
     // MARK: - Cached Formatters
 
+    private static let byteFormatterLock = NSLock()
+
     nonisolated(unsafe) private static let byteFormatter: ByteCountFormatter = {
         let formatter = ByteCountFormatter()
         formatter.allowedUnits = [.useAll]
@@ -14,24 +16,21 @@ enum FormatUtils {
         return formatter
     }()
 
-    private static let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter
-    }()
-
     // MARK: - Byte Formatting
 
     /// - Parameter bytes: The number of bytes (Int64).
     static func formatBytes(_ bytes: Int64) -> String {
-        byteFormatter.string(fromByteCount: bytes)
+        byteFormatterLock.lock()
+        defer { byteFormatterLock.unlock() }
+        return byteFormatter.string(fromByteCount: bytes)
     }
 
     /// Values larger than `Int64.max` are capped and annotated with "+".
     /// - Parameter bytes: The number of bytes (UInt64).
     static func formatBytes(_ bytes: UInt64) -> String {
         if bytes <= UInt64(Int64.max) {
+            byteFormatterLock.lock()
+            defer { byteFormatterLock.unlock() }
             return byteFormatter.string(fromByteCount: Int64(bytes))
         }
         // For values exceeding Int64.max (~8 EB), format in TB manually.
@@ -43,7 +42,7 @@ enum FormatUtils {
 
     /// - Parameter date: The date to format.
     static func formatDate(_ date: Date) -> String {
-        dateFormatter.string(from: date)
+        date.formatted(date: .abbreviated, time: .shortened)
     }
 
     // MARK: - Duration Formatting

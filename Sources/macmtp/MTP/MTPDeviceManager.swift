@@ -197,27 +197,7 @@ public final class MTPDeviceManager: ObservableObject {
             }
             self.mtpFiles = mapped
             
-            // Calculate directory sizes asynchronously with generation guard
-            refreshGeneration &+= 1
-            let gen = refreshGeneration
-            let snapshot = self.mtpFiles
-            Task {
-                for i in snapshot.indices where snapshot[i].isDirectory {
-                    let size = await FileNode.calculateDirectorySize(
-                        path: snapshot[i].path,
-                        isLocal: false,
-                        storageId: storageId
-                    )
-                    await MainActor.run {
-                        guard self.refreshGeneration == gen else { return }
-                        if let idx = self.mtpFiles.firstIndex(where: { $0.path == snapshot[i].path }) {
-                            var updatedFiles = self.mtpFiles
-                            updatedFiles[idx].calculatedSize = size
-                            self.mtpFiles = updatedFiles
-                        }
-                    }
-                }
-            }
+            // MTP directory sizes are too expensive to calculate automatically as recursive Walk blocks the single-threaded MTP session.
         } catch {
             self.errorMessage = "Failed to list directory: \(error.localizedDescription)"
             self.mtpFiles = []

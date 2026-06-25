@@ -39,16 +39,14 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         self.runLoopSource = IONotificationPortGetRunLoopSource(port).takeUnretainedValue()
         CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
         
-        // Set up matching dictionary for USB devices
-        // We match any USB device and filter inside the callback, or match specifically.
+        // Set up matching dictionaries for USB devices
+        // We match any USB device and filter inside the callback.
         // Android MTP devices typically present as USB devices.
-        guard let matchingDict = IOServiceMatching(kIOUSBDeviceClassName) as? [String: Any] else {
-            print("USBWatcher: Failed to create matching dictionary")
+        guard let matchingDict1 = IOServiceMatching(kIOUSBDeviceClassName),
+              let matchingDict2 = IOServiceMatching(kIOUSBDeviceClassName) else {
+            print("USBWatcher: Failed to create matching dictionaries")
             return
         }
-        
-        // We need to keep a copy of the matching dictionary for the second notification
-        let matchingDictCopy = matchingDict as CFDictionary
         
         // Self pointer to pass to C callbacks
         let selfPtr = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
@@ -57,7 +55,7 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         let addedResult = IOServiceAddMatchingNotification(
             port,
             kIOPublishNotification,
-            matchingDictCopy,
+            matchingDict1,
             { (refcon, iterator) in
                 let watcher = Unmanaged<USBWatcher>.fromOpaque(refcon!).takeUnretainedValue()
                 Task { @MainActor in
@@ -83,7 +81,7 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         let removedResult = IOServiceAddMatchingNotification(
             port,
             kIOTerminatedNotification,
-            matchingDictCopy,
+            matchingDict2,
             { (refcon, iterator) in
                 let watcher = Unmanaged<USBWatcher>.fromOpaque(refcon!).takeUnretainedValue()
                 Task { @MainActor in
