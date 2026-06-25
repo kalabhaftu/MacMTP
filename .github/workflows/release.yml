@@ -39,7 +39,8 @@ jobs:
 
     - name: Install dependencies
       run: |
-        brew install pkg-config libusb create-dmg
+        brew install pkg-config libusb
+        npm install -g create-dmg
         
     - name: Build and Package
       run: |
