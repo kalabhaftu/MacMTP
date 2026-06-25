@@ -122,9 +122,9 @@ cd "$PROJECT_ROOT"
 if [ "$BUILD_UNIVERSAL" = true ]; then
     echo "  Building universal binary (x86_64 + arm64)..."
     # Build for arm64 natively
-    swift build -c release --triple arm64-apple-macosx 2>&1
+    swift build -c release --triple arm64-apple-macosx -Xswiftc -Xfrontend -Xswiftc -disable-round-trip-debug-types 2>&1
     # Build for x86_64 via Rosetta
-    swift build -c release --triple x86_64-apple-macosx 2>&1
+    swift build -c release --triple x86_64-apple-macosx -Xswiftc -Xfrontend -Xswiftc -disable-round-trip-debug-types 2>&1
     # Lipo them together
     mkdir -p "$PROJECT_ROOT/.build/universal"
     lipo -create -output "$PROJECT_ROOT/.build/universal/macmtp" \
@@ -133,7 +133,7 @@ if [ "$BUILD_UNIVERSAL" = true ]; then
     SWIFT_BIN="$PROJECT_ROOT/.build/universal/macmtp"
 else
     if [ "$BUILD_MODE" = "release" ]; then
-        swift build -c release 2>&1
+        swift build -c release -Xswiftc -Xfrontend -Xswiftc -disable-round-trip-debug-types 2>&1
         SWIFT_BIN="$PROJECT_ROOT/.build/release/macmtp"
     else
         swift build 2>&1
