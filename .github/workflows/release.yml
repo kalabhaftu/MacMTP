@@ -10,7 +10,14 @@ jobs:
     runs-on: macos-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout MacMTP
+      uses: actions/checkout@v4
+
+    - name: Checkout OpenMTP
+      uses: actions/checkout@v4
+      with:
+        repository: ganeshrvel/openmtp
+        path: ../openmtp
 
     - name: Set up Go
       uses: actions/setup-go@v5
@@ -22,10 +29,18 @@ jobs:
       with:
         node-version: '20'
 
-    - name: Build Application & Release Assets
+    - name: Set up Swift
+      uses: swift-actions/setup-swift@v2
+      with:
+        swift-version: '6.0'
+
+    - name: Install dependencies
       run: |
-        npm install -g create-dmg
-        bash scripts/release.sh --universal ${{ github.ref_name }}
+        brew install pkg-config libusb create-dmg
+        
+    - name: Build and Package
+      run: |
+        bash scripts/release.sh ${{ github.ref_name }}
 
     - name: Release
       uses: softprops/action-gh-release@v2

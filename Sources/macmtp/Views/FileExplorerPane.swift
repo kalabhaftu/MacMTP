@@ -510,14 +510,12 @@ struct FileExplorerPane: View {
             fileRow(for: file)
                 .contextMenu { contextMenuItems(for: file) }
                 .listRowSeparator(.visible)
-                .onTapGesture {
+                .onTapGesture(count: 2) {
+                    handleDoubleClick(file: file)
+                }
+                .onTapGesture(count: 1) {
                     handleSingleClick(file: file)
                 }
-                .gesture(
-                    TapGesture(count: 2).onEnded {
-                        handleDoubleClick(file: file)
-                    }
-                )
         }
         .listStyle(.inset)
         .contextMenu { emptySpaceContextMenuItems }
@@ -594,12 +592,11 @@ struct FileExplorerPane: View {
             RoundedRectangle(cornerRadius: 6)
                 .stroke(isSelected ? Color.accentColor.opacity(0.5) : Color.clear, lineWidth: 1.5)
         )
-        .onTapGesture {
-            if let event = NSApp.currentEvent, event.clickCount == 2 {
-                handleDoubleClick(file: file)
-            } else {
-                handleSingleClick(file: file)
-            }
+        .onTapGesture(count: 2) {
+            handleDoubleClick(file: file)
+        }
+        .onTapGesture(count: 1) {
+            handleSingleClick(file: file)
         }
         .onDrag { dragProvider(for: file) }
         .onDrop(of: file.isDirectory ? [.fileURL, .utf8PlainText] : [], isTargeted: nil) { providers in

@@ -101,7 +101,6 @@ struct ToolbarView: View {
                 icon: "doc.on.clipboard",
                 label: "Paste",
                 shortcut: "⌘V",
-                isEnabled: hasClipboardContent,
                 action: onPaste
             )
             

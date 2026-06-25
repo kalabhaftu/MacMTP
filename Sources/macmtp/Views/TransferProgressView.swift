@@ -362,6 +362,9 @@ public struct TransferProgressView: View {
             }
             return "Preparing…"
         case .paused:
+            if let current = batch.currentItem, current.status == .transferring {
+                return "Pausing after \(current.fileName) completes..."
+            }
             return "Tap Resume to continue"
         case .completed:
             let duration = formatDuration(batch.elapsedTime)

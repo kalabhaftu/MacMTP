@@ -217,7 +217,7 @@ public final class FileTransferService: ObservableObject {
         if !conflicts.isEmpty {
             conflictProcessIndex = 0
             while conflictProcessIndex < conflicts.count {
-                self.conflictingFiles = [conflicts[conflictProcessIndex]]
+                self.conflictingFiles = Array(conflicts[conflictProcessIndex...])
                 self.showConflictDialog = true
                 
                 // Await user input from the conflict sheet
