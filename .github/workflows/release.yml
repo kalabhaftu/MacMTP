@@ -32,10 +32,6 @@ jobs:
       with:
         node-version: '20'
 
-    - name: Set up Swift
-      uses: swift-actions/setup-swift@v2
-      with:
-        swift-version: '6.0'
 
     - name: Install dependencies
       run: |
