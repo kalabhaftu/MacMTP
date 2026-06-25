@@ -50,6 +50,7 @@ Popular contribution areas: MTP device testing, UI polish, keyboard shortcuts, l
 ## Reporting Issues
 
 Include:
+
 - macOS version
 - Android device model and OS version
 - macMTP version

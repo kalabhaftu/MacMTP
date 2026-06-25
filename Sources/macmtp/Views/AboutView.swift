@@ -21,7 +21,7 @@ struct AboutView: View {
                 .multilineTextAlignment(.center)
                 .padding(.top, 4)
             
-            Link(destination: URL(string: "https://github.com/kalabhaftu/macmtp")!) {
+            Link(destination: URL(string: "https://github.com/kalabhaftu/MacMTP")!) {
                 HStack {
                     Image(systemName: "link")
                     Text("GitHub Repository")

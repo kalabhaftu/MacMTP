@@ -5,7 +5,7 @@ import AppKit
 public final class UpdaterService: ObservableObject, @unchecked Sendable {
     public static let shared = UpdaterService()
     
-    private let repoURL = "https://api.github.com/repos/kalabhaftu/macmtp/releases/latest"
+    private let repoURL = "https://api.github.com/repos/kalabhaftu/MacMTP/releases/latest"
     
     private init() {}
     

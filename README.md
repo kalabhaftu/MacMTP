@@ -49,6 +49,7 @@ Transferring files between macOS and Android has always been painful. Google's o
 ## Features
 
 ### Core File Transfer
+
 - **Plug and Play**: Connect your Android device via USB cable. macMTP auto-detects it instantly.
 - **No File Size Limits**: Transfer files of any size — 4GB, 10GB, 50GB+.
 - **Internal Storage & SD Card**: Choose between internal memory and SD card on your device.
@@ -56,6 +57,7 @@ Transferring files between macOS and Android has always been painful. Google's o
 - **Transfer Speed**: 30-40 MB/s on budget devices, 100-120 MB/s on flagship devices.
 
 ### SuperCopier Conflict Resolution
+
 When pasting files that already exist at the destination, macMTP gives you full control:
 
 | Option | Behavior |
@@ -69,6 +71,7 @@ When pasting files that already exist at the destination, macMTP gives you full 
 This means if you were copying 10 episodes and got interrupted at episode 5, you can resume — macMTP will skip the 5 completed episodes and continue from where it stopped.
 
 ### Finder-Like Interface
+
 - **Native Sidebar**: Shows Macintosh HD, Home, Desktop, Downloads, Documents, Movies, Music, Pictures, and all mounted external drives/USB disks/DMGs — just like Finder.
 - **Dual-Pane Layout**: Local filesystem on the left, Android device on the right.
 - **Column Sorting**: Click column headers to sort by Name, Size, Type, or Date Modified.
@@ -76,6 +79,7 @@ This means if you were copying 10 episodes and got interrupted at episode 5, you
 - **Dark Mode**: Full support for macOS dark mode with native system colors.
 
 ### Keyboard Navigation
+
 | Shortcut | Action |
 |----------|--------|
 | Letter key | Jump to first file starting with that letter |
@@ -93,6 +97,7 @@ This means if you were copying 10 episodes and got interrupted at episode 5, you
 | `⌘+Click` | Toggle individual selection |
 
 ### Drag and Drop
+
 - Drag files from the local pane to the MTP pane (upload).
 - Drag files from the MTP pane to the local pane (download).
 - Drag files from Finder into macMTP (upload to device).
@@ -152,6 +157,7 @@ To create DMG and ZIP distribution packages:
 ```
 
 This generates:
+
 ```
 release/
 ├── MacMTP-1.0.0-mac-x86_64.dmg      # DMG installer with Applications shortcut
@@ -191,6 +197,7 @@ macMTP is built on a clean layered architecture:
 ### Why Go for the MTP Engine?
 
 The Kalam MTP engine is written in Go because:
+
 1. **Battle-tested**: Used by OpenMTP with thousands of users across hundreds of Android device models.
 2. **Edge-case handling**: Years of fixes for Samsung, Pixel, OnePlus, Xiaomi, and other manufacturer-specific MTP quirks.
 3. **Performance**: Go's concurrency model enables efficient bulk file transfers.

@@ -185,7 +185,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @objc private func openIssueTracker() {
-        if let url = URL(string: "https://github.com/kalabhaftu/macmtp/issues") {
+        if let url = URL(string: "https://github.com/kalabhaftu/MacMTP/issues") {
             NSWorkspace.shared.open(url)
         }
     }
