@@ -1,0 +1,41 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.22'
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Build Application & Release Assets
+      run: |
+        npm install -g create-dmg
+        bash scripts/release.sh --universal ${{ github.ref_name }}
+
+    - name: Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          release/*.dmg
+          release/*.zip
+          release/*.sha256
+          release/latest-mac.yml
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

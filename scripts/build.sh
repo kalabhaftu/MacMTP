@@ -79,14 +79,27 @@ if [ ! -d "$KALAM_DIR" ]; then
 else
     (
         cd "$KALAM_DIR"
-        CGO_ENABLED=1 \
-        GOARCH="${GOARCH:-amd64}" \
-        GOOS=darwin \
-        CGO_CFLAGS="-mmacosx-version-min=14.0" \
-        CGO_LDFLAGS="-mmacosx-version-min=14.0" \
-        go build -tags nosigsegv -buildmode=c-archive \
-            -o "$KALAM_OUTPUT/libkalam.a" \
-            ./*.go
+        
+        if [ "$BUILD_UNIVERSAL" = true ]; then
+            echo "    Building libkalam for amd64..."
+            CGO_ENABLED=1 GOARCH=amd64 GOOS=darwin CGO_CFLAGS="-mmacosx-version-min=14.0" CGO_LDFLAGS="-mmacosx-version-min=14.0" go build -tags nosigsegv -buildmode=c-archive -o "$KALAM_OUTPUT/libkalam_amd64.a" ./*.go
+            
+            echo "    Building libkalam for arm64..."
+            CGO_ENABLED=1 GOARCH=arm64 GOOS=darwin CGO_CFLAGS="-mmacosx-version-min=14.0" CGO_LDFLAGS="-mmacosx-version-min=14.0" go build -tags nosigsegv -buildmode=c-archive -o "$KALAM_OUTPUT/libkalam_arm64.a" ./*.go
+            
+            echo "    Creating universal libkalam.a..."
+            lipo -create -output "$KALAM_OUTPUT/libkalam.a" "$KALAM_OUTPUT/libkalam_amd64.a" "$KALAM_OUTPUT/libkalam_arm64.a"
+            rm "$KALAM_OUTPUT"/libkalam_amd64.* "$KALAM_OUTPUT"/libkalam_arm64.*
+        else
+            CGO_ENABLED=1 \
+            GOARCH="${GOARCH:-amd64}" \
+            GOOS=darwin \
+            CGO_CFLAGS="-mmacosx-version-min=14.0" \
+            CGO_LDFLAGS="-mmacosx-version-min=14.0" \
+            go build -tags nosigsegv -buildmode=c-archive \
+                -o "$KALAM_OUTPUT/libkalam.a" \
+                ./*.go
+        fi
     )
     cp "$KALAM_DIR/libkalam.h" "$KALAM_OUTPUT/include/kalam.h" 2>/dev/null || true
     echo "  ✓ libkalam.a compiled successfully"
@@ -198,7 +211,7 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << 'PLIST'
     <key>LSUIElement</key>
     <false/>
     <key>NSHumanReadableCopyright</key>
-    <string>Copyright © 2024 macMTP Contributors. MIT License.</string>
+    <string>Copyright © 2026 macMTP Contributors. MIT License.</string>
     <key>com.apple.security.device.usb</key>
     <true/>
 </dict>

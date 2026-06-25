@@ -149,12 +149,19 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
             IOObjectRelease(device)
         }
         
-        // Trigger MTP scan when a new USB device is connected (skip initial scan to avoid double connection at launch)
-        if deviceCount > 0 && !isInitialScan {
-            print("USBWatcher: USB device change detected, scanning MTP devices...")
-            // Wait briefly for the device descriptor to settle
-            try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
-            await MTPDeviceManager.shared.connectDevice()
+        // Trigger MTP scan when a new USB device is connected
+        if deviceCount > 0 {
+            let autoDetect = UserDefaults.standard.object(forKey: "autoDetectDevice") as? Bool ?? true
+            if autoDetect {
+                print("USBWatcher: USB device detected, scanning MTP devices...")
+                // Wait briefly for the device descriptor to settle, unless it's already plugged in
+                if !isInitialScan {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+                }
+                await MTPDeviceManager.shared.connectDevice()
+            } else {
+                print("USBWatcher: Auto-detect disabled. Ignoring device.")
+            }
         }
     }
     

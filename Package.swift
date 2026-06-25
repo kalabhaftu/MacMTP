@@ -10,6 +10,9 @@ let package = Package(
     platforms: [
         .macOS(.v14)
     ],
+    dependencies: [
+        .package(url: "https://github.com/getsentry/sentry-cocoa.git", from: "9.19.0")
+    ],
     targets: [
         // C target that exposes the Go Kalam static library headers
         .target(
@@ -39,7 +42,10 @@ let package = Package(
         // Main macOS application target
         .executableTarget(
             name: "macmtp",
-            dependencies: ["CKalam"],
+            dependencies: [
+                "CKalam",
+                .product(name: "Sentry", package: "sentry-cocoa")
+            ],
             path: "Sources/macmtp",
 
             linkerSettings: [

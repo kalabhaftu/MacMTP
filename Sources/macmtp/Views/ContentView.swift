@@ -60,6 +60,8 @@ struct ContentView: View {
 
     // MARK: - MTP Storage Info
 
+    @State private var mtpStorages: [MTPStorageInfo] = []
+    @State private var mtpSelectedStorageId: UInt32? = nil
     @State private var mtpTotalBytes: Int64 = 0
     @State private var mtpFreeBytes: Int64 = 0
 
@@ -73,6 +75,10 @@ struct ContentView: View {
     // MARK: - Keyboard Event Monitor
 
     @State private var eventMonitor: Any? = nil
+
+    @AppStorage("hasSeenPrivacyPrompt") private var hasSeenPrivacyPrompt: Bool = false
+    @AppStorage("sendCrashReports") private var sendCrashReports: Bool = false
+    @State private var showPrivacyPrompt: Bool = false
 
     // MARK: - Body
 
@@ -129,7 +135,8 @@ struct ContentView: View {
                         },
                         onFileOperation: { operation in
                             handleFileOperation(operation, isLocal: true)
-                        }
+                        },
+                        onPaste: handlePaste
                     )
                     .frame(minWidth: 350, idealWidth: 420)
                     .layoutPriority(1)
@@ -144,22 +151,38 @@ struct ContentView: View {
                     .onChange(of: selectedLocalItems) { _, _ in activePane = .local }
 
                     // MTP File Explorer (Right)
-                    FileExplorerPane(
-                        title: isMTPConnected ? connectedDeviceName : "MTP Device",
-                        currentPath: $currentMTPPath,
-                        selectedItems: $selectedMTPItems,
-                        isLocal: false,
-                        isDisabled: !isMTPConnected,
-                        files: $mtpFiles,
-                        isActivePane: activePane == .mtp,
-                        clipboardManager: ClipboardManager.shared,
-                        onFilesDropped: { files, destination in
-                            handleFilesDropped(files: files, destination: destination, isLocal: false)
-                        },
-                        onFileOperation: { operation in
-                            handleFileOperation(operation, isLocal: false)
+                    VStack(spacing: 0) {
+                        if isMTPConnected && mtpStorages.count > 1 {
+                            StorageSelectorView(
+                                storages: mtpStorages,
+                                selectedStorageId: mtpSelectedStorageId,
+                                onSelect: { storageId in
+                                    MTPDeviceManager.shared.selectedStorageId = storageId
+                                    Task {
+                                        await MTPDeviceManager.shared.navigateTo(path: "/")
+                                    }
+                                }
+                            )
                         }
-                    )
+                        
+                        FileExplorerPane(
+                            title: isMTPConnected ? connectedDeviceName : "MTP Device",
+                            currentPath: $currentMTPPath,
+                            selectedItems: $selectedMTPItems,
+                            isLocal: false,
+                            isDisabled: !isMTPConnected,
+                            files: $mtpFiles,
+                            isActivePane: activePane == .mtp,
+                            clipboardManager: ClipboardManager.shared,
+                            onFilesDropped: { files, destination in
+                                handleFilesDropped(files: files, destination: destination, isLocal: false)
+                            },
+                            onFileOperation: { operation in
+                                handleFileOperation(operation, isLocal: false)
+                            },
+                            onPaste: handlePaste
+                        )
+                    }
                     .frame(minWidth: 350, idealWidth: 420)
                     .layoutPriority(1)
                     .simultaneousGesture(
@@ -245,9 +268,28 @@ struct ContentView: View {
         } message: {
             Text("Enter a name for the new folder:")
         }
+        // Privacy dialog
+        .alert("Privacy First", isPresented: $showPrivacyPrompt) {
+            Button("I Agree") {
+                sendCrashReports = true
+                hasSeenPrivacyPrompt = true
+            }
+            Button("No Thanks", role: .cancel) {
+                sendCrashReports = false
+                hasSeenPrivacyPrompt = true
+            }
+        } message: {
+            Text("Would you like to help improve macMTP by sending anonymous crash reports and error logs? We genuinely do not collect any personal data.")
+        }
         // Keyboard shortcut monitoring
         .onAppear {
             installKeyboardMonitor()
+            if !hasSeenPrivacyPrompt {
+                // slight delay to prevent overlapping alerts on launch
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    showPrivacyPrompt = true
+                }
+            }
         }
         .onDisappear {
             removeKeyboardMonitor()
@@ -268,14 +310,23 @@ struct ContentView: View {
             mtpFiles = newFiles
             currentMTPPath = MTPDeviceManager.shared.currentMTPPath
         }
-        // Observe MTP storages for status bar display
         .onReceive(MTPDeviceManager.shared.$storages) { storages in
-            let total = storages.reduce(0) { $0 + $1.totalCapacity }
-            let free = storages.reduce(0) { $0 + $1.freeSpace }
-            mtpTotalBytes = Int64(total)
-            mtpFreeBytes = Int64(free)
+            mtpStorages = storages
+            if let first = storages.first {
+                mtpTotalBytes = Int64(first.totalCapacity)
+                mtpFreeBytes = Int64(first.freeSpace)
+            } else {
+                mtpTotalBytes = 0
+                mtpFreeBytes = 0
+            }
         }
-        // Observe FileTransferService for showing transfer progress and status bar
+        .onReceive(MTPDeviceManager.shared.$selectedStorageId) { storageId in
+            mtpSelectedStorageId = storageId
+            if let storageId = storageId, let selected = mtpStorages.first(where: { $0.storageId == storageId }) {
+                mtpTotalBytes = Int64(selected.totalCapacity)
+                mtpFreeBytes = Int64(selected.freeSpace)
+            }
+        }// Observe FileTransferService for showing transfer progress and status bar
         .onReceive(FileTransferService.shared.$activeBatch) { batch in
             showTransferProgress = batch != nil
             statusIsTransferring = batch?.isActive ?? false

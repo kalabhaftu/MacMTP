@@ -145,6 +145,36 @@ struct ToolbarView: View {
             .buttonStyle(.plain)
             .help("Refresh directory listing (⌘R)")
             .frame(width: 30, height: 30)
+            
+            ToolbarDivider()
+            
+            // Settings
+            Button(action: {
+                if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
+                    appDelegate.perform(NSSelectorFromString("showPreferences"))
+                }
+            }) {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.accentColor)
+            }
+            .buttonStyle(.plain)
+            .help("Preferences")
+            .frame(width: 30, height: 30)
+
+            // About
+            Button(action: {
+                if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
+                    appDelegate.perform(NSSelectorFromString("showAbout"))
+                }
+            }) {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.accentColor)
+            }
+            .buttonStyle(.plain)
+            .help("About macMTP")
+            .frame(width: 30, height: 30)
         }
     }
     

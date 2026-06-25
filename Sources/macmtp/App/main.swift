@@ -1,6 +1,7 @@
 import Cocoa
 import SwiftUI
 import Darwin
+import Sentry
 
 // MARK: - Application Delegate
 
@@ -8,6 +9,8 @@ import Darwin
 class AppDelegate: NSObject, NSApplicationDelegate {
     var window: NSWindow!
     var preferencesWindowController: NSWindowController?
+    var aboutWindowController: NSWindowController?
+    var helpWindowController: NSWindowController?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Create the main SwiftUI content view
@@ -40,21 +43,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Build the menu bar
         setupMainMenu()
         
-        // Start USB device monitoring
-        USBWatcher.shared.startWatching()
-        
-        // Start MTP device auto-connection
-        Task {
-            try? await Task.sleep(nanoseconds: 2_000_000_000) // 2s delay for USB to settle
-            if !MTPDeviceManager.shared.isConnected {
-                await MTPDeviceManager.shared.connectDevice()
+        // Initialize Sentry if privacy toggle is enabled
+        let sendReports = UserDefaults.standard.object(forKey: "sendCrashReports") as? Bool ?? false
+        if sendReports {
+            SentrySDK.start { options in
+                options.dsn = "https://85a2a845bf5e0409b28e64c446f870e1@o4511628143820800.ingest.us.sentry.io/4511628158763008"
+                options.debug = false
+                options.sendDefaultPii = true
             }
         }
         
+        // Start USB device monitoring (will automatically connect if a device is already present and auto-detect is enabled)
+        USBWatcher.shared.startWatching()
+        
         // Check for updates
         Task {
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            UpdaterService.shared.checkForUpdates(silent: true)
+            let autoCheck = UserDefaults.standard.object(forKey: "autoCheckUpdates") as? Bool ?? true
+            if autoCheck {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                UpdaterService.shared.checkForUpdates(silent: true)
+            }
         }
         
         // Bring the app to the foreground
@@ -149,22 +157,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Menu Actions
     
     @MainActor @objc private func showAbout() {
-        let alert = NSAlert()
-        alert.messageText = "macMTP"
-        alert.informativeText = """
-        Version \(AppVersion.current)
+        if let existing = aboutWindowController {
+            existing.window?.makeKeyAndOrderFront(nil)
+            return
+        }
+        let hostingView = NSHostingView(rootView: AboutView())
+        let aboutWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 380, height: 420),
+            styleMask: [.titled, .closable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        aboutWindow.titlebarAppearsTransparent = true
+        aboutWindow.titleVisibility = .hidden
+        aboutWindow.isMovableByWindowBackground = true
+        aboutWindow.isReleasedWhenClosed = false
+        aboutWindow.contentView = hostingView
+        aboutWindow.center()
         
-        A native macOS Android file transfer utility.
-        Built with Swift and SwiftUI.
-        
-        Powered by the Kalam MTP Engine.
-        
-        © 2024 macMTP Contributors
-        MIT License
-        """
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
+        let controller = NSWindowController(window: aboutWindow)
+        aboutWindowController = controller
+        aboutWindow.makeKeyAndOrderFront(nil)
     }
     
     @MainActor @objc private func checkForUpdates() {
@@ -172,7 +185,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @objc private func openIssueTracker() {
-        if let url = URL(string: "https://github.com/macmtp/macmtp/issues") {
+        if let url = URL(string: "https://github.com/kalabhaftu/macmtp/issues") {
             NSWorkspace.shared.open(url)
         }
     }
@@ -190,6 +203,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             defer: false
         )
         window.title = "macMTP Preferences"
+        window.isReleasedWhenClosed = false
         window.contentView = hostingView
         window.center()
         let controller = NSWindowController(window: window)
@@ -198,6 +212,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @MainActor @objc private func showHelp() {
+        if let existing = helpWindowController {
+            existing.window?.makeKeyAndOrderFront(nil)
+            return
+        }
         let hostingView = NSHostingView(rootView: HelpView())
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 480, height: 360),
@@ -206,8 +224,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             defer: false
         )
         window.title = "macMTP Help"
+        window.isReleasedWhenClosed = false
         window.contentView = hostingView
         window.center()
+        let controller = NSWindowController(window: window)
+        helpWindowController = controller
         window.makeKeyAndOrderFront(nil)
     }
 }

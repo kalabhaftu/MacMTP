@@ -95,15 +95,13 @@ struct FileExplorerPane: View {
 
     @Binding var files: [FileNode]
 
-    var isActivePane: Bool = false
-
-    var clipboardManager: ClipboardManager?
-
-    var onFilesDropped: (([DroppedFile], String) -> Void)?
-
-    var onFileOperation: ((FileOperation) -> Void)?
-
-    // MARK: - Internal State
+    let isActivePane: Bool
+    let clipboardManager: ClipboardManager
+    var onFilesDropped: (([DroppedFile], String) -> Void)? = nil
+    var onFileOperation: ((FileOperation) -> Void)? = nil
+    var onPaste: (() -> Void)? = nil
+    
+    // MARK: - Staternal State
 
     @State private var loadingState: FileExplorerLoadingState = .idle
     @State private var displayedFiles: [FileNode] = []
@@ -125,7 +123,8 @@ struct FileExplorerPane: View {
     @State private var isEditingPath: Bool = false
     @State private var editablePathText: String = ""
 
-    @State private var renamingItemID: String? = nil
+    @State private var showRenameDialog: Bool = false
+    @State private var renameTargetFile: FileNode? = nil
     @State private var renameText: String = ""
 
     @State private var isCreatingNewFolder: Bool = false
@@ -135,7 +134,7 @@ struct FileExplorerPane: View {
 
     @State private var isDropTargeted: Bool = false
 
-    @State private var localSizeGen: UInt64 = 0
+    @State private var sizeGen: UInt64 = 0
 
     @State private var contextMenuTargetID: String? = nil
 
@@ -180,8 +179,9 @@ struct FileExplorerPane: View {
             }
         }
         .onChange(of: currentPath) { _, newPath in
-            if !isDisabled && pathHistory.last != newPath {
-                loadDirectory()
+            let currentHistoricalPath = pathHistory.indices.contains(pathHistoryIndex) ? pathHistory[pathHistoryIndex] : nil
+            if !isDisabled && currentHistoricalPath != newPath {
+                navigateTo(path: newPath)
             }
         }
         .onChange(of: files) { _, newFiles in
@@ -204,6 +204,14 @@ struct FileExplorerPane: View {
             } else {
                 loadingState = .loaded
             }
+            sizeGen &+= 1
+            calculateDirectorySizesAsync()
+        }
+        .onChange(of: showHiddenFilesLocal) { _, _ in
+            if isLocal { applyFilterAndSort() }
+        }
+        .onChange(of: showHiddenFilesMTP) { _, _ in
+            if !isLocal { applyFilterAndSort() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .localDirectoryNeedsRefresh)) { _ in
             if isLocal {
@@ -232,6 +240,17 @@ struct FileExplorerPane: View {
             if let file = propertiesFile {
                 FilePropertiesView(file: file, isLocal: isLocal)
             }
+        }
+        .alert("Rename", isPresented: $showRenameDialog) {
+            TextField("New name", text: $renameText)
+            Button("Cancel", role: .cancel) { }
+            Button("Rename") {
+                if let file = renameTargetFile {
+                    commitRename(file: file)
+                }
+            }
+        } message: {
+            Text("Enter a new name for this item.")
         }
     }
 
@@ -501,6 +520,7 @@ struct FileExplorerPane: View {
                 )
         }
         .listStyle(.inset)
+        .contextMenu { emptySpaceContextMenuItems }
         .overlay(
             RoundedRectangle(cornerRadius: 0)
                 .stroke(isDropTargeted ? Color.accentColor : Color.clear, lineWidth: 2)
@@ -527,6 +547,7 @@ struct FileExplorerPane: View {
             }
         }
         .background(Color(NSColor.controlBackgroundColor))
+        .contextMenu { emptySpaceContextMenuItems }
         .overlay(
             RoundedRectangle(cornerRadius: 0)
                 .stroke(isDropTargeted ? Color.accentColor : Color.clear, lineWidth: 2)
@@ -584,6 +605,7 @@ struct FileExplorerPane: View {
         .onDrop(of: file.isDirectory ? [.fileURL, .utf8PlainText] : [], isTargeted: nil) { providers in
             handleDrop(providers: providers, targetDirectory: file.path)
         }
+        .contextMenu { contextMenuItems(for: file) }
     }
 
     // MARK: - File Row
@@ -597,21 +619,10 @@ struct FileExplorerPane: View {
                     .foregroundColor(file.iconColor)
                     .frame(width: 20)
 
-                if renamingItemID == file.path {
-                    TextField("Name", text: $renameText, onCommit: {
-                        commitRename(file: file)
-                    })
-                    .textFieldStyle(.roundedBorder)
+                Text(file.name)
                     .font(.system(size: 12))
-                    .onExitCommand {
-                        renamingItemID = nil
-                    }
-                } else {
-                    Text(file.name)
-                        .font(.system(size: 12))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
+                    .lineLimit(1)
+                    .truncationMode(.middle)
 
                 Spacer()
             }
@@ -640,6 +651,7 @@ struct FileExplorerPane: View {
                 .padding(.horizontal, 8)
         }
         .padding(.vertical, 2)
+        .contentShape(Rectangle())
         .onDrag { dragProvider(for: file) }
         .onDrop(of: file.isDirectory ? [.fileURL, .utf8PlainText] : [], isTargeted: nil) { providers in
             handleDrop(providers: providers, targetDirectory: file.path)
@@ -681,7 +693,7 @@ struct FileExplorerPane: View {
         }
 
         Button(action: {
-            // Paste handled by ContentView's handlePaste via keyboard shortcut
+            onPaste?()
         }) {
             Label("Paste", systemImage: "doc.on.clipboard")
         }
@@ -696,8 +708,9 @@ struct FileExplorerPane: View {
         }
 
         Button(action: {
-            renamingItemID = file.path
+            renameTargetFile = file
             renameText = file.name
+            showRenameDialog = true
         }) {
             Label("Rename", systemImage: "pencil")
         }
@@ -720,10 +733,29 @@ struct FileExplorerPane: View {
         Divider()
 
         Button(action: {
-            propertiesFile = selectedItems.isEmpty ? file : displayedFiles.first { selectedItems.contains($0.path) }
+            propertiesFile = selectedItems.isEmpty ? file : (displayedFiles.first { selectedItems.contains($0.path) } ?? file)
             showProperties = true
         }) {
             Label("Properties", systemImage: "info.circle")
+        }
+    }
+    
+    @ViewBuilder
+    private var emptySpaceContextMenuItems: some View {
+        Button(action: {
+            onPaste?()
+        }) {
+            Label("Paste", systemImage: "doc.on.clipboard")
+        }
+        .disabled(!ClipboardManager.shared.hasContent)
+        
+        Divider()
+        
+        Button(action: {
+            isCreatingNewFolder = true
+            newFolderName = "New Folder"
+        }) {
+            Label("New Folder", systemImage: "folder.badge.plus")
         }
     }
 
@@ -908,12 +940,12 @@ struct FileExplorerPane: View {
         if isLocal {
             loadingState = .loading
             let path = currentPath
-            localSizeGen &+= 1
-            let gen = localSizeGen
+            sizeGen &+= 1
+            let gen = sizeGen
             DispatchQueue.global(qos: .userInitiated).async {
                 let result = self.listLocalDirectory(path: path)
                 DispatchQueue.main.async {
-                    guard self.localSizeGen == gen else { return }
+                    guard self.sizeGen == gen else { return }
                     if case .failure(let error) = result {
                         self.loadingState = .error(error.localizedDescription)
                     } else if case .success(let items) = result {
@@ -938,7 +970,7 @@ struct FileExplorerPane: View {
             let contents = try FileManager.default.contentsOfDirectory(
                 at: url,
                 includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey],
-                options: [.skipsHiddenFiles]
+                options: []
             )
 
             for itemUrl in contents {
@@ -965,13 +997,13 @@ struct FileExplorerPane: View {
     }
 
     private func calculateDirectorySizesAsync() {
-        let gen = localSizeGen
+        let gen = sizeGen
         let currentFiles = files
         let local = isLocal
         let storageId = MTPDeviceManager.shared.selectedStorageId
         Task {
             for i in currentFiles.indices where currentFiles[i].isDirectory {
-                let isStale = await MainActor.run { self.localSizeGen != gen }
+                let isStale = await MainActor.run { self.sizeGen != gen }
                 if isStale { break }
 
                 let size = await FileNode.calculateDirectorySize(
@@ -981,7 +1013,7 @@ struct FileExplorerPane: View {
                 )
                 if let size = size {
                     await MainActor.run {
-                        guard self.localSizeGen == gen else { return }
+                        guard self.sizeGen == gen else { return }
                         self.directorySizes[currentFiles[i].path] = size
                     }
                 }
@@ -991,10 +1023,19 @@ struct FileExplorerPane: View {
 
     // MARK: - Filtering & Sorting
 
+    @AppStorage("showHiddenFilesLocal") private var showHiddenFilesLocal: Bool = false
+    @AppStorage("showHiddenFilesMTP") private var showHiddenFilesMTP: Bool = false
+
     private func applyFilterAndSort(using input: [FileNode]? = nil) {
         var result = input ?? files
 
-        // Apply filter
+        // Filter hidden files
+        let showHidden = isLocal ? showHiddenFilesLocal : showHiddenFilesMTP
+        if !showHidden {
+            result = result.filter { !$0.name.hasPrefix(".") }
+        }
+
+        // Apply search filter
         if !filterText.isEmpty {
             let query = filterText.lowercased()
             if query.hasPrefix(".") {
@@ -1149,7 +1190,6 @@ struct FileExplorerPane: View {
     private func commitRename(file: FileNode) {
         let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != file.name else {
-            renamingItemID = nil
             return
         }
 
@@ -1165,8 +1205,6 @@ struct FileExplorerPane: View {
         } else {
             onFileOperation?(.rename(oldPath: file.path, newName: trimmed))
         }
-
-        renamingItemID = nil
     }
 
     // MARK: - Drag & Drop
