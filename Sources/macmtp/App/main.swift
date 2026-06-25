@@ -51,6 +51,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         
+        // Check for updates
+        Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            UpdaterService.shared.checkForUpdates(silent: true)
+        }
+        
         // Bring the app to the foreground
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -79,6 +85,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let appMenuItem = NSMenuItem()
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "About macMTP", action: #selector(showAbout), keyEquivalent: "")
+        appMenu.addItem(withTitle: "Check for Updates...", action: #selector(checkForUpdates), keyEquivalent: "")
         appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(withTitle: "Preferences…", action: #selector(showPreferences), keyEquivalent: ",")
         appMenu.addItem(NSMenuItem.separator())
@@ -145,7 +152,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let alert = NSAlert()
         alert.messageText = "macMTP"
         alert.informativeText = """
-        Version 1.0.0
+        Version \(AppVersion.current)
         
         A native macOS Android file transfer utility.
         Built with Swift and SwiftUI.
@@ -158,6 +165,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         alert.runModal()
+    }
+    
+    @MainActor @objc private func checkForUpdates() {
+        UpdaterService.shared.checkForUpdates(silent: false)
     }
     
     @objc private func openIssueTracker() {

@@ -195,9 +195,15 @@ struct FileExplorerPane: View {
         .onReceive(MTPDeviceManager.shared.$mtpFiles) { newFiles in
             guard !isLocal else { return }
             applyFilterAndSort(using: newFiles)
-            loadingState = newFiles.isEmpty
-                ? (MTPDeviceManager.shared.errorMessage == nil ? .empty : .error(MTPDeviceManager.shared.errorMessage!))
-                : .loaded
+            if newFiles.isEmpty {
+                if let err = MTPDeviceManager.shared.errorMessage {
+                    loadingState = .error(err)
+                } else {
+                    loadingState = .empty
+                }
+            } else {
+                loadingState = .loaded
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .localDirectoryNeedsRefresh)) { _ in
             if isLocal {
@@ -856,12 +862,11 @@ struct FileExplorerPane: View {
 
     private func navigateBack() {
         if isLocal {
-            if pathHistoryIndex > 0 {
-                pathHistoryIndex -= 1
-                currentPath = pathHistory[pathHistoryIndex]
-                selectedItems.removeAll()
-                loadDirectory()
-            }
+            guard pathHistoryIndex > 0 else { return }
+            pathHistoryIndex -= 1
+            currentPath = pathHistory[pathHistoryIndex]
+            selectedItems.removeAll()
+            loadDirectory()
         } else {
             Task {
                 await MTPDeviceManager.shared.navigateBack()
@@ -871,12 +876,11 @@ struct FileExplorerPane: View {
 
     private func navigateForward() {
         if isLocal {
-            if pathHistoryIndex < pathHistory.count - 1 {
-                pathHistoryIndex += 1
-                currentPath = pathHistory[pathHistoryIndex]
-                selectedItems.removeAll()
-                loadDirectory()
-            }
+            guard pathHistoryIndex >= 0 && pathHistoryIndex < pathHistory.count - 1 else { return }
+            pathHistoryIndex += 1
+            currentPath = pathHistory[pathHistoryIndex]
+            selectedItems.removeAll()
+            loadDirectory()
         } else {
             Task {
                 await MTPDeviceManager.shared.navigateForward()
@@ -917,7 +921,7 @@ struct FileExplorerPane: View {
                         self.files = items
                         self.applyFilterAndSort()
                         self.loadingState = self.files.isEmpty ? .empty : .loaded
-                        self.calculateLocalDirectorySizesAsync()
+                        self.calculateDirectorySizesAsync()
                     }
                 }
             }
@@ -960,9 +964,11 @@ struct FileExplorerPane: View {
         }
     }
 
-    private func calculateLocalDirectorySizesAsync() {
+    private func calculateDirectorySizesAsync() {
         let gen = localSizeGen
         let currentFiles = files
+        let local = isLocal
+        let storageId = MTPDeviceManager.shared.selectedStorageId
         Task {
             for i in currentFiles.indices where currentFiles[i].isDirectory {
                 let isStale = await MainActor.run { self.localSizeGen != gen }
@@ -970,8 +976,8 @@ struct FileExplorerPane: View {
 
                 let size = await FileNode.calculateDirectorySize(
                     path: currentFiles[i].path,
-                    isLocal: true,
-                    storageId: nil
+                    isLocal: local,
+                    storageId: storageId
                 )
                 if let size = size {
                     await MainActor.run {

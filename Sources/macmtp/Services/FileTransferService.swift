@@ -530,7 +530,11 @@ public final class FileTransferService: ObservableObject {
         return expanded
     }
     
-    private func expandLocalPath(path: String, baseParent: String, into list: inout [ScannedItem]) throws {
+    private func expandLocalPath(path: String, baseParent: String, depth: Int = 0, into list: inout [ScannedItem]) throws {
+        guard depth < 100 else {
+            throw KalamError.operationFailed("Directory structure is too deep")
+        }
+        
         let fileManager = FileManager.default
         var isDir: ObjCBool = false
         
@@ -550,7 +554,7 @@ public final class FileTransferService: ObservableObject {
             let contents = try fileManager.contentsOfDirectory(atPath: path)
             for child in contents {
                 let childPath = (path as NSString).appendingPathComponent(child)
-                try expandLocalPath(path: childPath, baseParent: baseParent, into: &list)
+                try expandLocalPath(path: childPath, baseParent: baseParent, depth: depth + 1, into: &list)
             }
         } else {
             list.append(ScannedItem(absolutePath: path, relativePath: relativePath, isDirectory: false, size: size, modificationDate: date))
