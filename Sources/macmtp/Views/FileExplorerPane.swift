@@ -142,6 +142,12 @@ struct FileExplorerPane: View {
 
     @State private var directorySizes: [String: Int64] = [:]
 
+    // MARK: - Marquee Selection State
+
+    @State private var dragRect: CGRect? = nil
+    @State private var itemFrames: [String: CGRect] = [:]
+    @State private var dragStartSelection: Set<String> = []
+
     // MARK: - File Operations Enum
 
     enum FileOperation {
@@ -542,7 +548,59 @@ struct FileExplorerPane: View {
                 }
                 .padding(12)
                 .frame(minWidth: scrollGeo.size.width, minHeight: scrollGeo.size.height, alignment: .topLeading)
+                .background(Color.white.opacity(0.001))
             }
+            .coordinateSpace(name: "explorerSpace")
+            .onPreferenceChange(ItemFramePreferenceKey.self) { frames in
+                itemFrames = frames
+            }
+            .gesture(
+                DragGesture(minimumDistance: 5)
+                    .onChanged { value in
+                        if dragRect == nil {
+                            let modifiers = NSEvent.modifierFlags
+                            if modifiers.contains(.shift) || modifiers.contains(.command) {
+                                dragStartSelection = selectedItems
+                            } else {
+                                dragStartSelection = []
+                                selectedItems.removeAll()
+                            }
+                        }
+                        
+                        let start = value.startLocation
+                        let current = value.location
+                        
+                        let rect = CGRect(
+                            x: min(start.x, current.x),
+                            y: min(start.y, current.y),
+                            width: abs(current.x - start.x),
+                            height: abs(current.y - start.y)
+                        )
+                        self.dragRect = rect
+                        
+                        var newSelection = dragStartSelection
+                        for (path, frame) in itemFrames {
+                            if rect.intersects(frame) {
+                                newSelection.insert(path)
+                            }
+                        }
+                        selectedItems = newSelection
+                    }
+                    .onEnded { _ in
+                        dragRect = nil
+                    }
+            )
+            .overlay(
+                Group {
+                    if let rect = dragRect {
+                        Rectangle()
+                            .fill(Color.accentColor.opacity(0.2))
+                            .stroke(Color.accentColor, lineWidth: 1)
+                            .frame(width: rect.width, height: rect.height)
+                            .position(x: rect.midX, y: rect.midY)
+                    }
+                }
+            )
         }
         .background(Color(NSColor.controlBackgroundColor))
         .contextMenu { emptySpaceContextMenuItems }
@@ -591,6 +649,14 @@ struct FileExplorerPane: View {
         .overlay(
             RoundedRectangle(cornerRadius: 6)
                 .stroke(isSelected ? Color.accentColor.opacity(0.5) : Color.clear, lineWidth: 1.5)
+        )
+        .background(
+            GeometryReader { geo in
+                Color.clear.preference(
+                    key: ItemFramePreferenceKey.self,
+                    value: [file.path: geo.frame(in: .named("explorerSpace"))]
+                )
+            }
         )
         .onTapGesture(count: 2) {
             handleDoubleClick(file: file)
@@ -1107,14 +1173,34 @@ struct FileExplorerPane: View {
     // Removed updateSelectionForMarquee
 
     private func dragProvider(for file: FileNode) -> NSItemProvider {
-        let items: [FileNode] = selectedItems.isEmpty
-            ? [file]
-            : displayedFiles.filter { selectedItems.contains($0.path) }
-        let provider = NSItemProvider()
-        if isLocal, let firstLocal = items.first {
-            let url = URL(fileURLWithPath: firstLocal.path)
-            provider.registerObject(url as NSURL, visibility: .all)
+        let items: [FileNode]
+        if selectedItems.contains(file.path) {
+            items = displayedFiles.filter { selectedItems.contains($0.path) }
+        } else {
+            selectedItems = [file.path]
+            lastClickedItemID = file.path
+            items = [file]
         }
+        
+        let provider = NSItemProvider()
+        
+        if isLocal {
+            // For Finder compatibility when dragging multiple files
+            let paths = items.map { $0.path }
+            if let data = try? PropertyListSerialization.data(fromPropertyList: paths, format: .xml, options: 0) {
+                provider.registerDataRepresentation(forTypeIdentifier: "NSFilenamesPboardType", visibility: .all) { completion in
+                    completion(data, nil)
+                    return nil
+                }
+            }
+            
+            // Still register the primary object for single-file drag scenarios
+            if let firstLocal = items.first {
+                let url = URL(fileURLWithPath: firstLocal.path)
+                provider.registerObject(url as NSURL, visibility: .all)
+            }
+        }
+        
         provider.registerDataRepresentation(for: .utf8PlainText, visibility: .all) { completion in
             let payloads = items.map { "\(isLocal ? "local" : "mtp"):\($0.isDirectory ? "dir" : "file"):\($0.path)" }.joined(separator: "\n")
             let data = payloads.data(using: .utf8)
@@ -1418,4 +1504,12 @@ struct FilePropertiesView: View {
     }
 }
 
-// Removed ItemFramePreferenceKey
+// MARK: - Item Frame Preference Key
+
+struct ItemFramePreferenceKey: PreferenceKey {
+    static let defaultValue: [String: CGRect] = [:]
+    
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue()) { current, _ in current }
+    }
+}
