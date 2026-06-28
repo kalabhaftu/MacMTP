@@ -80,14 +80,10 @@ else
     (
         cd "$KALAM_DIR"
 
-        # Apply data race patch if it exists and hasn't been applied yet
-        if [ -f "$PROJECT_ROOT/scripts/kalam.patch" ]; then
-            if ! patch -R -p0 -s -f --dry-run < "$PROJECT_ROOT/scripts/kalam.patch" 2>/dev/null; then
-                echo "    Applying kalam.patch for data race fix..."
-                patch -p0 < "$PROJECT_ROOT/scripts/kalam.patch" || true
-            else
-                echo "    kalam.patch already applied."
-            fi
+        # Copy pre-patched file for data race fix
+        if [ -f "$PROJECT_ROOT/scripts/kalam.go.patched" ]; then
+            echo "    Copying patched kalam.go..."
+            cp "$PROJECT_ROOT/scripts/kalam.go.patched" "kalam.go"
         fi
         
         SYSROOT=$(xcrun --show-sdk-path)
