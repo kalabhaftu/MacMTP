@@ -269,12 +269,8 @@ struct ConflictDialogView: View {
     private var rememberSection: some View {
         HStack {
             Toggle(isOn: $rememberForBatch) {
-                HStack(spacing: 6) {
-                    Image(systemName: rememberForBatch ? "checkmark.square.fill" : "square")
-                        .foregroundColor(rememberForBatch ? .accentColor : .secondary)
-                    Text("Remember for this batch")
-                        .font(.subheadline)
-                }
+                Text("Apply to all conflicts in this batch")
+                    .font(.subheadline)
             }
             .toggleStyle(.checkbox)
 

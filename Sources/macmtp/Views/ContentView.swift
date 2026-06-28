@@ -241,7 +241,7 @@ struct ContentView: View {
         // Conflict resolution sheet
         .sheet(isPresented: $showConflictDialog) {
             ConflictDialogView(
-                conflictingFiles: conflictingFiles,
+                conflictingFiles: FileTransferService.shared.conflictingFiles,
                 totalFileCount: FileTransferService.shared.totalFileCount,
                 resolution: $activeConflictResolution,
                 rememberForBatch: $conflictRememberForBatch
@@ -351,10 +351,9 @@ struct ContentView: View {
         // Observe FileTransferService conflict dialog
         .onReceive(FileTransferService.shared.$showConflictDialog) { show in
             showConflictDialog = show
-            conflictingFiles = FileTransferService.shared.conflictingFiles
-        }
-        .onReceive(FileTransferService.shared.$conflictingFiles) { files in
-            conflictingFiles = files
+            if show {
+                conflictRememberForBatch = false
+            }
         }
     }
 

@@ -239,6 +239,9 @@ public final class FileTransferService: ObservableObject {
                     for i in conflictProcessIndex..<conflicts.count {
                         resolvedConflicts[conflicts[i].sourcePath] = chosenResolution
                     }
+                    await MainActor.run {
+                        self.showConflictDialog = false
+                    }
                     break
                 } else {
                     resolvedConflicts[conflicts[conflictProcessIndex].sourcePath] = chosenResolution
