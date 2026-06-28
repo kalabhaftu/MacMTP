@@ -145,6 +145,7 @@ struct FileExplorerPane: View {
     // MARK: - Marquee Selection State
 
     @State private var dragRect: CGRect? = nil
+    @State private var ignoreMarqueeDrag: Bool = false
     @State private var itemFrames: [String: CGRect] = [:]
     @State private var dragStartSelection: Set<String> = []
 
@@ -558,6 +559,14 @@ struct FileExplorerPane: View {
                 DragGesture(minimumDistance: 5)
                     .onChanged { value in
                         if dragRect == nil {
+                            let start = value.startLocation
+                            let hitItem = itemFrames.values.contains { $0.insetBy(dx: -4, dy: -4).contains(start) }
+                            if hitItem {
+                                ignoreMarqueeDrag = true
+                                return
+                            }
+                            ignoreMarqueeDrag = false
+                            
                             let modifiers = NSEvent.modifierFlags
                             if modifiers.contains(.shift) || modifiers.contains(.command) {
                                 dragStartSelection = selectedItems
@@ -566,6 +575,8 @@ struct FileExplorerPane: View {
                                 selectedItems.removeAll()
                             }
                         }
+                        
+                        if ignoreMarqueeDrag { return }
                         
                         let start = value.startLocation
                         let current = value.location
@@ -588,11 +599,12 @@ struct FileExplorerPane: View {
                     }
                     .onEnded { _ in
                         dragRect = nil
+                        ignoreMarqueeDrag = false
                     }
             )
             .overlay(
                 Group {
-                    if let rect = dragRect {
+                    if let rect = dragRect, !ignoreMarqueeDrag {
                         Rectangle()
                             .fill(Color.accentColor.opacity(0.2))
                             .stroke(Color.accentColor, lineWidth: 1)
