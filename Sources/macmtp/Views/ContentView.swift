@@ -665,21 +665,27 @@ struct ContentView: View {
         if isLocal {
             // Dropping onto local pane
             if !localSources.isEmpty {
-                var didCopy = false
-                for file in localSources {
-                    let url = URL(fileURLWithPath: file.path)
-                    let destURL = URL(fileURLWithPath: destination).appendingPathComponent(file.name)
-                    if url == destURL || url.deletingLastPathComponent().path == URL(fileURLWithPath: destination).path {
-                        continue
+                DispatchQueue.global(qos: .userInitiated).async {
+                    var didCopy = false
+                    for file in localSources {
+                        let url = URL(fileURLWithPath: file.path)
+                        let destURL = URL(fileURLWithPath: destination).appendingPathComponent(file.name)
+                        if url == destURL || url.deletingLastPathComponent().path == URL(fileURLWithPath: destination).path {
+                            continue
+                        }
+                        do {
+                            try FileManager.default.copyItem(at: url, to: destURL)
+                            didCopy = true
+                        } catch {
+                            print("Drop copy failed for \(file.name): \(error.localizedDescription)")
+                        }
                     }
-                    do {
-                        try FileManager.default.copyItem(at: url, to: destURL)
-                        didCopy = true
-                    } catch {
-                        print("Drop copy failed for \(file.name): \(error.localizedDescription)")
+                    if didCopy {
+                        DispatchQueue.main.async {
+                            self.handleRefresh()
+                        }
                     }
                 }
-                if didCopy { handleRefresh() }
             }
             if !mtpSources.isEmpty {
                 // MTP files dropped onto local — initiate download
