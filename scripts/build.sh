@@ -79,6 +79,16 @@ if [ ! -d "$KALAM_DIR" ]; then
 else
     (
         cd "$KALAM_DIR"
+
+        # Apply data race patch if it exists and hasn't been applied yet
+        if [ -f "$PROJECT_ROOT/scripts/kalam.patch" ]; then
+            if ! patch -R -p0 -s -f --dry-run < "$PROJECT_ROOT/scripts/kalam.patch" 2>/dev/null; then
+                echo "    Applying kalam.patch for data race fix..."
+                patch -p0 < "$PROJECT_ROOT/scripts/kalam.patch" || true
+            else
+                echo "    kalam.patch already applied."
+            fi
+        fi
         
         SYSROOT=$(xcrun --show-sdk-path)
         
@@ -90,9 +100,11 @@ else
             CGO_ENABLED=1 GOARCH=arm64 GOOS=darwin CGO_CFLAGS="-mmacosx-version-min=14.0 -isysroot $SYSROOT" CGO_LDFLAGS="-mmacosx-version-min=14.0 -isysroot $SYSROOT" go build -tags nosigsegv -buildmode=c-archive -o "$KALAM_OUTPUT/libkalam_arm64.a" ./*.go
             
             echo "    Creating universal libkalam.a..."
+            rm -f "$KALAM_OUTPUT/libkalam.a"
             lipo -create -output "$KALAM_OUTPUT/libkalam.a" "$KALAM_OUTPUT/libkalam_amd64.a" "$KALAM_OUTPUT/libkalam_arm64.a"
             rm "$KALAM_OUTPUT"/libkalam_amd64.* "$KALAM_OUTPUT"/libkalam_arm64.*
         else
+            rm -f "$KALAM_OUTPUT/libkalam.a"
             CGO_ENABLED=1 \
             GOARCH="${GOARCH:-amd64}" \
             GOOS=darwin \

@@ -7,10 +7,7 @@ on:
 
 jobs:
   build:
-    strategy:
-      matrix:
-        os: [macos-latest, macos-13]
-    runs-on: ${{ matrix.os }}
+    runs-on: macos-latest
     permissions:
       contents: write
 
@@ -41,10 +38,12 @@ jobs:
     - name: Install dependencies
       run: |
         brew install pkg-config libusb create-dmg
+        NONINTERACTIVE=1 arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || true
+        arch -x86_64 /usr/local/bin/brew install pkg-config libusb
         
     - name: Build and Package
       run: |
-        bash scripts/release.sh ${{ github.ref_name }}
+        bash scripts/release.sh -u ${{ github.ref_name }}
 
     - name: Release
       uses: softprops/action-gh-release@v2

@@ -44,6 +44,8 @@ public final class FileTransferService: ObservableObject {
     private var speedSamples: [(time: Date, bytes: Int64)] = []
     private let maxSpeedSamples = 10
     
+    private var verifiedDirectories = Set<String>()
+    
     // MARK: - Initializer
     
     private init() {}
@@ -170,6 +172,7 @@ public final class FileTransferService: ObservableObject {
         pauseRequested = false
         completedBytesAccumulated = 0
         speedSamples.removeAll()
+        verifiedDirectories.removeAll()
         showConflictDialog = false
         conflictingFiles = []
         totalFileCount = 0
@@ -307,83 +310,108 @@ public final class FileTransferService: ObservableObject {
     private func runQueue(storageId: UInt32, direction: TransferDirection) async {
         guard let batch = activeBatch else { return }
         
+        // Group items by their destination parent directory
+        var groups: [String: [Int]] = [:] // destParent -> array of indices
         for index in batch.items.indices {
-            // Check for cancel
+            if batch.items[index].status == .skipped { continue }
+            let destParent = (batch.items[index].destinationPath as NSString).deletingLastPathComponent
+            groups[destParent, default: []].append(index)
+        }
+        
+        let chunkSize = 50 // Balance between bulk performance and cancellation responsiveness
+        
+        for (destParent, indices) in groups {
             if cancelRequested { break }
-            
-            // Check for pause
-            while pauseRequested && !cancelRequested {
-                try? await Task.sleep(nanoseconds: 100_000_000)
-            }
-            
-            if cancelRequested { break }
-            
-            // Keep progress view in sync with current item
-            batch.currentItemIndex = index
-            
-            var item = batch.items[index]
-            if item.status == .skipped {
-                continue
-            }
-            
-            // Mark item as preparing
-            item.status = .preprocessing
-            batch.items[index] = item
             
             do {
                 // Ensure destination parent directory exists
-                let destParent = (item.destinationPath as NSString).deletingLastPathComponent
                 try await ensureDirectoryExists(path: destParent, direction: direction, storageId: storageId)
+            } catch {
+                print("FileTransferService: Failed to create parent directory \(destParent): \(error.localizedDescription)")
+                // Mark all items in this group as failed
+                for idx in indices {
+                    var itm = batch.items[idx]
+                    itm.markFailed(error.localizedDescription)
+                    batch.items[idx] = itm
+                }
+                continue // Skip this group
+            }
+            
+            for chunkStart in stride(from: 0, to: indices.count, by: chunkSize) {
+                if cancelRequested { break }
                 
-                // Start active transferring
-                item.markTransferring()
-                batch.items[index] = item
-                
-                switch direction {
-                case .localToMTP:
-                    let itemID = item.id
-                    try await bridge.uploadFiles(
-                        storageId: storageId,
-                        sources: [item.sourcePath],
-                        destination: destParent,
-                        onPreprocess: { _ in },
-                        onProgress: { [weak self] progressInfo in
-                            guard let self = self else { return }
-                            let sent = progressInfo.activeFileSize.sent
-                            let speedMB = progressInfo.speed
-                            Task { @MainActor in
-                                self.updateActiveItemProgress(id: itemID, sent: sent, speedMB: speedMB)
-                            }
-                        }
-                    )
-                case .mtpToLocal:
-                    let itemID = item.id
-                    try await bridge.downloadFiles(
-                        storageId: storageId,
-                        sources: [item.sourcePath],
-                        destination: destParent,
-                        onPreprocess: { _ in },
-                        onProgress: { [weak self] progressInfo in
-                            guard let self = self else { return }
-                            let sent = progressInfo.activeFileSize.sent
-                            let speedMB = progressInfo.speed
-                            Task { @MainActor in
-                                self.updateActiveItemProgress(id: itemID, sent: sent, speedMB: speedMB)
-                            }
-                        }
-                    )
+                // Check for pause
+                while pauseRequested && !cancelRequested {
+                    try? await Task.sleep(nanoseconds: 100_000_000)
                 }
                 
-                // Mark complete
-                item.markCompleted()
-                batch.items[index] = item
-                completedBytesAccumulated += item.fileSize
+                if cancelRequested { break }
                 
-            } catch {
-                print("FileTransferService: File copy failed: \(item.fileName). Error: \(error.localizedDescription)")
-                var failedItem = item
-                failedItem.markFailed(error.localizedDescription)
-                batch.items[index] = failedItem
+                let chunkIndices = Array(indices[chunkStart..<min(chunkStart + chunkSize, indices.count)])
+                let sources = chunkIndices.map { batch.items[$0].sourcePath }
+                
+                // Mark items as preprocessing
+                for idx in chunkIndices {
+                    var itm = batch.items[idx]
+                    itm.status = .preprocessing
+                    batch.items[idx] = itm
+                }
+                
+                do {
+                    switch direction {
+                    case .localToMTP:
+                        try await bridge.uploadFiles(
+                            storageId: storageId,
+                            sources: sources,
+                            destination: destParent,
+                            onPreprocess: { _ in },
+                            onProgress: { [weak self] progressInfo in
+                                guard let self = self else { return }
+                                let sent = progressInfo.activeFileSize.sent
+                                let speedMB = progressInfo.speed
+                                Task { @MainActor in
+                                    self.updateActiveItemProgress(sourcePath: progressInfo.fullPath, sent: sent, speedMB: speedMB)
+                                }
+                            }
+                        )
+                    case .mtpToLocal:
+                        try await bridge.downloadFiles(
+                            storageId: storageId,
+                            sources: sources,
+                            destination: destParent,
+                            onPreprocess: { _ in },
+                            onProgress: { [weak self] progressInfo in
+                                guard let self = self else { return }
+                                let sent = progressInfo.activeFileSize.sent
+                                let speedMB = progressInfo.speed
+                                Task { @MainActor in
+                                    self.updateActiveItemProgress(sourcePath: progressInfo.fullPath, sent: sent, speedMB: speedMB)
+                                }
+                            }
+                        )
+                    }
+                    
+                    // Mark all chunk items complete
+                    for idx in chunkIndices {
+                        var itm = batch.items[idx]
+                        if itm.status != .completed {
+                            itm.markCompleted()
+                            batch.items[idx] = itm
+                            completedBytesAccumulated += itm.fileSize
+                        }
+                    }
+                    
+                } catch {
+                    print("FileTransferService: File copy failed for chunk in \(destParent). Error: \(error.localizedDescription)")
+                    // Mark items that didn't complete as failed
+                    for idx in chunkIndices {
+                        var itm = batch.items[idx]
+                        if itm.status != .completed && itm.bytesTransferred < itm.fileSize {
+                            itm.markFailed(error.localizedDescription)
+                            batch.items[idx] = itm
+                        }
+                    }
+                }
             }
         }
         
@@ -404,20 +432,18 @@ public final class FileTransferService: ObservableObject {
             
             // Handle cut operation: delete successfully transferred source files
             if isCutOperation && !cutSourcePaths.isEmpty {
-                let successfulPaths = batch.items
-                    .filter { $0.status == .completed && cutSourcePaths.contains($0.sourcePath) }
-                    .map { $0.sourcePath }
-                if !successfulPaths.isEmpty {
-                    print("FileTransferService: Cut operation - deleting \(successfulPaths.count) source files")
+                let failedItems = batch.items.filter { $0.status == .failed }
+                if failedItems.isEmpty {
+                    print("FileTransferService: Cut operation - deleting \(cutSourcePaths.count) source paths")
                     do {
                         if direction == .mtpToLocal {
                             try await bridge.deleteFiles(
                                 storageId: storageId,
-                                paths: successfulPaths
+                                paths: cutSourcePaths
                             )
                         } else {
                             let fileManager = FileManager.default
-                            for path in successfulPaths {
+                            for path in cutSourcePaths {
                                 try? fileManager.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
                             }
                         }
@@ -425,6 +451,8 @@ public final class FileTransferService: ObservableObject {
                     } catch {
                         print("FileTransferService: Failed to delete source files after cut: \(error)")
                     }
+                } else {
+                    print("FileTransferService: Cut operation aborted for deletion due to failed items")
                 }
             }
             isCutOperation = false
@@ -467,10 +495,11 @@ public final class FileTransferService: ObservableObject {
     
     // MARK: - Progress Updates
     
-    private func updateActiveItemProgress(id: UUID, sent: Int64, speedMB: Double) {
+    private func updateActiveItemProgress(sourcePath: String, sent: Int64, speedMB: Double) {
         guard let batch = activeBatch,
-              let index = batch.items.firstIndex(where: { $0.id == id }) else { return }
+              let index = batch.items.firstIndex(where: { $0.sourcePath == sourcePath }) else { return }
         
+        batch.currentItemIndex = index
         var item = batch.items[index]
         item.bytesTransferred = min(sent, item.fileSize)
         item.speed = speedMB * 1024 * 1024 // Convert MB/s to Bytes/s
@@ -478,6 +507,12 @@ public final class FileTransferService: ObservableObject {
         if item.speed > 0 {
             let remainingBytes = Double(item.fileSize - item.bytesTransferred)
             item.estimatedTimeRemaining = remainingBytes / item.speed
+        }
+        
+        if item.bytesTransferred >= item.fileSize && item.fileSize > 0 {
+            item.markCompleted()
+        } else {
+            item.markTransferring()
         }
         
         batch.items[index] = item
@@ -497,6 +532,17 @@ public final class FileTransferService: ObservableObject {
     }
     
     // MARK: - Expanding Sources
+    
+    private func getRelativePath(path: String, baseParent: String) -> String {
+        let prefix = baseParent.hasSuffix("/") ? baseParent : baseParent + "/"
+        if path.hasPrefix(prefix) {
+            return String(path.dropFirst(prefix.count))
+        } else if path == baseParent {
+            return (path as NSString).lastPathComponent
+        } else {
+            return path
+        }
+    }
     
     private func expandSources(sources: [FileNode], direction: TransferDirection, storageId: UInt32) async throws -> [ScannedItem] {
         var expanded: [ScannedItem] = []
@@ -540,7 +586,7 @@ public final class FileTransferService: ObservableObject {
         
         guard fileManager.fileExists(atPath: path, isDirectory: &isDir) else { return }
         
-        let relativePath = path.replacingOccurrences(of: baseParent.hasSuffix("/") ? baseParent : baseParent + "/", with: "")
+        let relativePath = getRelativePath(path: path, baseParent: baseParent)
         
         let attributes = try fileManager.attributesOfItem(atPath: path)
         let size = (attributes[.size] as? Int64) ?? 0
@@ -562,7 +608,7 @@ public final class FileTransferService: ObservableObject {
     }
     
     private func expandMTPPath(path: String, baseParent: String, storageId: UInt32, into list: inout [ScannedItem]) async throws {
-        let relativePath = path.replacingOccurrences(of: baseParent.hasSuffix("/") ? baseParent : baseParent + "/", with: "")
+        let relativePath = getRelativePath(path: path, baseParent: baseParent)
         print("[expandMTPPath] path=\(path) baseParent=\(baseParent) relativePath=\(relativePath)")
 
         let parentDir = (path as NSString).deletingLastPathComponent
@@ -596,7 +642,7 @@ public final class FileTransferService: ObservableObject {
                 let children = try await bridge.walk(storageId: storageId, path: path, recursive: true, skipHidden: false)
                 print("[expandMTPPath] recursive walk returned \(children.count) children")
                 for child in children {
-                    let childRel = child.path.replacingOccurrences(of: baseParent.hasSuffix("/") ? baseParent : baseParent + "/", with: "")
+                    let childRel = getRelativePath(path: child.path, baseParent: baseParent)
                     let childDate = parseGoDate(child.dateAdded)
                     list.append(ScannedItem(absolutePath: child.path, relativePath: childRel, isDirectory: child.isFolder, size: child.size, modificationDate: childDate))
                 }
@@ -699,10 +745,13 @@ public final class FileTransferService: ObservableObject {
     // MARK: - Directory Helpers
     
     private func ensureDirectoryExists(path: String, direction: TransferDirection, storageId: UInt32) async throws {
+        if verifiedDirectories.contains(path) { return }
+        
         if direction == .localToMTP {
             // Ensure MTP directory path exists
             let existResult = try await bridge.checkFilesExist(storageId: storageId, paths: [path])
             if let exists = existResult.first, exists {
+                verifiedDirectories.insert(path)
                 return
             }
             
@@ -714,6 +763,7 @@ public final class FileTransferService: ObservableObject {
             
             // Create this directory
             try await bridge.makeDirectory(storageId: storageId, path: path)
+            verifiedDirectories.insert(path)
         } else {
             // Local directory creation
             let fileManager = FileManager.default
@@ -721,6 +771,7 @@ public final class FileTransferService: ObservableObject {
             if !fileManager.fileExists(atPath: path, isDirectory: &isDir) {
                 try fileManager.createDirectory(atPath: path, withIntermediateDirectories: true)
             }
+            verifiedDirectories.insert(path)
         }
     }
     

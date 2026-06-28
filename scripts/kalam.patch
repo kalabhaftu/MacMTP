@@ -1,0 +1,111 @@
+--- kalam.go.orig
++++ kalam.go
+@@ -9,6 +9,7 @@
+ 	"os"
+ 	"runtime"
+ 	"strings"
++	"sync"
+ 	"syscall"
+ 	"time"
+ )
+@@ -362,6 +363,7 @@
+ 	}
+ 
+ 	var pInterface interface{}
++	var pMutex sync.Mutex
+ 
+ 	ch := make(chan bool)
+ 	go func() {
+@@ -372,8 +374,16 @@
+ 
+ 				return
+ 			default:
++				pMutex.Lock()
++				var pLocal interface{}
+ 				if pInterface != nil {
+-					switch v := pInterface.(type) {
++					pLocal = pInterface
++					pInterface = nil // Clear so we don't re-send the same data if no updates
++				}
++				pMutex.Unlock()
++
++				if pLocal != nil {
++					switch v := pLocal.(type) {
+ 					case UploadPreprocessContainer:
+ 						send_to_js.SendUploadFilesPreprocess(sendToJsOnPreprocessPtr, v.fi, v.fullPath)
+ 
+@@ -396,10 +406,12 @@
+ 				return err
+ 			}
+ 
++			pMutex.Lock()
+ 			pInterface = UploadPreprocessContainer{
+ 				fi:       fi,
+ 				fullPath: fullPath,
+ 			}
++			pMutex.Unlock()
+ 
+ 			return nil
+ 		},
+@@ -408,9 +420,11 @@
+ 				return err
+ 			}
+ 
++			pMutex.Lock()
+ 			pInterface = ProgressContainer{
+ 				pInfo: p,
+ 			}
++			pMutex.Unlock()
+ 
+ 			return nil
+ 		})
+@@ -453,6 +467,7 @@
+ 	}
+ 
+ 	var pInterface interface{}
++	var pMutex sync.Mutex
+ 
+ 	ch := make(chan bool)
+ 	go func() {
+@@ -463,8 +478,16 @@
+ 
+ 				return
+ 			default:
++				pMutex.Lock()
++				var pLocal interface{}
+ 				if pInterface != nil {
+-					switch v := pInterface.(type) {
++					pLocal = pInterface
++					pInterface = nil // Clear so we don't re-send the same data if no updates
++				}
++				pMutex.Unlock()
++
++				if pLocal != nil {
++					switch v := pLocal.(type) {
+ 					case DownloadPreprocessContainer:
+ 						send_to_js.SendDownloadFilesPreprocess(sendToJsOnPreprocessPtr, v.fi)
+ 
+@@ -487,9 +510,11 @@
+ 				return err
+ 			}
+ 
++			pMutex.Lock()
+ 			pInterface = DownloadPreprocessContainer{
+ 				fi: fi,
+ 			}
++			pMutex.Unlock()
+ 
+ 			return nil
+ 		},
+@@ -498,9 +523,11 @@
+ 				return err
+ 			}
+ 
++			pMutex.Lock()
+ 			pInterface = ProgressContainer{
+ 				pInfo: p,
+ 			}
++			pMutex.Unlock()
+ 
+ 			return nil
+ 		})
