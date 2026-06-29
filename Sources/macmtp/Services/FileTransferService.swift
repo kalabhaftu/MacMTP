@@ -167,7 +167,10 @@ public final class FileTransferService: ObservableObject {
             throw KalamError.operationInProgress
         }
 
-        // Reset all state
+        let shouldDeleteSourcesAfterTransfer = isCutOperation
+        let sourcePathsToDeleteAfterTransfer = cutSourcePaths
+
+        // Reset all transient state for this batch.
         cancelRequested = false
         pauseRequested = false
         completedBytesAccumulated = 0
@@ -181,8 +184,6 @@ public final class FileTransferService: ObservableObject {
             conflictContinuation = nil
             oldContinuation.resume(returning: (.cancel, true))
         }
-        isCutOperation = false
-        cutSourcePaths = []
         
         if (direction == .localToMTP || direction == .mtpToLocal) && storageId == nil {
             throw NSError(domain: "FileTransferService", code: 1, userInfo: [NSLocalizedDescriptionKey: "Storage ID is required for MTP transfers"])
@@ -305,12 +306,22 @@ public final class FileTransferService: ObservableObject {
         batch.start()
         
         // Start transferring files
-        await runQueue(storageId: mStorageId, direction: direction)
+        await runQueue(
+            storageId: mStorageId,
+            direction: direction,
+            shouldDeleteSourcesAfterTransfer: shouldDeleteSourcesAfterTransfer,
+            sourcePathsToDeleteAfterTransfer: sourcePathsToDeleteAfterTransfer
+        )
     }
     
     // MARK: - Queue Executer
     
-    private func runQueue(storageId: UInt32, direction: TransferDirection) async {
+    private func runQueue(
+        storageId: UInt32,
+        direction: TransferDirection,
+        shouldDeleteSourcesAfterTransfer: Bool,
+        sourcePathsToDeleteAfterTransfer: [String]
+    ) async {
         guard let batch = activeBatch else { return }
         
         // Group items by their destination parent directory
@@ -434,19 +445,19 @@ public final class FileTransferService: ObservableObject {
             batch.complete()
             
             // Handle cut operation: delete successfully transferred source files
-            if isCutOperation && !cutSourcePaths.isEmpty {
+            if shouldDeleteSourcesAfterTransfer && !sourcePathsToDeleteAfterTransfer.isEmpty {
                 let failedItems = batch.items.filter { $0.status == .failed }
                 if failedItems.isEmpty {
-                    print("FileTransferService: Cut operation - deleting \(cutSourcePaths.count) source paths")
+                    print("FileTransferService: Cut operation - deleting \(sourcePathsToDeleteAfterTransfer.count) source paths")
                     do {
                         if direction == .mtpToLocal {
                             try await bridge.deleteFiles(
                                 storageId: storageId,
-                                paths: cutSourcePaths
+                                paths: sourcePathsToDeleteAfterTransfer
                             )
                         } else {
                             let fileManager = FileManager.default
-                            for path in cutSourcePaths {
+                            for path in sourcePathsToDeleteAfterTransfer {
                                 try? fileManager.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
                             }
                         }

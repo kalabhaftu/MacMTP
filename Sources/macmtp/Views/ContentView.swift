@@ -33,6 +33,9 @@ struct ContentView: View {
     @State private var activeConflictResolution: ConflictResolution? = nil
     @State private var conflictingFiles: [ConflictingFilePair] = []
     @State private var conflictRememberForBatch: Bool = false
+    @State private var pendingLocalPasteItems: [FileNode] = []
+    @State private var pendingLocalPasteDestination: String = ""
+    @State private var pendingLocalPasteIsCut: Bool = false
 
     // MARK: - Transfer Progress State
 
@@ -241,8 +244,8 @@ struct ContentView: View {
         // Conflict resolution sheet
         .sheet(isPresented: $showConflictDialog) {
             ConflictDialogView(
-                conflictingFiles: FileTransferService.shared.conflictingFiles,
-                totalFileCount: FileTransferService.shared.totalFileCount,
+                conflictingFiles: conflictingFiles.isEmpty ? FileTransferService.shared.conflictingFiles : conflictingFiles,
+                totalFileCount: conflictingFiles.isEmpty ? FileTransferService.shared.totalFileCount : pendingLocalPasteItems.count,
                 resolution: $activeConflictResolution,
                 rememberForBatch: $conflictRememberForBatch
             )
@@ -297,7 +300,25 @@ struct ContentView: View {
         // Forward conflict resolution back to FileTransferService
         .onChange(of: activeConflictResolution) { _, resolution in
             if let resolution = resolution {
-                FileTransferService.shared.resolveConflicts(with: resolution, rememberForBatch: conflictRememberForBatch)
+                if !pendingLocalPasteItems.isEmpty {
+                    if resolution != .cancel {
+                        performLocalPaste(
+                            items: pendingLocalPasteItems,
+                            destination: pendingLocalPasteDestination,
+                            isCut: pendingLocalPasteIsCut,
+                            conflictResolution: resolution
+                        )
+                        ClipboardManager.shared.clear()
+                        handleRefresh()
+                    }
+                    pendingLocalPasteItems = []
+                    pendingLocalPasteDestination = ""
+                    pendingLocalPasteIsCut = false
+                    conflictingFiles = []
+                    showConflictDialog = false
+                } else {
+                    FileTransferService.shared.resolveConflicts(with: resolution, rememberForBatch: conflictRememberForBatch)
+                }
                 activeConflictResolution = nil
             }
         }
@@ -498,6 +519,9 @@ struct ContentView: View {
 
             if !conflicts.isEmpty {
                 conflictingFiles = conflicts
+                pendingLocalPasteItems = ClipboardManager.shared.items
+                pendingLocalPasteDestination = destinationPath
+                pendingLocalPasteIsCut = ClipboardManager.shared.isCutOperation
                 showConflictDialog = true
                 return
             }
@@ -509,20 +533,11 @@ struct ContentView: View {
             ClipboardManager.shared.clear()
             handleRefresh()
         } else if !ClipboardManager.shared.sourceIsLocal && !isDestLocal {
-            if ClipboardManager.shared.isCutOperation {
-                let sources = ClipboardManager.shared.items
-                Task {
-                    for s in sources {
-                        try? await KalamBridge.shared.renameFile(
-                            storageId: MTPDeviceManager.shared.selectedStorageId ?? 0,
-                            path: s.path,
-                            newName: destinationPath + "/" + s.name
-                        )
-                    }
-                    await MTPDeviceManager.shared.refreshFiles()
-                }
+            if destinationPath == ClipboardManager.shared.sourcePath {
+                ClipboardManager.shared.clear()
+            } else {
+                print("MTP-to-MTP paste is not supported by the current MTP bridge.")
             }
-            ClipboardManager.shared.clear()
         } else {
             // Cross-device transfer (local ↔ MTP) via FileTransferService.
             let direction: TransferDirection = isDestLocal ? .mtpToLocal : .localToMTP
@@ -643,12 +658,27 @@ struct ContentView: View {
             }
 
         case .newFolder(let parent, let name):
-            let folderURL = URL(fileURLWithPath: parent).appendingPathComponent(name)
-            do {
-                try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: false)
-                handleRefresh()
-            } catch {
-                print("Create folder failed: \(error)")
+            if isLocal {
+                let folderURL = URL(fileURLWithPath: parent).appendingPathComponent(name)
+                do {
+                    try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: false)
+                    handleRefresh()
+                } catch {
+                    print("Create folder failed: \(error)")
+                }
+            } else {
+                let separator = parent == "/" ? "" : "/"
+                Task {
+                    do {
+                        try await KalamBridge.shared.makeDirectory(
+                            storageId: MTPDeviceManager.shared.selectedStorageId ?? 0,
+                            path: "\(parent)\(separator)\(name)"
+                        )
+                        await MTPDeviceManager.shared.refreshFiles()
+                    } catch {
+                        print("Create MTP folder failed: \(error)")
+                    }
+                }
             }
 
         case .open(let path):
@@ -797,13 +827,38 @@ struct ContentView: View {
         }
     }
 
-    private func performLocalPaste(items: [FileNode], destination: String, isCut: Bool) {
+    private func performLocalPaste(
+        items: [FileNode],
+        destination: String,
+        isCut: Bool,
+        conflictResolution: ConflictResolution? = nil
+    ) {
         let fileManager = FileManager.default
         let destURL = URL(fileURLWithPath: destination)
         for item in items {
             let sourceURL = URL(fileURLWithPath: item.path)
             let targetURL = destURL.appendingPathComponent(item.name)
+            if sourceURL == targetURL || sourceURL.deletingLastPathComponent() == destURL {
+                continue
+            }
             do {
+                if fileManager.fileExists(atPath: targetURL.path) {
+                    switch conflictResolution {
+                    case .skip, .skipIfSameSize:
+                        continue
+                    case .overwriteIfDifferent:
+                        let sourceSize = ((try? fileManager.attributesOfItem(atPath: sourceURL.path)[.size]) as? Int64) ?? 0
+                        let targetSize = ((try? fileManager.attributesOfItem(atPath: targetURL.path)[.size]) as? Int64) ?? 0
+                        if sourceSize == targetSize { continue }
+                        try fileManager.removeItem(at: targetURL)
+                    case .overwrite:
+                        try fileManager.removeItem(at: targetURL)
+                    case .cancel:
+                        return
+                    case .askEach, .none:
+                        break
+                    }
+                }
                 if isCut {
                     try fileManager.moveItem(at: sourceURL, to: targetURL)
                 } else {

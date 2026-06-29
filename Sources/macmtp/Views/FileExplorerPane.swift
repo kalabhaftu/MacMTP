@@ -259,6 +259,15 @@ struct FileExplorerPane: View {
         } message: {
             Text("Enter a new name for this item.")
         }
+        .alert("New Folder", isPresented: $isCreatingNewFolder) {
+            TextField("Folder name", text: $newFolderName)
+            Button("Cancel", role: .cancel) { }
+            Button("Create") {
+                commitNewFolder()
+            }
+        } message: {
+            Text("Enter a name for the new folder.")
+        }
     }
 
     // MARK: - Navigation Header
@@ -744,25 +753,13 @@ struct FileExplorerPane: View {
         Divider()
 
         Button(action: {
-            let items: [FileNode]
-            if selectedItems.isEmpty {
-                items = [file]
-            } else {
-                items = displayedFiles.filter { selectedItems.contains($0.path) }
-            }
-            ClipboardManager.shared.copyItems(items: items, from: currentPath, isLocal: isLocal)
+            ClipboardManager.shared.copyItems(items: targetedItems(for: file), from: currentPath, isLocal: isLocal)
         }) {
             Label("Copy", systemImage: "doc.on.doc")
         }
 
         Button(action: {
-            let items: [FileNode]
-            if selectedItems.isEmpty {
-                items = [file]
-            } else {
-                items = displayedFiles.filter { selectedItems.contains($0.path) }
-            }
-            ClipboardManager.shared.cutItems(items: items, from: currentPath, isLocal: isLocal)
+            ClipboardManager.shared.cutItems(items: targetedItems(for: file), from: currentPath, isLocal: isLocal)
         }) {
             Label("Cut", systemImage: "scissors")
         }
@@ -777,7 +774,7 @@ struct FileExplorerPane: View {
         Divider()
 
         Button(action: {
-            onFileOperation?(.delete(paths: Array(selectedItems.isEmpty ? [file.path] : selectedItems)))
+            onFileOperation?(.delete(paths: targetedItems(for: file).map(\.path)))
         }) {
             Label("Delete", systemImage: "trash")
         }
@@ -808,11 +805,19 @@ struct FileExplorerPane: View {
         Divider()
 
         Button(action: {
-            propertiesFile = selectedItems.isEmpty ? file : (displayedFiles.first { selectedItems.contains($0.path) } ?? file)
+            propertiesFile = targetedItems(for: file).first ?? file
             showProperties = true
         }) {
             Label("Properties", systemImage: "info.circle")
         }
+    }
+
+    private func targetedItems(for file: FileNode) -> [FileNode] {
+        guard selectedItems.contains(file.path) else {
+            return [file]
+        }
+        let items = displayedFiles.filter { selectedItems.contains($0.path) }
+        return items.isEmpty ? [file] : items
     }
     
     @ViewBuilder
@@ -1302,6 +1307,23 @@ struct FileExplorerPane: View {
         }
     }
 
+    private func commitNewFolder() {
+        let trimmed = newFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        if isLocal {
+            let folderURL = URL(fileURLWithPath: currentPath).appendingPathComponent(trimmed)
+            do {
+                try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: false)
+                loadDirectory()
+            } catch {
+                print("Create folder failed: \(error)")
+            }
+        } else {
+            onFileOperation?(.newFolder(parentPath: currentPath, name: trimmed))
+        }
+    }
+
     // MARK: - Drag & Drop
 
     private func handleDrop(providers: [NSItemProvider], targetDirectory: String? = nil) -> Bool {
@@ -1311,35 +1333,44 @@ struct FileExplorerPane: View {
 
         for provider in providers {
             let suggestedName = provider.suggestedName ?? ""
-            if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+            if provider.hasItemConformingToTypeIdentifier(UTType.utf8PlainText.identifier) {
+                group.enter()
+                let _ = provider.loadDataRepresentation(for: .utf8PlainText) { data, _ in
+                    defer { group.leave() }
+                    guard let data, let str = String(data: data, encoding: .utf8) else { return }
+
+                    let lines = str.split(separator: "\n", omittingEmptySubsequences: true)
+                    var foundInternalPayload = false
+
+                    for line in lines {
+                        let parts = line.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
+                        guard parts.count == 3 else { continue }
+
+                        let prefix = String(parts[0])
+                        guard prefix == "local" || prefix == "mtp" else { continue }
+
+                        let type = String(parts[1])
+                        let path = String(parts[2])
+                        let isMTP = prefix == "mtp"
+                        let isDirectory = type == "dir"
+                        let name = (path as NSString).lastPathComponent
+                        collectedFiles.append(DroppedFile(path: path, isLocal: !isMTP, name: name, isDirectory: isDirectory))
+                        foundInternalPayload = true
+                    }
+
+                    if !foundInternalPayload {
+                        if let url = URL(string: str), url.isFileURL {
+                            Self.appendLocalDroppedFile(url: url, suggestedName: suggestedName, to: collectedFiles)
+                        } else if str.hasPrefix("/") {
+                            Self.appendLocalDroppedFile(url: URL(fileURLWithPath: str), suggestedName: suggestedName, to: collectedFiles)
+                        }
+                    }
+                }
+            } else if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
                 group.enter()
                 _ = provider.loadObject(ofClass: URL.self) { url, _ in
                     if let url {
-                        var isDir: ObjCBool = false
-                        let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
-                        let isDirectory = exists && isDir.boolValue
-                        let name = suggestedName.isEmpty ? url.lastPathComponent : suggestedName
-                        collectedFiles.append(DroppedFile(path: url.path, isLocal: true, name: name, isDirectory: isDirectory))
-                    }
-                    group.leave()
-                }
-            } else if provider.hasItemConformingToTypeIdentifier(UTType.utf8PlainText.identifier) {
-                group.enter()
-                let _ = provider.loadDataRepresentation(for: .utf8PlainText) { data, _ in
-                    if let data, let str = String(data: data, encoding: .utf8) {
-                        let lines = str.split(separator: "\n", omittingEmptySubsequences: true)
-                        for line in lines {
-                            let parts = line.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
-                            if parts.count == 3 {
-                                let prefix = String(parts[0])
-                                let type = String(parts[1])
-                                let path = String(parts[2])
-                                let isMTP = prefix == "mtp"
-                                let isDirectory = type == "dir"
-                                let name = (path as NSString).lastPathComponent
-                                collectedFiles.append(DroppedFile(path: path, isLocal: !isMTP, name: name, isDirectory: isDirectory))
-                            }
-                        }
+                        Self.appendLocalDroppedFile(url: url, suggestedName: suggestedName, to: collectedFiles)
                     }
                     group.leave()
                 }
@@ -1354,6 +1385,14 @@ struct FileExplorerPane: View {
         }
 
         return true
+    }
+
+    nonisolated private static func appendLocalDroppedFile(url: URL, suggestedName: String, to files: ThreadSafeArray<DroppedFile>) {
+        var isDir: ObjCBool = false
+        let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
+        let isDirectory = exists && isDir.boolValue
+        let name = suggestedName.isEmpty ? url.lastPathComponent : suggestedName
+        files.append(DroppedFile(path: url.path, isLocal: true, name: name, isDirectory: isDirectory))
     }
 
     // MARK: - Formatting Utilities
