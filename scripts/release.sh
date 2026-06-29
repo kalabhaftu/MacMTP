@@ -1,135 +1,157 @@
 #!/usr/bin/env bash
-# ──────────────────────────────────────────────────────────────
-#  macMTP — Release Packaging Script
-#  Creates DMG installer and ZIP archive for distribution.
-#  Usage:  ./scripts/release.sh [version]
-#  Example: ./scripts/release.sh 1.0.0
-# ──────────────────────────────────────────────────────────────
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 APP_NAME="macMTP"
-VERSION="${1:-1.0.0}"
+VERSION="1.0.0"
 RELEASE_DIR="$PROJECT_ROOT/release"
 APP_BUNDLE="$PROJECT_ROOT/$APP_NAME.app"
-ARCH=$(uname -m)
-BUILD_ARGS=""
+TARGETS=()
 
-# Parse options
+usage() {
+    cat <<EOF
+Usage: scripts/release.sh [version] [--arch arm64|x86_64|universal] [--all]
+EOF
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -u|--universal) BUILD_ARGS="--universal"; ARCH="universal"; shift ;;
-        *) 
-            if [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                VERSION="$1"
+        --arch)
+            TARGETS+=("${2:?missing value for --arch}")
+            shift 2
+            ;;
+        -u|--universal)
+            TARGETS+=("universal")
+            shift
+            ;;
+        --all)
+            TARGETS=("arm64" "x86_64" "universal")
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            if [[ "$1" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                VERSION="${1#v}"
+                shift
+            else
+                echo "ERROR: Unknown argument: $1"
+                usage
+                exit 1
             fi
-            shift 
             ;;
     esac
 done
 
-echo "════════════════════════════════════════════════"
-echo "  macMTP Release Packaging"
-echo "  Version: $VERSION | Arch: $ARCH"
-echo "════════════════════════════════════════════════"
-
-# ── Step 1: Build Release ──
-echo ""
-echo "▸ [1/4] Building release binary..."
-bash "$SCRIPT_DIR/build.sh" release $BUILD_ARGS
-
-if [ ! -d "$APP_BUNDLE" ]; then
-    echo "ERROR: App bundle not found at $APP_BUNDLE"
-    exit 1
+if [[ ${#TARGETS[@]} -eq 0 ]]; then
+    TARGETS=("$(uname -m)")
 fi
 
-# ── Step 2: Update Version in Info.plist ──
-echo ""
-echo "▸ [2/4] Setting version to $VERSION..."
-/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP_BUNDLE/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$APP_BUNDLE/Contents/Info.plist"
-
-# Re-sign after plist modification
-codesign -s - --force --deep "$APP_BUNDLE"
-
-echo "  ✓ Version set to $VERSION"
-
-# ── Step 3: Create Release Directory ──
-echo ""
-echo "▸ [3/4] Creating release artifacts..."
+echo "========================================"
+echo "  macMTP Release"
+echo "  Version: $VERSION"
+echo "  Targets: ${TARGETS[*]}"
+echo "========================================"
 
 rm -rf "$RELEASE_DIR"
 mkdir -p "$RELEASE_DIR"
 
-DMG_NAME="$APP_NAME-$VERSION-mac-$ARCH.dmg"
-ZIP_NAME="$APP_NAME-$VERSION-mac-$ARCH.zip"
+set_version() {
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP_BUNDLE/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$APP_BUNDLE/Contents/Info.plist"
+    codesign -s - --force --deep "$APP_BUNDLE"
+}
 
-# Create ZIP archive
-echo "  Creating ZIP archive..."
-cd "$PROJECT_ROOT"
-ditto -c -k --sequesterRsrc --keepParent "$APP_BUNDLE" "$RELEASE_DIR/$ZIP_NAME"
-echo "  ✓ $ZIP_NAME created"
+build_target() {
+    local target="$1"
 
-# Create DMG using create-dmg
-echo "  Creating DMG installer..."
+    case "$target" in
+        arm64)
+            bash "$SCRIPT_DIR/build.sh" release --arch arm64
+            ;;
+        x86_64)
+            bash "$SCRIPT_DIR/build.sh" release --arch x86_64
+            ;;
+        universal)
+            bash "$SCRIPT_DIR/build.sh" release --universal
+            ;;
+        *)
+            echo "ERROR: Unsupported release target: $target"
+            exit 1
+            ;;
+    esac
 
-cd "$RELEASE_DIR"
-if command -v create-dmg &> /dev/null; then
-    create-dmg \
-      --volname "macMTP" \
-      --window-pos 200 120 \
-      --window-size 600 400 \
-      --icon-size 100 \
-      --icon "$APP_NAME.app" 150 190 \
-      --hide-extension "$APP_NAME.app" \
-      --app-drop-link 450 190 \
-      "$DMG_NAME" \
-      "$APP_BUNDLE" || true
-else
-    npx create-dmg "$APP_BUNDLE" || true
-    mv "$RELEASE_DIR"/*.dmg "$RELEASE_DIR/$DMG_NAME" 2>/dev/null || true
-fi
+    if [[ ! -d "$APP_BUNDLE" ]]; then
+        echo "ERROR: App bundle not found at $APP_BUNDLE"
+        exit 1
+    fi
+}
 
-echo "  ✓ $DMG_NAME created"
+package_target() {
+    local target="$1"
+    local dmg_name="$APP_NAME-$VERSION-mac-$target.dmg"
+    local zip_name="$APP_NAME-$VERSION-mac-$target.zip"
 
-# ── Step 4: Generate Checksums ──
+    set_version
+
+    echo "Packaging $target ZIP..."
+    (
+        cd "$PROJECT_ROOT"
+        ditto -c -k --sequesterRsrc --keepParent "$APP_BUNDLE" "$RELEASE_DIR/$zip_name"
+    )
+
+    echo "Packaging $target DMG..."
+    rm -f "$RELEASE_DIR/$dmg_name"
+    if command -v create-dmg >/dev/null 2>&1; then
+        create-dmg \
+            --volname "macMTP" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --icon "$APP_NAME.app" 150 190 \
+            --hide-extension "$APP_NAME.app" \
+            --app-drop-link 450 190 \
+            "$RELEASE_DIR/$dmg_name" \
+            "$APP_BUNDLE"
+    else
+        hdiutil create -volname "macMTP" -srcfolder "$APP_BUNDLE" -ov -format UDZO "$RELEASE_DIR/$dmg_name"
+    fi
+
+    (
+        cd "$RELEASE_DIR"
+        shasum -a 256 "$dmg_name" > "$dmg_name.sha256"
+        shasum -a 256 "$zip_name" > "$zip_name.sha256"
+    )
+}
+
+for target in "${TARGETS[@]}"; do
+    echo ""
+    echo "Building release target: $target"
+    build_target "$target"
+    package_target "$target"
+done
+
+echo "Writing latest-mac.yml..."
+{
+    echo "version: $VERSION"
+    echo "files:"
+    for file in "$RELEASE_DIR"/*.zip "$RELEASE_DIR"/*.dmg; do
+        name="$(basename "$file")"
+        echo "  - url: $name"
+        echo "    sha256: $(shasum -a 256 "$file" | awk '{print $1}')"
+        echo "    size: $(stat -f%z "$file")"
+    done
+    preferred="$APP_NAME-$VERSION-mac-universal.zip"
+    if [[ ! -f "$RELEASE_DIR/$preferred" ]]; then
+        preferred="$(basename "$(find "$RELEASE_DIR" -name '*.zip' | sort | head -1)")"
+    fi
+    echo "path: $preferred"
+    echo "releaseDate: '$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")'"
+} > "$RELEASE_DIR/latest-mac.yml"
+
 echo ""
-echo "▸ [4/4] Generating checksums..."
-
-cd "$RELEASE_DIR"
-shasum -a 256 "$DMG_NAME" > "$DMG_NAME.sha256"
-shasum -a 256 "$ZIP_NAME" > "$ZIP_NAME.sha256"
-
-# Generate a release info YAML (similar to OpenMTP's latest-mac.yml)
-cat > "$RELEASE_DIR/latest-mac.yml" << YAML
-version: $VERSION
-files:
-  - url: $ZIP_NAME
-    sha256: $(shasum -a 256 "$ZIP_NAME" | awk '{print $1}')
-    size: $(stat -f%z "$ZIP_NAME")
-  - url: $DMG_NAME
-    sha256: $(shasum -a 256 "$DMG_NAME" | awk '{print $1}')
-    size: $(stat -f%z "$DMG_NAME")
-path: $ZIP_NAME
-releaseDate: '$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")'
-YAML
-
-echo "  ✓ Checksums and release info generated"
-
-# Summary
-echo ""
-echo "════════════════════════════════════════════════"
-echo "  ✅ RELEASE PACKAGING COMPLETE"
-echo ""
-echo "  Release Directory: $RELEASE_DIR/"
-echo "  ┣ $DMG_NAME"
-echo "  ┣ $DMG_NAME.sha256"
-echo "  ┣ $ZIP_NAME"
-echo "  ┣ $ZIP_NAME.sha256"
-echo "  ┗ latest-mac.yml"
-echo ""
-DMG_SIZE=$(du -sh "$RELEASE_DIR/$DMG_NAME" | cut -f1)
-ZIP_SIZE=$(du -sh "$RELEASE_DIR/$ZIP_NAME" | cut -f1)
-echo "  DMG: $DMG_SIZE | ZIP: $ZIP_SIZE"
-echo "════════════════════════════════════════════════"
+echo "Release artifacts:"
+ls -lh "$RELEASE_DIR"

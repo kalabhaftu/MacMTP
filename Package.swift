@@ -4,6 +4,24 @@ import PackageDescription
 import Foundation
 
 let packageDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
+let env = ProcessInfo.processInfo.environment
+let hostArch = env["HOSTTYPE"] ?? env["RUNNER_ARCH"] ?? env["NATIVE_ARCH"] ?? ""
+let libusbLibDir = env["MACMTP_LIBUSB_LIB_DIR"]
+let defaultLibusbSearchPaths = hostArch.contains("arm64")
+    || hostArch == "ARM64"
+    ? ["/opt/homebrew/lib", "/usr/local/lib"]
+    : ["/usr/local/lib", "/opt/homebrew/lib"]
+let existingDefaultLibusbSearchPaths = defaultLibusbSearchPaths.filter {
+    FileManager.default.fileExists(atPath: $0)
+}
+let selectedLibusbSearchPaths = libusbLibDir.map { [$0] }
+    ?? (existingDefaultLibusbSearchPaths.isEmpty ? defaultLibusbSearchPaths : existingDefaultLibusbSearchPaths)
+let libusbLinkerFlags = selectedLibusbSearchPaths
+    .flatMap { ["-L\($0)"] } + ["-lusb-1.0"]
+let kalamLinkerFlags = [
+    "-L\(packageDir)/Sources/CKalam",
+    "-lkalam",
+]
 
 let package = Package(
     name: "macmtp",
@@ -24,15 +42,8 @@ let package = Package(
                 .headerSearchPath("include")
             ],
             linkerSettings: [
-                .unsafeFlags([
-                    "-L\(packageDir)/Sources/CKalam",
-                    "-lkalam",
-                ]),
-                .unsafeFlags([
-                    "-L/usr/local/lib",
-                    "-L/opt/homebrew/lib",
-                    "-lusb-1.0",
-                ]),
+                .unsafeFlags(kalamLinkerFlags),
+                .unsafeFlags(libusbLinkerFlags),
                 .linkedFramework("CoreFoundation"),
                 .linkedFramework("Security"),
                 .linkedFramework("IOKit"),
@@ -49,13 +60,7 @@ let package = Package(
             path: "Sources/macmtp",
 
             linkerSettings: [
-                .unsafeFlags([
-                    "-L\(packageDir)/Sources/CKalam",
-                    "-lkalam",
-                    "-L/usr/local/lib",
-                    "-L/opt/homebrew/lib",
-                    "-lusb-1.0",
-                ]),
+                .unsafeFlags(kalamLinkerFlags + libusbLinkerFlags),
                 .linkedFramework("CoreFoundation"),
                 .linkedFramework("Security"),
                 .linkedFramework("IOKit"),

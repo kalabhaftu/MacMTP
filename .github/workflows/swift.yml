@@ -10,11 +10,51 @@ jobs:
   build:
     runs-on: macos-latest
 
+    env:
+      MACMTP_ARM64_LIBUSB_PKGCONFIG: /opt/homebrew/opt/libusb/lib/pkgconfig
+      MACMTP_X86_64_LIBUSB_PKGCONFIG: /usr/local/opt/libusb/lib/pkgconfig
+
     steps:
-    - uses: actions/checkout@v4
-    - name: Install system dependencies
-      run: brew install libusb
-    - name: Build
+    - name: Checkout MacMTP
+      uses: actions/checkout@v4
+
+    - name: Checkout OpenMTP
+      uses: actions/checkout@v4
+      with:
+        repository: ganeshrvel/openmtp
+        path: openmtp
+
+    - name: Link OpenMTP for build script
+      run: ln -s "$GITHUB_WORKSPACE/openmtp" "$GITHUB_WORKSPACE/../openmtp"
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.22'
+
+    - name: Install dependencies
+      run: |
+        brew install pkg-config libusb
+        softwareupdate --install-rosetta --agree-to-license || true
+        if [ ! -x /usr/local/bin/brew ]; then
+          NONINTERACTIVE=1 arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        fi
+        arch -x86_64 /usr/local/bin/brew install pkg-config libusb
+
+    - name: Build project app
+      run: bash scripts/build.sh debug --arch "$(uname -m)"
+
+    - name: Build Swift package
       run: swift build -v
+
+    - name: Build arm64 release
+      run: bash scripts/build.sh release --arch arm64
+
+    - name: Build x86_64 release
+      run: bash scripts/build.sh release --arch x86_64
+
+    - name: Build universal release
+      run: bash scripts/build.sh release --universal
+
     - name: Run tests
-      run: swift test -v 2>/dev/null || echo "No tests found — skipping"
+      run: swift test -v 2>/dev/null || echo "No tests found - skipping"

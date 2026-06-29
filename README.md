@@ -1,11 +1,11 @@
-# macMTP — Native macOS Android File Transfer
+# macMTP - Native macOS Android File Transfer
 
 <p align="center">
-  <strong>A modern, high-performance, native macOS utility for transferring files between Mac and Android devices via USB (MTP).</strong>
+  <strong>A native macOS utility for transferring files between a Mac and Android devices over USB MTP.</strong>
 </p>
 
 <p align="center">
-  Built from scratch in <strong>Swift</strong> and <strong>SwiftUI</strong>. Powered by the battle-tested <strong>Kalam MTP Engine</strong> (Go).
+  Built with <strong>Swift</strong> and <strong>SwiftUI</strong>. The MTP layer uses the Go-based Kalam/OpenMTP engine through a small C bridge.
 </p>
 
 <p align="center">
@@ -30,234 +30,227 @@
 
 ## Why macMTP?
 
-Transferring files between macOS and Android has always been painful. Google's official "Android File Transfer" app is abandoned and buggy. Most alternatives are either Electron-based (heavy on resources) or use WiFi/ADB (extremely slow). macMTP solves these problems:
+macMTP aims to provide a focused, native file-transfer app for people who still move files between macOS and Android devices with a USB cable. It is intentionally small: a local file pane, an MTP device pane, transfer progress, conflict handling, and packaging scripts for Intel, Apple Silicon, and universal releases.
 
-| Problem | macMTP Solution |
-|---------|----------------|
-| Electron-based apps use 300+ MB RAM | Native Swift app uses ~30 MB RAM |
-| 4GB file size limit in official app | No file size limits — transfer 50GB+ files |
-| Frequent USB disconnections | Robust Kalam MTP engine with auto-reconnection |
-| No conflict resolution on copy | SuperCopier-style conflict dialog with 5 options |
-| Can't resume interrupted transfers | Skip-if-same-size detects completed files |
-| Basic file browser UI | Finder-like sidebar with volumes, drives, bookmarks |
-| No keyboard navigation | Letter-selection cycling, full keyboard shortcuts |
-| No drag and drop | Native drag-and-drop between panes and Finder |
-| No file type filtering | Filter by extension (.mp4, .jpg, etc.) |
+This is community-maintained software, so this README should describe the current app rather than a wish list. If a feature below is incomplete or broken, please open an issue or PR.
 
 ---
 
-## Features
+## Current Features
 
-### Core File Transfer
+### File Transfer
 
-- **Plug and Play**: Connect your Android device via USB cable. macMTP auto-detects it instantly.
-- **No File Size Limits**: Transfer files of any size — 4GB, 10GB, 50GB+.
-- **Internal Storage & SD Card**: Choose between internal memory and SD card on your device.
-- **Batch Transfers**: Copy hundreds of files at once with queue-based processing.
-- **Transfer Speed**: 30-40 MB/s on budget devices, 100-120 MB/s on flagship devices.
+- USB MTP device detection through IOKit, with optional auto-connect.
+- Local-to-device uploads and device-to-local downloads.
+- Internal storage and SD card selection when the connected device exposes multiple MTP storages.
+- Batch transfers with per-file progress, pause/resume controls for the queue, cancellation, and completion/error notifications.
+- Cut/copy/paste flows across local and MTP panes.
+- MTP-to-MTP copy/move is not currently supported by the bridge.
 
-### SuperCopier Conflict Resolution
+### Conflict Handling
 
-When pasting files that already exist at the destination, macMTP gives you full control:
+When transferred files already exist at the destination, macMTP can ask how to handle conflicts:
 
 | Option | Behavior |
 |--------|----------|
-| **Overwrite All** | Replace all conflicting files unconditionally |
-| **Skip All** | Skip every file that already exists at the destination |
-| **Overwrite if Different** | Only replace files where the source and destination sizes differ |
-| **Skip if Same Size (Resume)** | Keep fully-copied files, re-copy files that were partially transferred |
-| **Cancel** | Abort the entire operation |
+| Overwrite All | Replace conflicting destination files with source files |
+| Skip All | Keep existing destination files and skip conflicting transfers |
+| Overwrite if Different | Replace only when source and destination sizes differ |
+| Skip if Same Size | Keep destination files whose sizes match the source |
+| Cancel | Abort the transfer |
 
-This means if you were copying 10 episodes and got interrupted at episode 5, you can resume — macMTP will skip the 5 completed episodes and continue from where it stopped.
+This is size-based conflict handling. It is useful for skipping already-copied files, but it is not byte-range resume inside a partially written file.
 
-### Finder-Like Interface
+### File Browser
 
-- **Native Sidebar**: Shows Macintosh HD, Home, Desktop, Downloads, Documents, Movies, Music, Pictures, and all mounted external drives/USB disks/DMGs — just like Finder.
-- **Dual-Pane Layout**: Local filesystem on the left, Android device on the right.
-- **Column Sorting**: Click column headers to sort by Name, Size, Type, or Date Modified.
-- **File Type Filtering**: Type `.mp4` in the filter bar to show only MP4 files.
-- **Dark Mode**: Full support for macOS dark mode with native system colors.
+- Dual-pane layout: local filesystem on the left, Android device on the right.
+- Sidebar with common local folders and mounted volumes.
+- List and icon views.
+- Sorting by name, size, type, or modified date in list view.
+- Filter bar for names or extensions such as `.mp4`.
+- Hidden-file toggles for local and MTP panes.
+- macOS dark mode via system colors.
 
-### Keyboard Navigation
+### Keyboard and Selection
 
 | Shortcut | Action |
 |----------|--------|
-| Letter key | Jump to first file starting with that letter |
-| Letter key (repeat) | Cycle through files starting with that letter |
-| `⌘C` | Copy selected files |
-| `⌘X` | Cut selected files |
-| `⌘V` | Paste files |
-| `⌘⌫` | Delete selected files |
-| `⌘N` | Create new folder |
-| `⌘R` | Refresh directory listing |
-| `⌘A` | Select all files |
-| `Enter` | Open / navigate into folder |
-| `⌘↑` | Navigate to parent folder |
-| `Shift+Click` | Range selection |
-| `⌘+Click` | Toggle individual selection |
+| Letter key | Jump to the first file starting with that letter |
+| Repeated letter key | Cycle through matching files |
+| `Command-C` | Copy selected files |
+| `Command-X` | Cut selected files |
+| `Command-V` | Paste files |
+| `Command-Delete` | Delete selected files |
+| `Command-N` | Create new folder |
+| `Command-R` | Refresh directory listing |
+| `Command-A` | Select all files |
+| `Enter` | Open or navigate into selected item |
+| `Command-Up` | Navigate to parent folder |
+| `Shift-click` | Range selection |
+| `Command-click` | Toggle selection |
 
 ### Drag and Drop
 
-- Drag files from the local pane to the MTP pane (upload).
-- Drag files from the MTP pane to the local pane (download).
-- Drag files from Finder into macMTP (upload to device).
-- Drag files from macMTP to Finder (download from device).
+- Drag files from the local pane to the MTP pane to upload.
+- Drag files from the MTP pane to the local pane to download.
+- Drag files from Finder into macMTP to upload to the selected MTP destination.
+- Drag local files from macMTP to Finder.
+
+Dragging MTP files directly to Finder is not implemented yet; use the local pane as the download target.
 
 ---
 
 ## System Requirements
 
-- **macOS**: 14.0 (Sonoma) or later
-- **Architecture**: Intel (x86_64) and Apple Silicon (arm64)
-- **USB**: Standard USB cable connecting Mac to Android device
-- **Android**: USB debugging or MTP file transfer mode enabled
+- macOS 14.0 Sonoma or later
+- Apple Silicon or Intel Mac
+- USB cable connected to an Android device
+- Android device set to File Transfer / MTP mode
 
 ---
 
 ## Installation
 
-### Download Pre-built Binary
+Download the latest release from the [Releases](https://github.com/kalabhaftu/MacMTP/releases) page.
 
-Download the latest release from the [Releases](https://github.com/kalabhaftu/MacMTP/releases) page:
+Release artifacts are built for:
 
-- **DMG Installer**: `MacMTP-X.Y.Z-mac-x86_64.dmg` — Open and drag to Applications
-- **ZIP Archive**: `MacMTP-X.Y.Z-mac-x86_64.zip` — Unzip and move to Applications
+- `mac-arm64`
+- `mac-x86_64`
+- `mac-universal`
 
-### Build from Source
+Use the universal build if you are unsure which architecture you need.
 
-#### Prerequisites
+---
+
+## Build From Source
+
+### Prerequisites
 
 - macOS 14.0+
-- Swift 6.0+ (via Xcode Command Line Tools: `xcode-select --install`)
-- Go 1.21+ (`brew install go`)
-- libusb (`brew install libusb`)
+- Swift 6.0+ through Xcode or Xcode Command Line Tools
+- Go 1.21+
+- pkg-config and libusb
+- Kalam source from OpenMTP checked out next to this repository
 
-#### Clone and Build
+Install the local dependencies:
+
+```bash
+brew install go pkg-config libusb
+```
+
+Clone both repositories as siblings:
 
 ```bash
 git clone https://github.com/kalabhaftu/MacMTP.git
+git clone https://github.com/ganeshrvel/openmtp.git
 cd MacMTP
-
-# Quick build (debug mode)
-swift build
-
-# Release build
-swift build -c release
-
-# Run the app
-open .build/debug/macMTP.app
 ```
 
-#### Release Packaging
-
-To create DMG and ZIP distribution packages:
+Build a debug app bundle for the current machine:
 
 ```bash
-./scripts/release.sh 1.0.0
+bash scripts/build.sh debug --arch "$(uname -m)"
+open macMTP.app
 ```
 
-This generates:
+Build a release app bundle for a specific architecture:
 
+```bash
+bash scripts/build.sh release --arch arm64
+bash scripts/build.sh release --arch x86_64
 ```
+
+`swift build` only works after `Sources/CKalam/libkalam.a` has been generated for the target architecture. The build script handles that step.
+
+### Universal Builds
+
+Universal builds require both Apple Silicon Homebrew and Intel Homebrew under Rosetta, each with `pkg-config` and `libusb` installed:
+
+```bash
+brew install pkg-config libusb
+softwareupdate --install-rosetta --agree-to-license
+arch -x86_64 /usr/local/bin/brew install pkg-config libusb
+
+bash scripts/build.sh release --universal
+```
+
+### Release Packaging
+
+Create DMG and ZIP packages for all supported targets:
+
+```bash
+bash scripts/release.sh 1.0.0 --all
+```
+
+This generates architecture-specific DMG and ZIP files plus SHA-256 checksums and `latest-mac.yml`:
+
+```text
 release/
-├── MacMTP-1.0.0-mac-x86_64.dmg      # DMG installer with Applications shortcut
-├── MacMTP-1.0.0-mac-x86_64.dmg.sha256
-├── MacMTP-1.0.0-mac-x86_64.zip      # ZIP archive
-├── MacMTP-1.0.0-mac-x86_64.zip.sha256
-└── latest-mac.yml                    # Release manifest
+├── macMTP-1.0.0-mac-arm64.dmg
+├── macMTP-1.0.0-mac-arm64.zip
+├── macMTP-1.0.0-mac-x86_64.dmg
+├── macMTP-1.0.0-mac-x86_64.zip
+├── macMTP-1.0.0-mac-universal.dmg
+├── macMTP-1.0.0-mac-universal.zip
+└── latest-mac.yml
 ```
 
 ---
 
 ## Architecture
 
-macMTP is built on a clean layered architecture:
-
-```
-┌──────────────────────────────────────────┐
-│          SwiftUI Frontend               │
-│  (ContentView, FileExplorerPane, etc.)  │
-├──────────────────────────────────────────┤
-│        Swift Service Layer              │
-│  (ClipboardManager, FileTransfer,       │
-│   ConflictResolver, USBWatcher)         │
-├──────────────────────────────────────────┤
-│        KalamBridge (Swift↔C FFI)        │
-│  (Async wrappers, JSON parsing)         │
-├──────────────────────────────────────────┤
-│        Go Kalam MTP Engine              │
-│  (Static C-archive: libkalam.a)         │
-│  (go-mtpx, go-mtpfs libraries)          │
-├──────────────────────────────────────────┤
-│        libusb (USB transport)           │
-│  (User-space USB communication)         │
-└──────────────────────────────────────────┘
+```text
+SwiftUI app
+  ContentView, FileExplorerPane, SidebarView, transfer/progress UI
+        |
+Swift services and models
+  ClipboardManager, FileTransferService, USBWatcher, MTPDeviceManager
+        |
+KalamBridge
+  Swift async wrappers around C callbacks and JSON payloads
+        |
+CKalam
+  C bridge target plus Go c-archive libkalam.a
+        |
+Kalam / go-mtpx / libusb
+  MTP operations and USB transport
 ```
 
-### Why Go for the MTP Engine?
-
-The Kalam MTP engine is written in Go because:
-
-1. **Battle-tested**: Used by OpenMTP with thousands of users across hundreds of Android device models.
-2. **Edge-case handling**: Years of fixes for Samsung, Pixel, OnePlus, Xiaomi, and other manufacturer-specific MTP quirks.
-3. **Performance**: Go's concurrency model enables efficient bulk file transfers.
-4. **Stability**: The `go-mtpx` library handles USB timeouts, EOF errors, and storage access issues gracefully.
-
-We compile it as a static C-archive (`libkalam.a`) and bridge it into Swift via C function pointers.
+The Go MTP engine is compiled as a static C archive (`libkalam.a`) and linked into the Swift executable. `libusb.dylib` is bundled into the app package during scripted builds.
 
 ---
 
 ## Project Structure
 
-```
+```text
 macmtp/
-├── Package.swift                  # Swift Package Manager configuration
-├── README.md                      # This document
-├── .gitignore
+├── Package.swift
 ├── Sources/
-│   ├── CKalam/                    # C bridge target for Go library
+│   ├── CKalam/
 │   │   ├── include/
-│   │   │   ├── kalam.h            # Go-generated C header
-│   │   │   └── module.modulemap   # Swift module map
-│   │   ├── shim.c                 # Required by SPM
-│   │   └── libkalam.a             # Go static library (compiled)
-│   └── macmtp/                    # Main Swift application
+│   │   ├── early_init.c
+│   │   ├── shim.c
+│   │   └── libkalam.a              # generated by scripts/build.sh
+│   └── macmtp/
 │       ├── App/
-│       │   └── main.swift         # App entry point, window, menu bar
-│       ├── Views/
-│       │   ├── ContentView.swift  # Main split-pane layout
-│       │   ├── FileExplorerPane.swift  # File table with sorting, filtering
-│       │   ├── SidebarView.swift  # Finder-like sidebar with volumes
-│       │   ├── ToolbarView.swift  # Operation toolbar
-│       │   ├── StatusView.swift   # Bottom status bar
-│       │   ├── ConflictDialogView.swift  # SuperCopier conflict sheet
-│       │   └── TransferProgressView.swift  # Transfer progress panel
 │       ├── Models/
-│       │   ├── FileNode.swift     # File/directory data model
-│       │   ├── DeviceInfo.swift   # MTP device & storage models
-│       │   ├── TransferItem.swift # Transfer queue models
-│       │   └── ClipboardManager.swift  # App clipboard
 │       ├── MTP/
-│       │   ├── KalamBridge.swift  # Swift↔C FFI bridge
-│       │   └── MTPDeviceManager.swift  # Device state manager
 │       ├── Services/
-│       │   ├── FileTransferService.swift  # Transfer queue engine
-│       │   └── USBWatcher.swift   # IOKit USB monitoring
-│       └── Utilities/
-│           └── FormatUtils.swift  # Formatting helpers
+│       ├── Utilities/
+│       └── Views/
 ├── Resources/
-│   └── Info.plist
 ├── scripts/
-│   ├── build.sh                   # Build script
-│   └── release.sh                 # Release packaging script
-└── release/                       # Generated release artifacts
+│   ├── build.sh
+│   └── release.sh
+└── .github/workflows/
 ```
 
 ---
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide — setup, code style, PR process, and areas to work on.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, code style, PR process, and areas to work on.
 
 This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md). Report security issues via [SECURITY.md](SECURITY.md).
 
@@ -267,18 +260,13 @@ Governance and decision-making are documented in [GOVERNANCE.md](GOVERNANCE.md).
 
 ## Acknowledgments
 
-- **[Kalam MTP Engine](https://github.com/ganeshrvel/go-mtpx)** — The Go-based MTP kernel by Ganesh Rathinavel
-- **[OpenMTP](https://github.com/ganeshrvel/openmtp)** — The original Electron-based Android file transfer app that inspired this project
-- **[libusb](https://libusb.info/)** — Cross-platform USB library
+- [OpenMTP](https://github.com/ganeshrvel/openmtp)
+- [go-mtpx](https://github.com/ganeshrvel/go-mtpx)
+- [libusb](https://libusb.info/)
+- [Sentry Cocoa](https://github.com/getsentry/sentry-cocoa)
 
 ---
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
-
----
-
-<p align="center">
-  <em>Made with ❤️ for the macOS and Android community</em>
-</p>
+MIT License - see [LICENSE](LICENSE) for details.
