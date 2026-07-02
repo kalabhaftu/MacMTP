@@ -51,6 +51,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 options.debug = false
                 options.sendDefaultPii = true
                 options.releaseName = AppVersion.current
+                
+                // Recommended by Sentry for performance profiling
+                options.tracesSampleRate = 1.0
+                options.profilesSampleRate = 1.0
             }
         }
         
