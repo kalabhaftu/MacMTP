@@ -11,46 +11,48 @@ struct PreferencesView: View {
     @AppStorage("sendCrashReports") private var sendCrashReports: Bool = true
 
     var body: some View {
-        Form {
-            Section(header: Text("General").font(.headline)) {
-                Toggle("Auto-detect and connect MTP device on launch", isOn: $autoDetectDevice)
-            }
-            .padding(.bottom, 10)
-            
-            Section(header: Text("MTP Engine").font(.headline)) {
-                Picker("Engine Type", selection: Binding(
-                    get: { UserDefaults.standard.string(forKey: "mtpEngine") ?? "Kalam" },
-                    set: { UserDefaults.standard.set($0, forKey: "mtpEngine") }
-                )) {
-                    Text("Kalam (Modern, Fast, >4GB support)").tag("Kalam")
-                    Text("Legacy (Fallback for older devices)").tag("Legacy")
+        ScrollView {
+            Form {
+                Section(header: Text("General").font(.headline)) {
+                    Toggle("Auto-detect and connect MTP device on launch", isOn: $autoDetectDevice)
                 }
-                .pickerStyle(RadioGroupPickerStyle())
-                
-            }
-            .padding(.bottom, 10)
+                .padding(.bottom, 10)
 
-            Section(header: Text("File Explorer").font(.headline)) {
-                Toggle("Show hidden files on Local Mac", isOn: $showHiddenFilesLocal)
-                Toggle("Show hidden files on Android Device", isOn: $showHiddenFilesMTP)
-            }
-            .padding(.bottom, 10)
+                Section(header: Text("MTP Engine").font(.headline)) {
+                    Picker("Engine Type", selection: Binding(
+                        get: { UserDefaults.standard.string(forKey: "mtpEngine") ?? "Kalam" },
+                        set: { UserDefaults.standard.set($0, forKey: "mtpEngine") }
+                    )) {
+                        Text("Kalam (Modern, Fast, >4GB support)").tag("Kalam")
+                        Text("Legacy (Fallback for older devices)").tag("Legacy")
+                    }
+                    .pickerStyle(RadioGroupPickerStyle())
 
-            Section(header: Text("Updates").font(.headline)) {
-                Toggle("Automatically check for updates", isOn: $autoCheckUpdates)
-                Toggle("Automatically download new updates", isOn: $autoDownloadUpdates)
-                    .disabled(!autoCheckUpdates)
-            }
-            .padding(.bottom, 10)
+                }
+                .padding(.bottom, 10)
 
-            Section(header: Text("Privacy").font(.headline)) {
-                Toggle("Send anonymous crash reports and usage logs", isOn: $sendCrashReports)
-                Text("We genuinely don't collect your data. This only sends error logs if enabled.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                Section(header: Text("File Explorer").font(.headline)) {
+                    Toggle("Show hidden files on Local Mac", isOn: $showHiddenFilesLocal)
+                    Toggle("Show hidden files on Android Device", isOn: $showHiddenFilesMTP)
+                }
+                .padding(.bottom, 10)
+
+                Section(header: Text("Updates").font(.headline)) {
+                    Toggle("Automatically check for updates", isOn: $autoCheckUpdates)
+                    Toggle("Automatically download new updates", isOn: $autoDownloadUpdates)
+                        .disabled(!autoCheckUpdates)
+                }
+                .padding(.bottom, 10)
+
+                Section(header: Text("Privacy").font(.headline)) {
+                    Toggle("Send anonymous crash reports and usage logs", isOn: $sendCrashReports)
+                    Text("We genuinely don't collect your data. This only sends error logs if enabled.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
+            .padding(20)
         }
-        .padding(20)
-        .frame(width: 480, height: 380)
+        .frame(width: 480)
     }
 }
