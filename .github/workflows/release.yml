@@ -43,7 +43,7 @@ jobs:
         arch -x86_64 /usr/local/bin/brew install pkg-config libusb
 
     - name: Build and package all release targets
-      run: bash scripts/release.sh "${{ github.ref_name }}" --universal
+      run: bash scripts/release.sh "${{ github.ref_name }}" --all
 
     - name: Release
       uses: softprops/action-gh-release@v2
