@@ -66,7 +66,6 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
         alert.informativeText = "Downloading version \(version). Please wait."
         alert.alertStyle = .informational
         
-        // Show an indeterminate progress indicator in the alert
         let progress = NSProgressIndicator(frame: NSRect(x: 0, y: 0, width: 200, height: 20))
         progress.isIndeterminate = true
         progress.startAnimation(nil)
@@ -113,7 +112,6 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
         
         let response = alert.runModal()
         if response == .alertFirstButtonReturn {
-            // Cancel clicked
             downloadTask.cancel()
         }
     }
@@ -126,20 +124,17 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
         alert.addButton(withTitle: "Download")
         alert.addButton(withTitle: "Cancel")
         
-        // Limit the width of the informative text to avoid giant alerts
         let accessory = NSTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 150))
         accessory.string = releaseNotes
         accessory.isEditable = false
         accessory.drawsBackground = false
         accessory.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         
-        // Use scroll view
         let scroll = NSScrollView(frame: accessory.frame)
         scroll.documentView = accessory
         scroll.hasVerticalScroller = true
         alert.accessoryView = scroll
         
-        // Clear informative text since we are using accessory view for notes
         alert.informativeText = "Version \(version) is now available. You are running version \(AppVersion.current)."
         
         let response = alert.runModal()

@@ -1,16 +1,11 @@
 import Foundation
 
-// MARK: - MTPStorageType
 
 public enum MTPStorageType: String, Codable, Sendable, CaseIterable {
     case `internal` = "Internal Storage"
     case sdCard = "SD Card"
     case unknown = "Unknown Storage"
 
-    /// MTP storage type codes (StorageInfo dataset, field StorageType):
-    /// - 0x0002: Removable ROM
-    /// - 0x0004: Removable RAM (SD card)
-    /// - Parameter code: The raw MTP storage type code.
     public static func fromMTPCode(_ code: UInt16) -> MTPStorageType {
         switch code {
         case 0x0001, 0x0003:
@@ -34,7 +29,6 @@ public enum MTPStorageType: String, Codable, Sendable, CaseIterable {
     }
 }
 
-// MARK: - MTPStorageInfo
 
 public struct MTPStorageInfo: Identifiable, Codable, Hashable, Sendable {
 
@@ -48,11 +42,9 @@ public struct MTPStorageInfo: Identifiable, Codable, Hashable, Sendable {
 
     public let storageType: MTPStorageType
 
-    // MARK: - Identifiable
 
     public var id: UInt32 { storageId }
 
-    // MARK: - Computed – Formatted Strings
 
     public var formattedTotal: String {
         FormatUtils.formatBytes(totalCapacity)
@@ -67,7 +59,6 @@ public struct MTPStorageInfo: Identifiable, Codable, Hashable, Sendable {
         return FormatUtils.formatBytes(used)
     }
 
-    /// Returns 0.0 if the total capacity is zero to avoid division by zero.
     public var usagePercent: Double {
         guard totalCapacity > 0 else { return 0.0 }
         let used = Double(totalCapacity - min(freeSpace, totalCapacity))
@@ -80,7 +71,6 @@ public struct MTPStorageInfo: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
-// MARK: - MTPStorageInfo Mock Data
 
 extension MTPStorageInfo {
     public static let mockInternal = MTPStorageInfo(
@@ -100,7 +90,6 @@ extension MTPStorageInfo {
     )
 }
 
-// MARK: - MTPDeviceInfo
 
 public struct MTPDeviceInfo: Identifiable, Codable, Hashable, Sendable {
 
@@ -114,18 +103,15 @@ public struct MTPDeviceInfo: Identifiable, Codable, Hashable, Sendable {
 
     public var storages: [MTPStorageInfo]
 
-    // MARK: - Identifiable
 
     public var id: String {
         "\(manufacturer)_\(model)_\(serialNumber)"
     }
 
-    // MARK: - Computed Properties
 
     public var displayName: String {
         if manufacturer.isEmpty { return model }
         if model.isEmpty { return manufacturer }
-        // Avoid repetition when the model already contains the manufacturer name.
         if model.localizedCaseInsensitiveContains(manufacturer) {
             return model
         }
@@ -161,7 +147,6 @@ public struct MTPDeviceInfo: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
-// MARK: - MTPDeviceInfo Mock Data
 
 extension MTPDeviceInfo {
     public static let mock = MTPDeviceInfo(

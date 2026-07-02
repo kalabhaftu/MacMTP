@@ -1,6 +1,5 @@
 import SwiftUI
 
-// MARK: - Sidebar Data Model
 
 struct SidebarItem: Identifiable, Hashable {
     var id: String
@@ -14,7 +13,6 @@ struct SidebarItem: Identifiable, Hashable {
     var freeSpace: Int64 = 0
 }
 
-// MARK: - Sidebar Section Type
 
 enum SidebarSection: String, CaseIterable {
     case favorites = "Favorites"
@@ -22,14 +20,11 @@ enum SidebarSection: String, CaseIterable {
     case mtpDevice = "Android Device"
 }
 
-// MARK: - Sidebar View
 
-/// mounted volumes (Macintosh HD, external drives, USB disks, DMGs), and
 struct SidebarView: View {
     @Binding var selectedItem: String?
     @Binding var currentLocalPath: String
     
-    // MTP device integration
     var isMTPConnected: Bool = false
     var mtpDeviceName: String = ""
     var mtpStorages: [MTPStorageInfo] = []
@@ -38,7 +33,6 @@ struct SidebarView: View {
     @State private var volumes: [SidebarItem] = []
     @State private var refreshTimer: Timer? = nil
     
-    // MARK: - Quick Links (Favorites)
     
     private var quickLinks: [SidebarItem] {
         let home = FileManager.default.homeDirectoryForCurrentUser
@@ -95,28 +89,23 @@ struct SidebarView: View {
         ]
     }
     
-    // MARK: - Body
     
     var body: some View {
         List(selection: $selectedItem) {
-            // ── Favorites Section ──
             Section(header: sectionHeader("Favorites", icon: "star.fill")) {
                 ForEach(quickLinks) { item in
                     sidebarRow(item: item)
                 }
             }
             
-            // ── Locations Section (Volumes) ──
             Section(header: sectionHeader("Locations", icon: "externaldrive.fill")) {
                 ForEach(volumes) { volume in
                     sidebarRow(item: volume)
                 }
             }
             
-            // ── MTP Device Section ──
             if isMTPConnected {
                 Section(header: sectionHeader("Android Device", icon: "ipad.and.iphone")) {
-                    // Device header row
                     HStack(spacing: 8) {
                         Image(systemName: "ipad.and.iphone")
                             .foregroundColor(.green)
@@ -127,7 +116,6 @@ struct SidebarView: View {
                     }
                     .padding(.vertical, 2)
                     
-                    // Storage entries
                     ForEach(mtpStorages) { storage in
                         Button(action: {
                             onMTPStorageSelected?(storage.storageId)
@@ -142,7 +130,6 @@ struct SidebarView: View {
                                         .font(.system(size: 12))
                                         .lineLimit(1)
                                     
-                                    // Storage usage bar
                                     GeometryReader { geo in
                                         ZStack(alignment: .leading) {
                                             RoundedRectangle(cornerRadius: 2)
@@ -181,7 +168,6 @@ struct SidebarView: View {
         }
     }
     
-    // MARK: - Sidebar Row
     
     private func sidebarRow(item: SidebarItem) -> some View {
         HStack(spacing: 8) {
@@ -194,7 +180,6 @@ struct SidebarView: View {
                     .font(.system(size: 12))
                     .lineLimit(1)
                 
-                // Show capacity for volumes
                 if item.isVolume && item.totalCapacity > 0 {
                     Text("\(formatBytes(item.freeSpace)) free")
                         .font(.system(size: 10))
@@ -204,7 +189,6 @@ struct SidebarView: View {
             
             Spacer()
             
-            // Eject button for removable volumes
             if item.isEjectable {
                 Button(action: {
                     ejectVolume(path: item.path)
@@ -221,7 +205,6 @@ struct SidebarView: View {
         .tag(item.id)
     }
     
-    // MARK: - Section Header
     
     private func sectionHeader(_ title: String, icon: String) -> some View {
         HStack(spacing: 4) {
@@ -233,12 +216,10 @@ struct SidebarView: View {
         .foregroundColor(.secondary)
     }
     
-    // MARK: - Volume Discovery
     
     private func refreshVolumes() {
         var detectedVolumes: [SidebarItem] = []
         
-        // Always add System Volume (Macintosh HD)
         let systemCapacity = getVolumeCapacity(path: "/")
         detectedVolumes.append(
             SidebarItem(
@@ -252,7 +233,6 @@ struct SidebarView: View {
             )
         )
         
-        // Discover all mounted volumes
         let keys: [URLResourceKey] = [
             .volumeNameKey,
             .volumeIsRemovableKey,
@@ -268,9 +248,7 @@ struct SidebarView: View {
             options: [.skipHiddenVolumes]
         ) {
             for url in volumeURLs {
-                // Skip the root system volume (already added)
                 if url.path == "/" { continue }
-                // Skip system volumes like /System, /Library, etc.
                 if url.path.hasPrefix("/System") { continue }
                 
                 do {
@@ -282,7 +260,6 @@ struct SidebarView: View {
                     let totalCapacity = Int64(resourceValues.volumeTotalCapacity ?? 0)
                     let freeSpace = Int64(resourceValues.volumeAvailableCapacity ?? 0)
                     
-                    // Determine icon
                     let icon: String
                     if isRemovable {
                         icon = "externaldrive.fill"
@@ -313,25 +290,21 @@ struct SidebarView: View {
         self.volumes = detectedVolumes
     }
     
-    // MARK: - Handle Selection
     
     private func handleSelection(_ itemId: String?) {
         guard let itemId = itemId else { return }
         
-        // Check quick links
         if let matched = quickLinks.first(where: { $0.id == itemId }) {
             currentLocalPath = matched.path
             return
         }
         
-        // Check volumes
         if let matched = volumes.first(where: { $0.id == itemId }) {
             currentLocalPath = matched.path
             return
         }
     }
     
-    // MARK: - Volume Refresh Timer
     
     private func startVolumeRefreshTimer() {
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
@@ -346,7 +319,6 @@ struct SidebarView: View {
         refreshTimer = nil
     }
     
-    // MARK: - Helpers
     
     private func getSystemVolumeName() -> String {
         let url = URL(fileURLWithPath: "/")

@@ -5,7 +5,6 @@ import SwiftUI
 public final class MTPDeviceManager: ObservableObject {
     public static let shared = MTPDeviceManager()
 
-    // MARK: - Published Properties
 
     @Published public var isConnected = false
     @Published public var deviceInfo: MTPDeviceInfo?
@@ -16,28 +15,23 @@ public final class MTPDeviceManager: ObservableObject {
     @Published public var isLoading = false
     @Published public var errorMessage: String?
 
-    // MARK: - Navigation History
 
     private var backHistory: [String] = []
     private var forwardHistory: [String] = []
 
-    // MARK: - Private state
 
     private let bridge = KalamBridge.shared
     private let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        // Go constant format: "2006-01-02T15:04:05.000Z"
         formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         return formatter
     }()
-    /// discard results from stale (pre-navigation) work.
     private var refreshGeneration: UInt64 = 0
 
     private init() {}
 
-    // MARK: - Navigation History Helpers
 
     public var canNavigateBack: Bool {
         !backHistory.isEmpty
@@ -47,7 +41,6 @@ public final class MTPDeviceManager: ObservableObject {
         !forwardHistory.isEmpty
     }
 
-    // MARK: - Device Lifecycle
 
     public func connectDevice() async {
         guard !isLoading else { return }
@@ -57,10 +50,8 @@ public final class MTPDeviceManager: ObservableObject {
         do {
             let goDevInfo = try await bridge.initialize()
             
-            // Fetch storages immediately
             let goStorages = try await bridge.fetchStorages()
             
-            // Map MTPStorageInfo
             let mappedStorages = goStorages.map { item -> MTPStorageInfo in
                 let desc = item.Info.StorageDescription
                 let type = MTPStorageType.fromMTPCode(item.Info.StorageType)
@@ -73,7 +64,6 @@ public final class MTPDeviceManager: ObservableObject {
                 )
             }
 
-            // Map MTPDeviceInfo
             let mappedDevInfo = MTPDeviceInfo(
                 manufacturer: goDevInfo.mtpDeviceInfo?.Manufacturer ?? goDevInfo.usbDeviceInfo?.Manufacturer ?? "Unknown",
                 model: goDevInfo.mtpDeviceInfo?.Model ?? goDevInfo.usbDeviceInfo?.Product ?? "MTP Device",
@@ -86,7 +76,6 @@ public final class MTPDeviceManager: ObservableObject {
             self.storages = mappedStorages
             self.isConnected = true
             
-            // Automatically select first storage if none selected
             if let firstStorage = mappedStorages.first {
                 self.selectedStorageId = firstStorage.storageId
                 self.currentMTPPath = "/"
@@ -111,7 +100,6 @@ public final class MTPDeviceManager: ObservableObject {
         isLoading = true
         errorMessage = nil
         
-        // Notify about interrupted transfer if one is active
         if FileTransferService.shared.activeBatch?.isActive == true {
             Task { @MainActor in
                 FileTransferService.shared.cancelTransfer()
@@ -170,7 +158,6 @@ public final class MTPDeviceManager: ObservableObject {
         }
     }
 
-    // MARK: - Directory Navigation
 
     public func refreshFiles() async {
         guard isConnected, let storageId = selectedStorageId else { return }
@@ -180,7 +167,6 @@ public final class MTPDeviceManager: ObservableObject {
         do {
             let goFiles = try await bridge.listDirectory(storageId: storageId, path: currentMTPPath)
             
-            // Map GoFileInfo to FileNode
             let mapped = goFiles.map { item -> FileNode in
                 let modDate = dateFormatter.date(from: item.dateAdded) ?? Date()
                 return FileNode(
@@ -197,7 +183,6 @@ public final class MTPDeviceManager: ObservableObject {
             }
             self.mtpFiles = mapped
             
-            // MTP directory sizes are too expensive to calculate automatically as recursive Walk blocks the single-threaded MTP session.
         } catch {
             ErrorLogger.log(error, message: "Failed to list MTP directory")
             self.errorMessage = "Failed to list directory: \(error.localizedDescription)"
@@ -254,7 +239,6 @@ public final class MTPDeviceManager: ObservableObject {
         await refreshFiles()
     }
 
-    // MARK: - File Operations
 
     public func createFolder(name: String) async throws {
         guard isConnected, let storageId = selectedStorageId else {

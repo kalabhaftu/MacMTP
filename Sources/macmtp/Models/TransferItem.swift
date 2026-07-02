@@ -1,7 +1,6 @@
 import Foundation
 import SwiftUI
 
-// MARK: - TransferDirection
 
 public enum TransferDirection: String, Codable, Sendable, CaseIterable {
     case localToMTP = "Local → Device"
@@ -26,7 +25,6 @@ public enum TransferDirection: String, Codable, Sendable, CaseIterable {
     }
 }
 
-// MARK: - TransferStatus
 
 public enum TransferStatus: String, Codable, Sendable, CaseIterable {
     case queued = "Queued"
@@ -94,7 +92,6 @@ public enum TransferStatus: String, Codable, Sendable, CaseIterable {
     }
 }
 
-// MARK: - ConflictResolution
 
 public enum ConflictResolution: String, Codable, Sendable, CaseIterable, Identifiable {
     case overwrite = "Overwrite"
@@ -153,7 +150,6 @@ public enum ConflictResolution: String, Codable, Sendable, CaseIterable, Identif
     }
 }
 
-// MARK: - TransferItem
 
 public struct TransferItem: Identifiable, Hashable, Sendable {
 
@@ -181,7 +177,6 @@ public struct TransferItem: Identifiable, Hashable, Sendable {
 
     public var estimatedTimeRemaining: TimeInterval?
 
-    // MARK: - Initializer
 
     public init(
         id: UUID = UUID(),
@@ -211,9 +206,7 @@ public struct TransferItem: Identifiable, Hashable, Sendable {
         self.estimatedTimeRemaining = estimatedTimeRemaining
     }
 
-    // MARK: - Computed Properties
 
-    /// Returns 1.0 for zero-byte files that have completed or are in progress.
     public var progress: Double {
         guard fileSize > 0 else {
             return status == .completed ? 1.0 : 0.0
@@ -230,7 +223,6 @@ public struct TransferItem: Identifiable, Hashable, Sendable {
         if let eta = estimatedTimeRemaining, eta > 0, eta.isFinite {
             return FormatUtils.formatDuration(eta)
         }
-        // Fall back to computing from speed if the explicit ETA is absent.
         guard speed > 0 else { return "--" }
         let remaining = Double(fileSize - bytesTransferred)
         let computedETA = remaining / speed
@@ -255,7 +247,6 @@ public struct TransferItem: Identifiable, Hashable, Sendable {
         return FormatUtils.formatDuration(elapsed)
     }
 
-    // MARK: - Hashable
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(id)
@@ -266,7 +257,6 @@ public struct TransferItem: Identifiable, Hashable, Sendable {
     }
 }
 
-// MARK: - TransferItem Mutating Helpers
 
 extension TransferItem {
 
@@ -277,7 +267,6 @@ extension TransferItem {
         }
     }
 
-    /// - Parameter bytes: The total number of bytes transferred so far.
     public mutating func updateProgress(bytesTransferred bytes: Int64) {
         bytesTransferred = bytes
         if let start = startTime {
@@ -296,7 +285,6 @@ extension TransferItem {
         estimatedTimeRemaining = 0
     }
 
-    /// - Parameter message: A human-readable error description.
     public mutating func markFailed(_ message: String) {
         status = .failed
         error = message
@@ -320,7 +308,6 @@ extension TransferItem {
     }
 }
 
-// MARK: - Mock Data
 
 extension TransferItem {
     public static let mockData: [TransferItem] = [

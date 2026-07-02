@@ -5,11 +5,9 @@ import IOKit.usb
 @MainActor
 public final class USBWatcher: ObservableObject, @unchecked Sendable {
     
-    // MARK: - Singleton
     
     public static let shared = USBWatcher()
     
-    // MARK: - Private Properties
     
     private var notificationPort: IONotificationPortRef?
     private var addedIterator: io_iterator_t = 0
@@ -17,13 +15,11 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
     private var runLoopSource: CFRunLoopSource?
     private var isWatching = false
     
-    // MARK: - Initializer
     
     private init() {}
     
 
     
-    // MARK: - Public Methods
     
     public func startWatching() {
         guard !isWatching else { return }
@@ -33,22 +29,16 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         }
         self.notificationPort = port
         
-        // Get run loop source and add to main run loop
         self.runLoopSource = IONotificationPortGetRunLoopSource(port).takeUnretainedValue()
         CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
         
-        // Set up matching dictionaries for USB devices
-        // We match any USB device and filter inside the callback.
-        // Android MTP devices typically present as USB devices.
         guard let matchingDict1 = IOServiceMatching(kIOUSBDeviceClassName),
               let matchingDict2 = IOServiceMatching(kIOUSBDeviceClassName) else {
             return
         }
         
-        // Self pointer to pass to C callbacks
         let selfPtr = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
         
-        // 1. Register for device insertion
         let addedResult = IOServiceAddMatchingNotification(
             port,
             kIOPublishNotification,
@@ -68,12 +58,10 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
             return
         }
         
-        // Arm the iterator by consuming any existing devices
         Task { @MainActor in
             await handleDevicesAdded(iterator: addedIterator, isInitialScan: true)
         }
         
-        // 2. Register for device removal
         let removedResult = IOServiceAddMatchingNotification(
             port,
             kIOTerminatedNotification,
@@ -93,7 +81,6 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
             return
         }
         
-        // Arm the iterator by consuming existing terminated entries
         Task { @MainActor in
             await handleDevicesRemoved(iterator: removedIterator)
         }
@@ -127,7 +114,6 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         isWatching = false
     }
     
-    // MARK: - Private Event Handlers
     
     private func handleDevicesAdded(iterator: io_iterator_t, isInitialScan: Bool = false) async {
         var deviceCount = 0

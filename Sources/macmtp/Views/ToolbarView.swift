@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// Provides quick access to clipboard operations, folder creation, and view refresh.
 struct ToolbarView: View {
     var isMTPConnected: Bool
     var deviceName: String
@@ -18,13 +17,11 @@ struct ToolbarView: View {
     
     var body: some View {
         HStack(spacing: 0) {
-            // ── Device Status Panel ──
             deviceStatusPanel
                 .padding(.leading, 16)
             
             Spacer()
             
-            // ── File Operation Buttons ──
             fileOperationButtons
                 .padding(.trailing, 16)
         }
@@ -32,11 +29,9 @@ struct ToolbarView: View {
         .background(toolbarBackground)
     }
     
-    // MARK: - Device Status Panel
     
     private var deviceStatusPanel: some View {
         HStack(spacing: 10) {
-            // Device icon with connection indicator
             ZStack {
                 Image(systemName: isMTPConnected ? "ipad.and.iphone" : "ipad.and.iphone.slash")
                     .font(.system(size: 22, weight: .medium))
@@ -64,11 +59,9 @@ struct ToolbarView: View {
         }
     }
     
-    // MARK: - File Operation Buttons
     
     private var fileOperationButtons: some View {
         HStack(spacing: 6) {
-            // Select All
             ToolbarButton(
                 icon: "checkmark.circle",
                 label: "Select All",
@@ -78,7 +71,6 @@ struct ToolbarView: View {
             
             ToolbarDivider()
             
-            // Cut
             ToolbarButton(
                 icon: "scissors",
                 label: "Cut",
@@ -87,7 +79,6 @@ struct ToolbarView: View {
                 action: onCut
             )
             
-            // Copy
             ToolbarButton(
                 icon: "doc.on.doc",
                 label: "Copy",
@@ -96,7 +87,6 @@ struct ToolbarView: View {
                 action: onCopy
             )
             
-            // Paste
             ToolbarButton(
                 icon: "doc.on.clipboard",
                 label: "Paste",
@@ -106,7 +96,6 @@ struct ToolbarView: View {
             
             ToolbarDivider()
             
-            // Delete
             ToolbarButton(
                 icon: "trash",
                 label: "Delete",
@@ -116,7 +105,6 @@ struct ToolbarView: View {
                 action: onDelete
             )
             
-            // New Folder
             ToolbarButton(
                 icon: "folder.badge.plus",
                 label: "New Folder",
@@ -126,7 +114,6 @@ struct ToolbarView: View {
             
             ToolbarDivider()
             
-            // Refresh
             Button(action: {
                 withAnimation(.easeInOut(duration: 0.3)) {
                     isRefreshing = true
@@ -147,7 +134,6 @@ struct ToolbarView: View {
             
             ToolbarDivider()
             
-            // Settings
             Button(action: {
                 if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
                     appDelegate.perform(NSSelectorFromString("showPreferences"))
@@ -161,7 +147,6 @@ struct ToolbarView: View {
             .help("Preferences")
             .frame(width: 30, height: 30)
 
-            // About
             Button(action: {
                 if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
                     appDelegate.perform(NSSelectorFromString("showAbout"))
@@ -177,7 +162,6 @@ struct ToolbarView: View {
         }
     }
     
-    // MARK: - Toolbar Background
     
     private var toolbarBackground: some View {
         VStack(spacing: 0) {
@@ -187,7 +171,6 @@ struct ToolbarView: View {
     }
 }
 
-// MARK: - Toolbar Button Component
 
 struct ToolbarButton: View {
     let icon: String
@@ -237,7 +220,6 @@ struct ToolbarButton: View {
     }
 }
 
-// MARK: - Toolbar Divider
 
 struct ToolbarDivider: View {
     var body: some View {

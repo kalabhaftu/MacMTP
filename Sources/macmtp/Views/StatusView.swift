@@ -23,14 +23,12 @@ struct StatusView: View {
     
     var body: some View {
         HStack(spacing: 0) {
-            // ── Local Pane Status ──
             localStatusPanel
                 .frame(maxWidth: .infinity)
             
             Divider()
                 .frame(height: 16)
             
-            // ── Transfer Status (if active) ──
             if isTransferring {
                 transferStatusPanel
                     .frame(width: 200)
@@ -39,7 +37,6 @@ struct StatusView: View {
                     .frame(height: 16)
             }
             
-            // ── MTP Pane Status ──
             mtpStatusPanel
                 .frame(maxWidth: .infinity)
         }
@@ -56,7 +53,6 @@ struct StatusView: View {
         }
     }
     
-    // MARK: - Local Status Panel
     
     private var localStatusPanel: some View {
         HStack(spacing: 8) {
@@ -64,7 +60,6 @@ struct StatusView: View {
                 .font(.system(size: 11))
                 .foregroundColor(.secondary)
 
-            // Item count + size info
             VStack(alignment: .leading, spacing: 0) {
                 Text(itemCountText(total: localItemCount, selected: localSelectedCount))
                     .font(.system(size: 11))
@@ -82,9 +77,7 @@ struct StatusView: View {
 
             Spacer()
 
-            // Disk capacity
             HStack(spacing: 4) {
-                // Mini capacity bar
                 capacityBar(free: localFreeBytes, total: localTotalBytes)
 
                 Text("\(formatBytes(localFreeBytes)) free")
@@ -95,11 +88,9 @@ struct StatusView: View {
         .padding(.horizontal, 12)
     }
     
-    // MARK: - MTP Status Panel
     
     private var mtpStatusPanel: some View {
         HStack(spacing: 8) {
-            // Disk capacity
             if isMTPConnected {
                 HStack(spacing: 4) {
                     Text("\(formatBytes(mtpFreeBytes)) free")
@@ -112,7 +103,6 @@ struct StatusView: View {
 
             Spacer()
 
-            // Item count + size info
             if isMTPConnected {
                 VStack(alignment: .trailing, spacing: 0) {
                     Text(itemCountText(total: mtpItemCount, selected: mtpSelectedCount))
@@ -141,7 +131,6 @@ struct StatusView: View {
         .padding(.horizontal, 12)
     }
     
-    // MARK: - Transfer Status Panel
     
     private var transferStatusPanel: some View {
         HStack(spacing: 6) {
@@ -162,7 +151,6 @@ struct StatusView: View {
         .padding(.horizontal, 8)
     }
     
-    // MARK: - Capacity Bar
     
     private func capacityBar(free: Int64, total: Int64) -> some View {
         let ratio: Double
@@ -184,7 +172,6 @@ struct StatusView: View {
             }
     }
     
-    // MARK: - Helpers
     
     private func itemCountText(total: Int, selected: Int) -> String {
         if selected > 0 {

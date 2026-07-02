@@ -2,9 +2,7 @@ import Cocoa
 import SwiftUI
 import Sentry
 
-// MARK: - Application Delegate
 
-/// creates the native menu bar, and handles application-level events
 class AppDelegate: NSObject, NSApplicationDelegate {
     var window: NSWindow!
     var preferencesWindowController: NSWindowController?
@@ -12,10 +10,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var helpWindowController: NSWindowController?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Create the main SwiftUI content view
         let contentView = ContentView()
         
-        // Configure the main window
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1100, height: 720),
             styleMask: [
@@ -39,10 +35,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.makeKeyAndOrderFront(nil)
         window.isReleasedWhenClosed = false
         
-        // Build the menu bar
         setupMainMenu()
         
-        // Initialize Sentry if privacy toggle is enabled (defaults to true)
         let sendReports = UserDefaults.standard.object(forKey: "sendCrashReports") as? Bool ?? true
         if sendReports {
             SentrySDK.start { options in
@@ -51,16 +45,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 options.sendDefaultPii = true
                 options.releaseName = AppVersion.current
                 
-                // Recommended by Sentry for performance profiling
                 options.tracesSampleRate = 1.0
                 
             }
         }
         
-        // Start USB device monitoring (will automatically connect if a device is already present and auto-detect is enabled)
         USBWatcher.shared.startWatching()
         
-        // Check for updates
         Task {
             let autoCheck = UserDefaults.standard.object(forKey: "autoCheckUpdates") as? Bool ?? true
             if autoCheck {
@@ -69,7 +60,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         
-        // Bring the app to the foreground
         NSApp.activate(ignoringOtherApps: true)
     }
     
@@ -87,12 +77,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
     
-    // MARK: - Menu Bar Setup
     
     @MainActor private func setupMainMenu() {
         let mainMenu = NSMenu()
         
-        // ── Application Menu ──
         let appMenuItem = NSMenuItem()
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "About macMTP", action: #selector(showAbout), keyEquivalent: "")
@@ -110,7 +98,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         appMenuItem.submenu = appMenu
         mainMenu.addItem(appMenuItem)
         
-        // ── File Menu ──
         let fileMenuItem = NSMenuItem()
         let fileMenu = NSMenu(title: "File")
         fileMenu.addItem(withTitle: "New Folder", action: nil, keyEquivalent: "")
@@ -119,7 +106,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         fileMenuItem.submenu = fileMenu
         mainMenu.addItem(fileMenuItem)
         
-        // ── Edit Menu ──
         let editMenuItem = NSMenuItem()
         let editMenu = NSMenu(title: "Edit")
         editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "")
@@ -129,7 +115,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         editMenuItem.submenu = editMenu
         mainMenu.addItem(editMenuItem)
         
-        // ── View Menu ──
         let viewMenuItem = NSMenuItem()
         let viewMenu = NSMenu(title: "View")
         viewMenu.addItem(withTitle: "Refresh", action: nil, keyEquivalent: "")
@@ -138,7 +123,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         viewMenuItem.submenu = viewMenu
         mainMenu.addItem(viewMenuItem)
         
-        // ── Window Menu ──
         let windowMenuItem = NSMenuItem()
         let windowMenu = NSMenu(title: "Window")
         windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
@@ -146,7 +130,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         windowMenuItem.submenu = windowMenu
         mainMenu.addItem(windowMenuItem)
         
-        // ── Help Menu ──
         let helpMenuItem = NSMenuItem()
         let helpMenu = NSMenu(title: "Help")
         helpMenu.addItem(withTitle: "macMTP Help", action: #selector(showHelp), keyEquivalent: "?")
@@ -157,7 +140,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.mainMenu = mainMenu
     }
     
-    // MARK: - Menu Actions
     
     @MainActor @objc private func showAbout() {
         if let existing = aboutWindowController {
@@ -236,7 +218,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-// MARK: - Application Entry Point
 
 let app = NSApplication.shared
 let delegate = AppDelegate()

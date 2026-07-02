@@ -30,16 +30,13 @@ public enum KalamError: Error, LocalizedError {
     }
 }
 
-// MARK: - Continuation Registry for C Callbacks
 
 private final class KalamRegistry: @unchecked Sendable {
     static let shared = KalamRegistry()
     private let lock = NSLock()
 
-    // Continuations for synchronous-like operations
     private var doneContinuation: CheckedContinuation<String, Error>?
     
-    // Callbacks for transfers
     private var preprocessCallback: ((String) -> Void)?
     private var progressCallback: ((String) -> Void)?
     private var transferDoneCallback: ((String) -> Void)?
@@ -118,7 +115,6 @@ private final class KalamRegistry: @unchecked Sendable {
     }
 }
 
-// MARK: - Global C-convention callbacks
 
 private let bounceQueue = DispatchQueue(label: "com.macmtp.callback-bounce", qos: .userInitiated)
 
@@ -162,7 +158,6 @@ public func macMTP_transfer_done_callback(jsonPtr: UnsafeMutablePointer<CChar>?)
     }
 }
 
-// MARK: - KalamBridge Actor
 
 public actor KalamBridge {
     public static let shared = KalamBridge()
@@ -175,7 +170,6 @@ public actor KalamBridge {
         self.mtpQueue = DispatchQueue(label: "com.macmtp.kalam", qos: .userInitiated)
     }
 
-    // MARK: - Helper execution wrappers
 
     internal func executeMTP<T: Decodable>(_ operation: @escaping @Sendable () -> Void) async throws -> T {
         let jsonString = try await withCheckedThrowingContinuation { continuation in
@@ -221,7 +215,6 @@ public actor KalamBridge {
         }
     }
 
-    // MARK: - Public APIs
 
     public func initialize() async throws -> GoDeviceInfoData {
         let result: GoDeviceInfoResult = try await executeMTP {

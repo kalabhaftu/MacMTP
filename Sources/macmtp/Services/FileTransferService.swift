@@ -9,11 +9,9 @@ extension Notification.Name {
 @MainActor
 public final class FileTransferService: ObservableObject {
     
-    // MARK: - Singleton
     
     public static let shared = FileTransferService()
     
-    // MARK: - Published Properties
     
     @Published public var activeBatch: TransferBatch?
     
@@ -23,7 +21,6 @@ public final class FileTransferService: ObservableObject {
     
     @Published public var totalFileCount: Int = 0
     
-    // MARK: - Private Properties
     
     private let bridge = KalamBridge.shared
     private var cancelRequested = false
@@ -43,11 +40,9 @@ public final class FileTransferService: ObservableObject {
     
     private var verifiedDirectories = Set<String>()
     
-    // MARK: - Initializer
     
     private init() {}
     
-    // MARK: - Public Control Methods
     
     public func pauseTransfer() {
         guard activeBatch?.state == .transferring else { return }
@@ -65,7 +60,6 @@ public final class FileTransferService: ObservableObject {
         cancelRequested = true
         activeBatch?.cancel()
         
-        // If waiting in conflict dialog, cancel it
         if let continuation = conflictContinuation {
             conflictContinuation = nil
             continuation.resume(returning: (.cancel, true))
@@ -84,11 +78,7 @@ public final class FileTransferService: ObservableObject {
         showConflictDialog = false
     }
     
-    // MARK: - Core Transfer Operation
     
-    /// - Parameters:
-    ///   - destinationDir: The destination directory.
-    ///   - storageId: The MTP storage ID (required if direction is MTP-related).
     public func initiateTransfer(
         sources: [FileNode],
         destinationDir: String,
@@ -120,7 +110,6 @@ public final class FileTransferService: ObservableObject {
         }
     }
     
-    // MARK: - Notifications
     
     public func postTransferNotification(title: String, body: String, isError: Bool = false) {
         Task { @MainActor in
@@ -144,7 +133,6 @@ public final class FileTransferService: ObservableObject {
         }
     }
     
-    // MARK: - Private Transfer Logic
     
     private func performTransfer(
         sources: [FileNode],
@@ -159,7 +147,6 @@ public final class FileTransferService: ObservableObject {
         let shouldDeleteSourcesAfterTransfer = isCutOperation
         let sourcePathsToDeleteAfterTransfer = cutSourcePaths
 
-        // Reset all transient state for this batch.
         cancelRequested = false
         pauseRequested = false
         completedBytesAccumulated = 0
@@ -195,7 +182,6 @@ public final class FileTransferService: ObservableObject {
             storageId: mStorageId
         )
         
-        // 3. Resolve conflicts if any exist
         var chosenResolution: ConflictResolution = .askEach
         var rememberForBatch = true
         var resolvedConflicts: [String: ConflictResolution] = [:]
@@ -206,7 +192,6 @@ public final class FileTransferService: ObservableObject {
                 self.conflictingFiles = Array(conflicts[conflictProcessIndex...])
                 self.showConflictDialog = true
                 
-                // Await user input from the conflict sheet
                 (chosenResolution, rememberForBatch) = await withCheckedContinuation { continuation in
                     self.conflictContinuation = continuation
                 }
@@ -216,7 +201,6 @@ public final class FileTransferService: ObservableObject {
                     return
                 }
                 
-                // Apply resolution to current and possibly remaining conflicts
                 if rememberForBatch {
                     for i in conflictProcessIndex..<conflicts.count {
                         resolvedConflicts[conflicts[i].sourcePath] = chosenResolution
@@ -228,13 +212,11 @@ public final class FileTransferService: ObservableObject {
                 } else {
                     resolvedConflicts[conflicts[conflictProcessIndex].sourcePath] = chosenResolution
                     conflictProcessIndex += 1
-                    // Give the sheet time to dismiss before re-presenting
                     try? await Task.sleep(nanoseconds: 300_000_000)
                 }
             }
         }
         
-        // 4. Build final transfer items queue (files only; directories created by ensureDirectoryExists)
         var transferQueue: [TransferItem] = []
         for item in fileItems {
             let relativePath = item.relativePath
@@ -245,7 +227,6 @@ public final class FileTransferService: ObservableObject {
             
             var status: TransferStatus = .queued
             
-            // Apply conflict resolution choices
             if let fileResolution = resolvedConflicts[sourceFull] {
                 switch fileResolution {
                 case .skip:
@@ -284,7 +265,6 @@ public final class FileTransferService: ObservableObject {
         
         batch.start()
         
-        // Start transferring files
         await runQueue(
             storageId: mStorageId,
             direction: direction,
@@ -293,7 +273,6 @@ public final class FileTransferService: ObservableObject {
         )
     }
     
-    // MARK: - Queue Executer
     
     private func runQueue(
         storageId: UInt32,
@@ -303,7 +282,6 @@ public final class FileTransferService: ObservableObject {
     ) async {
         guard let batch = activeBatch else { return }
         
-        // Group items by their destination parent directory
         var groups: [String: [Int]] = [:] // destParent -> array of indices
         for index in batch.items.indices {
             if batch.items[index].status == .skipped { continue }
@@ -317,11 +295,9 @@ public final class FileTransferService: ObservableObject {
             if cancelRequested { break }
             
             do {
-                // Ensure destination parent directory exists
                 try await ensureDirectoryExists(path: destParent, direction: direction, storageId: storageId)
             } catch {
                 ErrorLogger.log(error, message: "FileTransferService: Failed to create parent directory \(destParent)")
-                // Mark all items in this group as failed
                 for idx in indices {
                     var itm = batch.items[idx]
                     itm.markFailed(error.localizedDescription)
@@ -333,7 +309,6 @@ public final class FileTransferService: ObservableObject {
             for chunkStart in stride(from: 0, to: indices.count, by: chunkSize) {
                 if cancelRequested { break }
                 
-                // Check for pause
                 while pauseRequested && !cancelRequested {
                     try? await Task.sleep(nanoseconds: 100_000_000)
                 }
@@ -343,7 +318,6 @@ public final class FileTransferService: ObservableObject {
                 let chunkIndices = Array(indices[chunkStart..<min(chunkStart + chunkSize, indices.count)])
                 let sources = chunkIndices.map { batch.items[$0].sourcePath }
                 
-                // Mark items as preprocessing
                 for idx in chunkIndices {
                     var itm = batch.items[idx]
                     itm.status = .preprocessing
@@ -384,7 +358,6 @@ public final class FileTransferService: ObservableObject {
                         )
                     }
                     
-                    // Mark all chunk items complete
                     for idx in chunkIndices {
                         var itm = batch.items[idx]
                         if itm.status != .completed {
@@ -396,7 +369,6 @@ public final class FileTransferService: ObservableObject {
                     
                 } catch {
                     ErrorLogger.log(error, message: "FileTransferService: File copy failed for chunk in \(destParent)")
-                    // Mark items that didn't complete as failed
                     for idx in chunkIndices {
                         var itm = batch.items[idx]
                         if itm.status != .completed && itm.bytesTransferred < itm.fileSize {
@@ -420,7 +392,6 @@ public final class FileTransferService: ObservableObject {
             let failedCount = batch.failedFileCount
             batch.complete()
             
-            // Handle cut operation: delete successfully transferred source files
             if shouldDeleteSourcesAfterTransfer && !sourcePathsToDeleteAfterTransfer.isEmpty {
                 let failedItems = batch.items.filter { $0.status == .failed }
                 if failedItems.isEmpty {
@@ -458,7 +429,6 @@ public final class FileTransferService: ObservableObject {
                     isError: false
                 )
             }
-            // Refresh directory listings to show newly copied files
             await MainActor.run {
                 switch direction {
                 case .localToMTP:
@@ -469,7 +439,6 @@ public final class FileTransferService: ObservableObject {
             }
         }
         
-        // Clean up batch after a delay — only clear if same batch is still set
         let completedBatch = batch
         Task {
             try? await Task.sleep(nanoseconds: 3_000_000_000)
@@ -479,7 +448,6 @@ public final class FileTransferService: ObservableObject {
         }
     }
     
-    // MARK: - Progress Updates
     
     private func updateActiveItemProgress(sourcePath: String, sent: Int64, speedMB: Double) {
         guard let batch = activeBatch,
@@ -503,11 +471,9 @@ public final class FileTransferService: ObservableObject {
         
         batch.items[index] = item
         
-        // Update batch-level speed tracking
         batch.recordSpeedSample(bytesTransferredNow: batch.totalBytesTransferred)
     }
     
-    // MARK: - Helper Types
     
     private struct ScannedItem {
         let absolutePath: String
@@ -517,7 +483,6 @@ public final class FileTransferService: ObservableObject {
         let modificationDate: Date
     }
     
-    // MARK: - Expanding Sources
     
     private func getRelativePath(path: String, baseParent: String) -> String {
         let prefix = baseParent.hasSuffix("/") ? baseParent : baseParent + "/"
@@ -574,10 +539,8 @@ public final class FileTransferService: ObservableObject {
         let date = (attributes[.modificationDate] as? Date) ?? Date()
         
         if isDir.boolValue {
-            // Add directory entry (size 0)
             list.append(ScannedItem(absolutePath: path, relativePath: relativePath, isDirectory: true, size: 0, modificationDate: date))
             
-            // Recurse children
             let contents = try fileManager.contentsOfDirectory(atPath: path)
             for child in contents {
                 let childPath = (path as NSString).appendingPathComponent(child)
@@ -625,7 +588,6 @@ public final class FileTransferService: ObservableObject {
         }
     }
     
-    // MARK: - Conflict Scanning
     
     private func scanForConflicts(
         items: [ScannedItem],
@@ -635,17 +597,13 @@ public final class FileTransferService: ObservableObject {
     ) async throws -> [ConflictingFilePair] {
         var conflicts: [ConflictingFilePair] = []
         
-        // Build destination paths we need to check
         let destinationPaths = items.map { item -> String in
             (destinationDir as NSString).appendingPathComponent(item.relativePath)
         }
         
         if direction == .localToMTP {
-            // MTP Destination checking: check if paths exist
             let existences = try await bridge.checkFilesExist(storageId: storageId, paths: destinationPaths)
             
-            // To get metadata (size/date) for conflicting files on MTP, we list the destination parent directory.
-            // Rather than listing for each file, we group by parent directories and walk them.
             var parentDirsToWalk = Set<String>()
             for (index, exists) in existences.enumerated() where exists {
                 let destPath = destinationPaths[index]
@@ -683,7 +641,6 @@ public final class FileTransferService: ObservableObject {
                 )
             }
         } else {
-            // Local Destination checking
             let fileManager = FileManager.default
             for (index, destPath) in destinationPaths.enumerated() {
                 var isDir: ObjCBool = false
@@ -712,30 +669,25 @@ public final class FileTransferService: ObservableObject {
         return conflicts
     }
     
-    // MARK: - Directory Helpers
     
     private func ensureDirectoryExists(path: String, direction: TransferDirection, storageId: UInt32) async throws {
         if verifiedDirectories.contains(path) { return }
         
         if direction == .localToMTP {
-            // Ensure MTP directory path exists
             let existResult = try await bridge.checkFilesExist(storageId: storageId, paths: [path])
             if let exists = existResult.first, exists {
                 verifiedDirectories.insert(path)
                 return
             }
             
-            // Recurse to ensure parent exists
             let parent = (path as NSString).deletingLastPathComponent
             if parent != "/" && !parent.isEmpty {
                 try await ensureDirectoryExists(path: parent, direction: direction, storageId: storageId)
             }
             
-            // Create this directory
             try await bridge.makeDirectory(storageId: storageId, path: path)
             verifiedDirectories.insert(path)
         } else {
-            // Local directory creation
             let fileManager = FileManager.default
             var isDir: ObjCBool = false
             if !fileManager.fileExists(atPath: path, isDirectory: &isDir) {
@@ -745,7 +697,6 @@ public final class FileTransferService: ObservableObject {
         }
     }
     
-    // MARK: - Date Parser
     
     private func parseGoDate(_ dateStr: String) -> Date {
         let formatter = DateFormatter()

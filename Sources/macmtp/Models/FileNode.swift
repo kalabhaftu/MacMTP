@@ -1,15 +1,11 @@
 import Foundation
 import SwiftUI
 
-/// `FileNode` is the primary data model used throughout macMTP to represent filesystem
-/// (objectId/parentId-based), enabling unified display and transfer logic.
 public struct FileNode: Identifiable, Hashable, Sendable {
 
-    // MARK: - Core Properties
 
     public let name: String
 
-    /// For local files this is the absolute POSIX path; for MTP files it is
     public let path: String
 
     public let parentPath: String
@@ -22,27 +18,18 @@ public struct FileNode: Identifiable, Hashable, Sendable {
 
     public let modificationDate: Date
 
-    // MARK: - MTP-Specific Properties
 
     public let objectId: UInt32
 
     public let parentId: UInt32
 
-    // MARK: - UI State
 
     public var isSelected: Bool
 
-    // MARK: - Identifiable
 
     public var id: String { path }
 
-    // MARK: - Initializer
 
-    /// - Parameters:
-    ///   - path: Full path within its file system.
-    ///   - isDirectory: Whether this entry is a directory.
-    ///   - modificationDate: Last-modification timestamp.
-    ///   - parentId: MTP parent object handle (default 0).
     public init(
         name: String,
         path: String,
@@ -67,23 +54,19 @@ public struct FileNode: Identifiable, Hashable, Sendable {
         self.calculatedSize = calculatedSize
     }
 
-    // MARK: - Computed Properties
 
-    /// or files without an extension.
     public var extensionName: String {
         guard !isDirectory else { return "" }
         let ext = (name as NSString).pathExtension.lowercased()
         return ext
     }
 
-    /// Returns "Folder" for directories and "File" for extensionless files.
     public var displayExtension: String {
         if isDirectory { return "Folder" }
         let ext = extensionName
         return ext.isEmpty ? "File" : ext.uppercased()
     }
 
-    /// counting style (base-10: KB, MB, GB).
     public var formattedSize: String {
         if let calculatedSize = calculatedSize {
             return FormatUtils.formatBytes(calculatedSize)
@@ -96,7 +79,6 @@ public struct FileNode: Identifiable, Hashable, Sendable {
         FormatUtils.formatDate(modificationDate)
     }
 
-    /// Directories use `folder.fill`. Files are mapped by extension to the most
     public var iconName: String {
         if isDirectory {
             return "folder.fill"
@@ -119,7 +101,6 @@ public struct FileNode: Identifiable, Hashable, Sendable {
         }
     }
 
-    // MARK: - Hashable
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(path)
@@ -130,10 +111,8 @@ public struct FileNode: Identifiable, Hashable, Sendable {
     }
 }
 
-// MARK: - Comparable
 
 extension FileNode: Comparable {
-    /// alphabetically by name using a case-insensitive, locale-aware comparison.
     public static func < (lhs: FileNode, rhs: FileNode) -> Bool {
         if lhs.isDirectory != rhs.isDirectory {
             return lhs.isDirectory
@@ -142,10 +121,8 @@ extension FileNode: Comparable {
     }
 }
 
-// MARK: - Convenience Factory Methods
 
 extension FileNode {
-    /// - Parameter url: A file URL pointing to a local file or directory.
     public static func fromLocalURL(_ url: URL) -> FileNode? {
         let fileManager = FileManager.default
         guard let attributes = try? fileManager.attributesOfItem(atPath: url.path) else {
@@ -166,7 +143,6 @@ extension FileNode {
         )
     }
 
-    /// - Parameter parentPath: The path of the parent directory to navigate to.
     public static func parentNavigationNode(for parentPath: String) -> FileNode {
         FileNode(
             name: "..",
@@ -177,7 +153,6 @@ extension FileNode {
     }
 }
 
-// MARK: - Directory Size Calculation
 
 extension FileNode {
 
@@ -200,13 +175,11 @@ extension FileNode {
                 return total
             }.value
         } else {
-            // MTP directory size calculations are disabled because recursive Walk blocks the single-threaded MTP session.
             return nil
         }
     }
 }
 
-// MARK: - Mock Data
 
 extension FileNode {
     public static let mockData: [FileNode] = {

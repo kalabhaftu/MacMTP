@@ -1,32 +1,26 @@
 import SwiftUI
 
-// MARK: - Content View
 
 struct ContentView: View {
-    // MARK: - Active Pane
 
     enum ActivePane: Equatable {
         case local
         case mtp
     }
 
-    // MARK: - Navigation State
 
     @State private var currentLocalPath: String = FileManager.default.homeDirectoryForCurrentUser.path
     @State private var currentMTPPath: String = "/"
     @State private var selectedLocalItems: Set<String> = []
     @State private var selectedMTPItems: Set<String> = []
 
-    // MARK: - Connection State
 
     @State private var isMTPConnected: Bool = false
     @State private var connectedDeviceName: String = "No Device Connected"
 
-    // MARK: - Sidebar State
 
     @State private var selectedSidebarItem: String? = "home"
 
-    // MARK: - Dialog State
 
     @State private var showConflictDialog: Bool = false
     @State private var activeConflictResolution: ConflictResolution? = nil
@@ -36,11 +30,9 @@ struct ContentView: View {
     @State private var pendingLocalPasteDestination: String = ""
     @State private var pendingLocalPasteIsCut: Bool = false
 
-    // MARK: - Transfer Progress State
 
     @State private var showTransferProgress: Bool = false
 
-    // MARK: - Status Bar State
 
     @State private var statusIsTransferring: Bool = false
     @State private var statusTransferProgress: Double = 0
@@ -51,30 +43,25 @@ struct ContentView: View {
     @State private var localDirSize: Int64 = 0
     @State private var mtpDirSize: Int64 = 0
 
-    // MARK: - Pane Focus
 
     @State private var activePane: ActivePane = .local
 
-    // MARK: - Local and MTP file bindings
 
     @State private var localFiles: [FileNode] = []
     @State private var mtpFiles: [FileNode] = []
 
-    // MARK: - MTP Storage Info
 
     @State private var mtpStorages: [MTPStorageInfo] = []
     @State private var mtpSelectedStorageId: UInt32? = nil
     @State private var mtpTotalBytes: Int64 = 0
     @State private var mtpFreeBytes: Int64 = 0
 
-    // MARK: - Alert State
 
     @State private var showDeleteConfirmation: Bool = false
     @State private var pendingDeletePaths: [String] = []
     @State private var showNewFolderDialog: Bool = false
     @State private var newFolderName: String = "New Folder"
 
-    // MARK: - Keyboard Event Monitor
 
     @State private var eventMonitor: Any? = nil
 
@@ -82,11 +69,9 @@ struct ContentView: View {
     @AppStorage("sendCrashReports") private var sendCrashReports: Bool = false
     @State private var showPrivacyPrompt: Bool = false
 
-    // MARK: - Body
 
     var body: some View {
         VStack(spacing: 0) {
-            // Top Toolbar
             ToolbarView(
                 isMTPConnected: isMTPConnected,
                 deviceName: connectedDeviceName,
@@ -101,9 +86,7 @@ struct ContentView: View {
                 selectedCount: activePane == .local ? selectedLocalItems.count : selectedMTPItems.count
             )
 
-            // Main Content Split
             HSplitView {
-                // Sidebar
                 SidebarView(
                     selectedItem: $selectedSidebarItem,
                     currentLocalPath: $currentLocalPath,
@@ -120,9 +103,7 @@ struct ContentView: View {
                 .frame(minWidth: 180, idealWidth: 220, maxWidth: 280)
                 .layoutPriority(0)
 
-                // Dual-pane file explorers
                 HSplitView {
-                    // Local File Explorer (Left)
                     FileExplorerPane(
                         title: "Local Files",
                         currentPath: $currentLocalPath,
@@ -152,7 +133,6 @@ struct ContentView: View {
                     )
                     .onChange(of: selectedLocalItems) { _, _ in activePane = .local }
 
-                    // MTP File Explorer (Right)
                     VStack(spacing: 0) {
                         if isMTPConnected && mtpStorages.count > 1 {
                             StorageSelectorView(
@@ -200,7 +180,6 @@ struct ContentView: View {
                 }
             }
 
-            // Transfer Progress Panel (conditional)
             if showTransferProgress, let batch = FileTransferService.shared.activeBatch {
                 TransferProgressView(
                     batch: batch,
@@ -218,7 +197,6 @@ struct ContentView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
-            // Bottom Status Bar
             StatusView(
                 localPath: currentLocalPath,
                 mtpPath: currentMTPPath,
@@ -240,7 +218,6 @@ struct ContentView: View {
         }
         .frame(minWidth: 960, minHeight: 600)
         .background(Color(NSColor.windowBackgroundColor))
-        // Conflict resolution sheet
         .sheet(isPresented: $showConflictDialog) {
             ConflictDialogView(
                 conflictingFiles: conflictingFiles.isEmpty ? FileTransferService.shared.conflictingFiles : conflictingFiles,
@@ -249,7 +226,6 @@ struct ContentView: View {
                 rememberForBatch: $conflictRememberForBatch
             )
         }
-        // Delete confirmation alert
         .alert("Delete Files", isPresented: $showDeleteConfirmation) {
             Button("Delete", role: .destructive) {
                 performDelete(paths: pendingDeletePaths)
@@ -260,7 +236,6 @@ struct ContentView: View {
         } message: {
             Text("Are you sure you want to delete \(pendingDeletePaths.count) item\(pendingDeletePaths.count == 1 ? "" : "s")? This cannot be undone.")
         }
-        // New folder dialog
         .alert("New Folder", isPresented: $showNewFolderDialog) {
             TextField("Folder name", text: $newFolderName)
             Button("Create") {
@@ -270,7 +245,6 @@ struct ContentView: View {
         } message: {
             Text("Enter a name for the new folder:")
         }
-        // Privacy dialog
         .alert("Privacy First", isPresented: $showPrivacyPrompt) {
             Button("I Agree") {
                 sendCrashReports = true
@@ -283,7 +257,6 @@ struct ContentView: View {
         } message: {
             Text("Would you like to help improve macMTP by sending anonymous crash reports and error logs? We genuinely do not collect any personal data.")
         }
-        // Keyboard shortcut monitoring
         .onAppear {
             installKeyboardMonitor()
             if !hasSeenPrivacyPrompt {
@@ -295,7 +268,6 @@ struct ContentView: View {
         .onDisappear {
             removeKeyboardMonitor()
         }
-        // Forward conflict resolution back to FileTransferService
         .onChange(of: activeConflictResolution) { _, resolution in
             if let resolution = resolution {
                 if !pendingLocalPasteItems.isEmpty {
@@ -320,7 +292,6 @@ struct ContentView: View {
                 activeConflictResolution = nil
             }
         }
-        // Sync MTP manager state
         .onReceive(MTPDeviceManager.shared.$isConnected) { connected in
             isMTPConnected = connected
             connectedDeviceName = MTPDeviceManager.shared.deviceInfo?.displayName ?? "No Device Connected"
@@ -352,14 +323,12 @@ struct ContentView: View {
             statusTransferProgress = batch?.overallProgress ?? 0
             statusTransferFileName = batch?.currentItem?.fileName ?? ""
         }
-        // Timer to keep status bar updated during transfer
         .onReceive(Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()) { _ in
             if let batch = FileTransferService.shared.activeBatch {
                 statusIsTransferring = batch.isActive
                 statusTransferProgress = batch.overallProgress
                 statusTransferFileName = batch.currentItem?.fileName ?? ""
             }
-            // Update selection sizes
             selectedLocalSize = localFiles.filter { selectedLocalItems.contains($0.path) }
                 .reduce(0) { $0 + ($1.calculatedSize ?? $1.size) }
             selectedMTPSize = mtpFiles.filter { selectedMTPItems.contains($0.path) }
@@ -367,7 +336,6 @@ struct ContentView: View {
             localDirSize = localFiles.reduce(0) { $0 + ($1.calculatedSize ?? $1.size) }
             mtpDirSize = mtpFiles.reduce(0) { $0 + ($1.calculatedSize ?? $1.size) }
         }
-        // Observe FileTransferService conflict dialog
         .onReceive(FileTransferService.shared.$showConflictDialog) { show in
             showConflictDialog = show
             if show {
@@ -376,7 +344,6 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Keyboard Monitor
 
     private func installKeyboardMonitor() {
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
@@ -384,7 +351,6 @@ struct ContentView: View {
             let hasShift = event.modifierFlags.contains(.shift)
             let modifiersOnly = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
-            // Escape to clear selection
             if event.keyCode == 53 {
                 switch self.activePane {
                 case .local: self.selectedLocalItems.removeAll()
@@ -393,13 +359,11 @@ struct ContentView: View {
                 return nil
             }
 
-            // Enter (keyCode 36) — open selected item
             if event.keyCode == 36 && !hasCmd && modifiersOnly == [] {
                 self.handleEnter()
                 return nil
             }
 
-            // Cmd+Up (keyCode 126) — navigate to parent
             if event.keyCode == 126 && hasCmd && !hasShift {
                 self.handleNavigateUp()
                 return nil
@@ -432,7 +396,6 @@ struct ContentView: View {
                 break
             }
 
-            // Cmd+Backspace for delete
             if event.keyCode == 51 && hasCmd {
                 self.handleDelete()
                 return nil
@@ -449,7 +412,6 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Clipboard Operations
 
     func handleCopy() {
         switch activePane {
@@ -495,7 +457,6 @@ struct ContentView: View {
         let destinationPath: String
         let isDestLocal: Bool
 
-        // Paste into the pane opposite to the source, or into the active pane
         switch activePane {
         case .local:
             destinationPath = currentLocalPath
@@ -505,7 +466,6 @@ struct ContentView: View {
             isDestLocal = false
         }
 
-        // Check for conflicts
         if ClipboardManager.shared.sourceIsLocal && isDestLocal {
             let conflicts = detectLocalConflicts(
                 sourcePaths: ClipboardManager.shared.items.map { $0.path },
@@ -522,7 +482,6 @@ struct ContentView: View {
             }
         }
 
-        // Perform paste operation
         if ClipboardManager.shared.sourceIsLocal && isDestLocal {
             performLocalPaste(items: ClipboardManager.shared.items, destination: destinationPath, isCut: ClipboardManager.shared.isCutOperation)
             ClipboardManager.shared.clear()
@@ -532,7 +491,6 @@ struct ContentView: View {
                 ClipboardManager.shared.clear()
             }
         } else {
-            // Cross-device transfer (local ↔ MTP) via FileTransferService.
             let direction: TransferDirection = isDestLocal ? .mtpToLocal : .localToMTP
             let storageId = MTPDeviceManager.shared.selectedStorageId ?? 0
             let sources = ClipboardManager.shared.items
@@ -621,7 +579,6 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - File Operations
 
     private func handleFileOperation(_ operation: FileExplorerPane.FileOperation, isLocal: Bool) {
         switch operation {
@@ -686,7 +643,6 @@ struct ContentView: View {
         let mtpSources = files.filter { !$0.isLocal }
 
         if isLocal {
-            // Dropping onto local pane
             if !localSources.isEmpty {
                 DispatchQueue.global(qos: .userInitiated).async {
                     var didCopy = false
@@ -711,7 +667,6 @@ struct ContentView: View {
                 }
             }
             if !mtpSources.isEmpty {
-                // MTP files dropped onto local — initiate download
                 let nodes = mtpSources.map { FileNode(name: $0.name, path: $0.path, isDirectory: $0.isDirectory, size: 0, modificationDate: Date()) }
                 FileTransferService.shared.initiateTransfer(
                     sources: nodes,
@@ -721,7 +676,6 @@ struct ContentView: View {
                 )
             }
         } else {
-            // Dropping onto MTP pane — upload local files
             if !localSources.isEmpty {
                 let nodes = localSources.map { FileNode(name: $0.name, path: $0.path, isDirectory: $0.isDirectory, size: 0, modificationDate: Date()) }
                 FileTransferService.shared.initiateTransfer(
@@ -734,7 +688,6 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Conflict Detection
 
     private func detectLocalConflicts(sourcePaths: [String], destination: String) -> [ConflictingFilePair] {
         var conflicts: [ConflictingFilePair] = []
@@ -781,7 +734,6 @@ struct ContentView: View {
         return conflicts
     }
 
-    // MARK: - Delete Operation
 
     private func performDelete(paths: [String]) {
         let fileManager = FileManager.default

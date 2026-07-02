@@ -1,6 +1,5 @@
 import SwiftUI
 
-// MARK: - Transfer State
 
 public enum TransferState: Equatable {
     case idle
@@ -18,9 +17,7 @@ public enum TransferState: Equatable {
     }
 }
 
-// MARK: - Transfer Batch (Observable Model)
 
-/// Used by TransferProgressView to display real-time progress.
 public class TransferBatch: ObservableObject {
     @Published public var items: [TransferItem] = []
     @Published public var currentItemIndex: Int = 0
@@ -28,7 +25,6 @@ public class TransferBatch: ObservableObject {
     @Published public var startTime: Date? = nil
     @Published public var bytesPerSecond: Double = 0
 
-    // Speed calculation history for smoothing
     private var speedSamples: [(time: Date, bytes: Int64)] = []
     private let maxSpeedSamples = 10
 
@@ -75,7 +71,6 @@ public class TransferBatch: ObservableObject {
         state == .paused
     }
 
-    // MARK: - Control Methods
 
     public func start() {
         state = .transferring
@@ -106,7 +101,6 @@ public class TransferBatch: ObservableObject {
             speedSamples.removeFirst()
         }
 
-        // Calculate speed from sliding window
         guard speedSamples.count >= 2 else { return }
         let oldest = speedSamples.first!
         let newest = speedSamples.last!
@@ -143,9 +137,7 @@ public class TransferBatch: ObservableObject {
     }
 }
 
-// MARK: - Transfer Progress View
 
-/// speed, ETA, elapsed time, and pause/cancel controls.
 public struct TransferProgressView: View {
     @ObservedObject public var batch: TransferBatch
 
@@ -157,7 +149,6 @@ public struct TransferProgressView: View {
 
     @State private var isMinimized: Bool = false
 
-    // Timer for elapsed time updates
     @State private var elapsedTimerTick: Int = 0
     private let elapsedTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -171,7 +162,6 @@ public struct TransferProgressView: View {
                     .padding(.vertical, 8)
             } else {
                 VStack(spacing: 12) {
-                    // Top row: title and status badge
                     HStack(alignment: .center) {
                         transferStatusIcon
 
@@ -187,7 +177,6 @@ public struct TransferProgressView: View {
 
                         Spacer()
 
-                    // File count badge
                     fileCountBadge
 
                     Button(action: { isMinimized = true }) {
@@ -200,18 +189,14 @@ public struct TransferProgressView: View {
                     .padding(.leading, 4)
                 }
 
-                    // Overall progress bar
                     overallProgressSection
 
-                    // Current file section
                     if let currentFile = batch.currentItem, batch.isActive || batch.state == .paused {
                         currentFileSection(currentFile)
                     }
 
-                    // Stats row
                     statsRow
 
-                    // Control buttons
                     controlButtons
                 }
                 .padding(.horizontal, 20)
@@ -220,7 +205,6 @@ public struct TransferProgressView: View {
         }
         .background(
             ZStack {
-                // Translucent background with blur effect
                 VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow)
                 Color(NSColor.windowBackgroundColor).opacity(0.7)
             }
@@ -237,7 +221,6 @@ public struct TransferProgressView: View {
         }
     }
 
-    // MARK: - Minimized View
 
     private var minimizedView: some View {
         HStack(spacing: 10) {
@@ -287,7 +270,6 @@ public struct TransferProgressView: View {
         }
     }
 
-    // MARK: - Initializer
 
     public init(
         batch: TransferBatch,
@@ -301,7 +283,6 @@ public struct TransferProgressView: View {
         self.onResume = onResume
     }
 
-    // MARK: - Status Icon
 
     private var transferStatusIcon: some View {
         Group {
@@ -336,7 +317,6 @@ public struct TransferProgressView: View {
         }
     }
 
-    // MARK: - Status Text
 
     private var statusTitle: String {
         switch batch.state {
@@ -377,7 +357,6 @@ public struct TransferProgressView: View {
         }
     }
 
-    // MARK: - File Count Badge
 
     private var fileCountBadge: some View {
         HStack(spacing: 4) {
@@ -400,18 +379,14 @@ public struct TransferProgressView: View {
         )
     }
 
-    // MARK: - Overall Progress
 
     private var overallProgressSection: some View {
         VStack(spacing: 4) {
-            // Progress bar
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
-                    // Track
                     RoundedRectangle(cornerRadius: 4)
                         .fill(Color(NSColor.controlBackgroundColor))
 
-                    // Fill
                     RoundedRectangle(cornerRadius: 4)
                         .fill(overallProgressColor)
                         .frame(width: max(0, geometry.size.width * CGFloat(batch.overallProgress)))
@@ -420,7 +395,6 @@ public struct TransferProgressView: View {
             }
             .frame(height: 8)
 
-            // Progress details
             HStack {
                 Text(formatPercentage(batch.overallProgress))
                     .font(.caption)
@@ -449,7 +423,6 @@ public struct TransferProgressView: View {
         }
     }
 
-    // MARK: - Current File Section
 
     private func currentFileSection(_ item: TransferItem) -> some View {
         VStack(spacing: 6) {
@@ -480,7 +453,6 @@ public struct TransferProgressView: View {
                     .monospacedDigit()
             }
 
-            // Per-file progress bar
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 3)
@@ -501,11 +473,9 @@ public struct TransferProgressView: View {
         )
     }
 
-    // MARK: - Stats Row
 
     private var statsRow: some View {
         HStack(spacing: 16) {
-            // Transfer speed
             statItem(
                 icon: "gauge.with.dots.needle.bottom.50percent",
                 label: "Speed",
@@ -514,7 +484,6 @@ public struct TransferProgressView: View {
 
             Divider().frame(height: 16)
 
-            // ETA
             statItem(
                 icon: "clock",
                 label: "Remaining",
@@ -523,7 +492,6 @@ public struct TransferProgressView: View {
 
             Divider().frame(height: 16)
 
-            // Elapsed time
             statItem(
                 icon: "timer",
                 label: "Elapsed",
@@ -582,7 +550,6 @@ public struct TransferProgressView: View {
         }
     }
 
-    // MARK: - Control Buttons
 
     private var controlButtons: some View {
         HStack(spacing: 12) {
@@ -639,7 +606,6 @@ public struct TransferProgressView: View {
         }
     }
 
-    // MARK: - Formatting Helpers
 
     private func formatBytes(_ bytes: Int64) -> String {
         let formatter = ByteCountFormatter()
@@ -700,7 +666,6 @@ public struct TransferProgressView: View {
     }
 }
 
-// MARK: - Visual Effect Blur (NSVisualEffectView wrapper)
 
 public struct VisualEffectBlur: NSViewRepresentable {
     public var material: NSVisualEffectView.Material

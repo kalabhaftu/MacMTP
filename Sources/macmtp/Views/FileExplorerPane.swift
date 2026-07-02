@@ -1,7 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-// MARK: - Dropped File
 
 struct DroppedFile {
     let path: String
@@ -28,7 +27,6 @@ final class ThreadSafeArray<T>: @unchecked Sendable {
     }
 }
 
-// MARK: - File Explorer Loading State
 
 enum FileExplorerLoadingState: Equatable {
     case idle
@@ -38,7 +36,6 @@ enum FileExplorerLoadingState: Equatable {
     case error(String)
 }
 
-// MARK: - Sort Column Identifier
 
 enum FileSortColumn: String, CaseIterable {
     case name = "Name"
@@ -60,7 +57,6 @@ enum FileSortDirection {
     }
 }
 
-// MARK: - View Mode
 
 enum FileViewMode: String, CaseIterable {
     case list = "List"
@@ -76,10 +72,8 @@ enum FileViewMode: String, CaseIterable {
     }
 }
 
-// MARK: - File Explorer Pane
 
 struct FileExplorerPane: View {
-    // MARK: - Properties
 
     var title: String
 
@@ -99,7 +93,6 @@ struct FileExplorerPane: View {
     var onFileOperation: ((FileOperation) -> Void)? = nil
     var onPaste: (() -> Void)? = nil
     
-    // MARK: - Internal State
 
     @State private var loadingState: FileExplorerLoadingState = .idle
     @State private var displayedFiles: [FileNode] = []
@@ -140,14 +133,12 @@ struct FileExplorerPane: View {
 
     @State private var directorySizes: [String: Int64] = [:]
 
-    // MARK: - Marquee Selection State
 
     @State private var dragRect: CGRect? = nil
     @State private var ignoreMarqueeDrag: Bool = false
     @State private var itemFrames: [String: CGRect] = [:]
     @State private var dragStartSelection: Set<String> = []
 
-    // MARK: - File Operations Enum
 
     enum FileOperation {
         case delete(paths: [String])
@@ -156,25 +147,20 @@ struct FileExplorerPane: View {
         case open(path: String)
     }
 
-    // MARK: - Body
 
     var body: some View {
         VStack(spacing: 0) {
-            // Navigation header
             navigationHeader
 
-            // Filter bar (togglable)
             if isFilterVisible {
                 filterBar
             }
 
-            // Column headers (list mode only)
             if viewMode == .list {
                 columnHeaders
                 Divider()
             }
 
-            // Main content area
             contentArea
         }
         .background(Color(NSColor.controlBackgroundColor))
@@ -268,11 +254,9 @@ struct FileExplorerPane: View {
         }
     }
 
-    // MARK: - Navigation Header
 
     private var navigationHeader: some View {
         HStack(spacing: 6) {
-            // Back button
             Button(action: navigateBack) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 12, weight: .semibold))
@@ -282,7 +266,6 @@ struct FileExplorerPane: View {
             .disabled(pathHistoryIndex <= 0)
             .help("Go back")
 
-            // Forward button
             Button(action: navigateForward) {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 12, weight: .semibold))
@@ -292,7 +275,6 @@ struct FileExplorerPane: View {
             .disabled(pathHistoryIndex >= pathHistory.count - 1)
             .help("Go forward")
 
-            // Up button
             Button(action: navigateUp) {
                 Image(systemName: "arrow.up")
                     .font(.system(size: 12, weight: .semibold))
@@ -302,7 +284,6 @@ struct FileExplorerPane: View {
             .disabled(currentPath == "/" || currentPath.isEmpty)
             .help("Go to parent folder")
 
-            // Path bar
             if isEditingPath {
                 TextField("Path", text: $editablePathText, onCommit: {
                     isEditingPath = false
@@ -323,7 +304,6 @@ struct FileExplorerPane: View {
 
             Spacer(minLength: 4)
 
-            // View mode toggle
             Button(action: {
                 let modes = FileViewMode.allCases
                 let idx = modes.firstIndex(of: viewMode) ?? 0
@@ -336,7 +316,6 @@ struct FileExplorerPane: View {
             .buttonStyle(.plain)
             .help("View mode: \(viewMode.rawValue)")
 
-            // Filter toggle
             Button(action: {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     isFilterVisible.toggle()
@@ -350,7 +329,6 @@ struct FileExplorerPane: View {
             .buttonStyle(.plain)
             .help("Filter files")
 
-            // Item count
             Text(itemCountText)
                 .font(.caption2)
                 .foregroundColor(.secondary)
@@ -422,7 +400,6 @@ struct FileExplorerPane: View {
         return "\(total) items"
     }
 
-    // MARK: - Filter Bar
 
     private var filterBar: some View {
         HStack(spacing: 8) {
@@ -449,7 +426,6 @@ struct FileExplorerPane: View {
         .transition(.move(edge: .top).combined(with: .opacity))
     }
 
-    // MARK: - Column Headers
 
     private var columnHeaders: some View {
         HStack(spacing: 0) {
@@ -495,7 +471,6 @@ struct FileExplorerPane: View {
         .frame(maxWidth: column == .name ? .infinity : minWidth + 20)
     }
 
-    // MARK: - Content Area
 
     @ViewBuilder
     private var contentArea: some View {
@@ -690,11 +665,9 @@ struct FileExplorerPane: View {
         .contextMenu { contextMenuItems(for: file) }
     }
 
-    // MARK: - File Row
 
     private func fileRow(for file: FileNode) -> some View {
         HStack(spacing: 0) {
-            // Name column
             HStack(spacing: 8) {
                 Image(systemName: file.iconName)
                     .font(.system(size: 14))
@@ -710,7 +683,6 @@ struct FileExplorerPane: View {
             }
             .frame(minWidth: 180, maxWidth: .infinity)
 
-            // Size column
             Text(fileSizeDisplay(for: file))
                 .font(.system(size: 11))
                 .foregroundColor(.secondary)
@@ -718,14 +690,12 @@ struct FileExplorerPane: View {
                 .frame(minWidth: 70, maxWidth: 90, alignment: .trailing)
                 .padding(.horizontal, 8)
 
-            // Type column
             Text(file.isDirectory ? "Folder" : file.extensionName)
                 .font(.system(size: 11))
                 .foregroundColor(.secondary)
                 .frame(minWidth: 60, maxWidth: 80, alignment: .leading)
                 .padding(.horizontal, 8)
 
-            // Date column
             Text(formatDate(file.modificationDate))
                 .font(.system(size: 11))
                 .foregroundColor(.secondary)
@@ -740,7 +710,6 @@ struct FileExplorerPane: View {
         }
     }
 
-    // MARK: - Context Menu
 
     @ViewBuilder
     private func contextMenuItems(for file: FileNode) -> some View {
@@ -837,7 +806,6 @@ struct FileExplorerPane: View {
         }
     }
 
-    // MARK: - State Views
 
     private var disabledStateView: some View {
         VStack(spacing: 16) {
@@ -939,7 +907,6 @@ struct FileExplorerPane: View {
 
 
 
-    // MARK: - Navigation
 
     private func navigateTo(path: String) {
         let cleanPath = path.isEmpty ? "/" : path
@@ -1011,7 +978,6 @@ struct FileExplorerPane: View {
         }
     }
 
-    // MARK: - Directory Loading
 
     private func loadDirectory() {
         if isLocal {
@@ -1099,7 +1065,6 @@ struct FileExplorerPane: View {
         }
     }
 
-    // MARK: - Filtering & Sorting
 
     @AppStorage("showHiddenFilesLocal") private var showHiddenFilesLocal: Bool = false
     @AppStorage("showHiddenFilesMTP") private var showHiddenFilesMTP: Bool = false
@@ -1107,17 +1072,14 @@ struct FileExplorerPane: View {
     private func applyFilterAndSort(using input: [FileNode]? = nil) {
         var result = input ?? files
 
-        // Filter hidden files
         let showHidden = isLocal ? showHiddenFilesLocal : showHiddenFilesMTP
         if !showHidden {
             result = result.filter { !$0.name.hasPrefix(".") }
         }
 
-        // Apply search filter
         if !filterText.isEmpty {
             let query = filterText.lowercased()
             if query.hasPrefix(".") {
-                // Extension filter mode
                 let ext = String(query.dropFirst())
                 result = result.filter {
                     $0.extensionName.lowercased() == ext || $0.isDirectory
@@ -1129,7 +1091,6 @@ struct FileExplorerPane: View {
             }
         }
 
-        // Apply sort — directories always first
         result.sort { a, b in
             if a.isDirectory != b.isDirectory {
                 return a.isDirectory
@@ -1163,7 +1124,6 @@ struct FileExplorerPane: View {
         return sortDirection == .ascending ? ascending : !ascending
     }
 
-    // MARK: - Click Handlers
 
     private func handleDoubleClick(file: FileNode) {
         if file.isDirectory {
@@ -1277,7 +1237,6 @@ struct FileExplorerPane: View {
         }
     }
 
-    // MARK: - Rename
 
     private func commitRename(file: FileNode) {
         let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1316,7 +1275,6 @@ struct FileExplorerPane: View {
         }
     }
 
-    // MARK: - Drag & Drop
 
     private func handleDrop(providers: [NSItemProvider], targetDirectory: String? = nil) -> Bool {
         let collectedFiles = ThreadSafeArray<DroppedFile>()
@@ -1387,7 +1345,6 @@ struct FileExplorerPane: View {
         files.append(DroppedFile(path: url.path, isLocal: true, name: name, isDirectory: isDirectory))
     }
 
-    // MARK: - Formatting Utilities
 
     private func formatBytes(_ bytes: Int64) -> String {
         let formatter = ByteCountFormatter()
@@ -1417,7 +1374,6 @@ struct FileExplorerPane: View {
     }
 }
 
-// MARK: - Keyboard Letter Navigation (NSViewRepresentable)
 
     struct KeyboardLetterNav: NSViewRepresentable {
     var onKeyPress: (String) -> Void
@@ -1476,7 +1432,6 @@ struct FileExplorerPane: View {
     }
 }
 
-// MARK: - File Properties View
 
 struct FilePropertiesView: View {
     let file: FileNode
@@ -1547,7 +1502,6 @@ struct FilePropertiesView: View {
     }
 }
 
-// MARK: - Item Frame Preference Key
 
 struct ItemFramePreferenceKey: PreferenceKey {
     static let defaultValue: [String: CGRect] = [:]

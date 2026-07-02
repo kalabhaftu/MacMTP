@@ -1,9 +1,7 @@
 import Foundation
 
-/// All methods are static and thread-safe. Formatters are cached to avoid
 enum FormatUtils {
 
-    // MARK: - Cached Formatters
 
     private static let byteFormatterLock = NSLock()
 
@@ -16,41 +14,29 @@ enum FormatUtils {
         return formatter
     }()
 
-    // MARK: - Byte Formatting
 
-    /// - Parameter bytes: The number of bytes (Int64).
     static func formatBytes(_ bytes: Int64) -> String {
         byteFormatterLock.lock()
         defer { byteFormatterLock.unlock() }
         return byteFormatter.string(fromByteCount: bytes)
     }
 
-    /// Values larger than `Int64.max` are capped and annotated with "+".
-    /// - Parameter bytes: The number of bytes (UInt64).
     static func formatBytes(_ bytes: UInt64) -> String {
         if bytes <= UInt64(Int64.max) {
             byteFormatterLock.lock()
             defer { byteFormatterLock.unlock() }
             return byteFormatter.string(fromByteCount: Int64(bytes))
         }
-        // For values exceeding Int64.max (~8 EB), format in TB manually.
         let tb = Double(bytes) / 1_000_000_000_000
         return String(format: "%.1f TB", tb)
     }
 
-    // MARK: - Date Formatting
 
-    /// - Parameter date: The date to format.
     static func formatDate(_ date: Date) -> String {
         date.formatted(date: .abbreviated, time: .shortened)
     }
 
-    // MARK: - Duration Formatting
 
-    /// Examples:
-    /// - 4320 seconds → "1h 12m"
-    /// - 0.5 seconds → "< 1s"
-    /// - Parameter interval: The duration in seconds.
     static func formatDuration(_ interval: TimeInterval) -> String {
         guard interval.isFinite, interval >= 0 else { return "--" }
 
@@ -76,9 +62,7 @@ enum FormatUtils {
         }
     }
 
-    // MARK: - Speed Formatting
 
-    /// - Parameter bytesPerSecond: The speed in bytes per second.
     static func formatSpeed(_ bytesPerSecond: Double) -> String {
         guard bytesPerSecond.isFinite, bytesPerSecond >= 0 else { return "--" }
 
@@ -91,7 +75,6 @@ enum FormatUtils {
         for unit in units {
             if bytesPerSecond >= unit.threshold {
                 let value = bytesPerSecond / unit.threshold
-                // Use integer formatting when the value rounds to a whole number.
                 if value >= 100 {
                     return String(format: "%.0f %@", value, unit.suffix)
                 } else if value >= 10 {
@@ -105,28 +88,22 @@ enum FormatUtils {
         return String(format: "%.0f B/s", bytesPerSecond)
     }
 
-    // MARK: - File Extension → SF Symbol Icon
 
-    /// The mapping covers common media, document, archive, code, and system
-    /// - Parameter ext: The file extension without a leading dot, lowercased.
     static func fileExtensionIcon(_ ext: String) -> String {
         let key = ext.lowercased()
 
-        // Video
         let videoExtensions: Set<String> = [
             "mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "m4v",
             "mpg", "mpeg", "3gp", "ts", "vob",
         ]
         if videoExtensions.contains(key) { return "film" }
 
-        // Audio
         let audioExtensions: Set<String> = [
             "mp3", "aac", "flac", "wav", "ogg", "wma", "m4a", "aiff",
             "alac", "opus", "mid", "midi",
         ]
         if audioExtensions.contains(key) { return "music.note" }
 
-        // Image
         let imageExtensions: Set<String> = [
             "jpg", "jpeg", "png", "heic", "heif", "gif", "bmp", "tiff",
             "tif", "webp", "svg", "ico", "raw", "cr2", "nef", "arw",
@@ -134,42 +111,35 @@ enum FormatUtils {
         ]
         if imageExtensions.contains(key) { return "photo" }
 
-        // PDF
         if key == "pdf" { return "doc.richtext" }
 
-        // Rich documents
         let richDocExtensions: Set<String> = [
             "doc", "docx", "rtf", "odt", "pages",
         ]
         if richDocExtensions.contains(key) { return "doc.richtext" }
 
-        // Spreadsheets
         let spreadsheetExtensions: Set<String> = [
             "xls", "xlsx", "csv", "numbers", "ods",
         ]
         if spreadsheetExtensions.contains(key) { return "tablecells" }
 
-        // Presentations
         let presentationExtensions: Set<String> = [
             "ppt", "pptx", "key", "odp",
         ]
         if presentationExtensions.contains(key) { return "rectangle.on.rectangle" }
 
-        // Archives
         let archiveExtensions: Set<String> = [
             "zip", "tar", "gz", "bz2", "xz", "7z", "rar", "dmg",
             "iso", "pkg", "deb", "rpm",
         ]
         if archiveExtensions.contains(key) { return "doc.zipper" }
 
-        // Plain text
         let textExtensions: Set<String> = [
             "txt", "md", "markdown", "log", "cfg", "ini", "conf",
             "yaml", "yml", "toml",
         ]
         if textExtensions.contains(key) { return "doc.text" }
 
-        // Source code
         let codeExtensions: Set<String> = [
             "swift", "py", "js", "ts", "java", "kt", "c", "cpp",
             "h", "hpp", "cs", "go", "rs", "rb", "php", "html",
@@ -178,40 +148,31 @@ enum FormatUtils {
         ]
         if codeExtensions.contains(key) { return "chevron.left.forwardslash.chevron.right" }
 
-        // Executables / binaries
         let execExtensions: Set<String> = [
             "app", "exe", "bin", "command", "sh",
         ]
         if execExtensions.contains(key) { return "terminal" }
 
-        // Fonts
         let fontExtensions: Set<String> = [
             "ttf", "otf", "woff", "woff2",
         ]
         if fontExtensions.contains(key) { return "textformat" }
 
-        // Database
         let dbExtensions: Set<String> = [
             "db", "sqlite", "sqlite3", "realm",
         ]
         if dbExtensions.contains(key) { return "cylinder" }
 
-        // Android-specific
         if key == "apk" || key == "aab" { return "shippingbox" }
 
-        // Default
         return "doc"
     }
 
-    // MARK: - MIME Type Mapping
 
-    /// Covers the most common media, document, archive, and text types.
-    /// - Parameter ext: The file extension without a leading dot (case-insensitive).
     static func mimeTypeForExtension(_ ext: String) -> String {
         let key = ext.lowercased()
 
         let mimeMap: [String: String] = [
-            // Video
             "mp4": "video/mp4",
             "mkv": "video/x-matroska",
             "avi": "video/x-msvideo",
@@ -225,7 +186,6 @@ enum FormatUtils {
             "3gp": "video/3gpp",
             "ts": "video/mp2t",
 
-            // Audio
             "mp3": "audio/mpeg",
             "aac": "audio/aac",
             "flac": "audio/flac",
@@ -238,7 +198,6 @@ enum FormatUtils {
             "mid": "audio/midi",
             "midi": "audio/midi",
 
-            // Image
             "jpg": "image/jpeg",
             "jpeg": "image/jpeg",
             "png": "image/png",
@@ -254,7 +213,6 @@ enum FormatUtils {
             "raw": "image/x-raw",
             "dng": "image/x-adobe-dng",
 
-            // Documents
             "pdf": "application/pdf",
             "doc": "application/msword",
             "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -266,7 +224,6 @@ enum FormatUtils {
             "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
             "csv": "text/csv",
 
-            // Archives
             "zip": "application/zip",
             "tar": "application/x-tar",
             "gz": "application/gzip",
@@ -277,7 +234,6 @@ enum FormatUtils {
             "dmg": "application/x-apple-diskimage",
             "iso": "application/x-iso9660-image",
 
-            // Text / Code
             "txt": "text/plain",
             "md": "text/markdown",
             "html": "text/html",
@@ -303,16 +259,13 @@ enum FormatUtils {
             "php": "text/x-php",
             "sql": "application/sql",
 
-            // Fonts
             "ttf": "font/ttf",
             "otf": "font/otf",
             "woff": "font/woff",
             "woff2": "font/woff2",
 
-            // Android
             "apk": "application/vnd.android.package-archive",
 
-            // Database
             "sqlite": "application/x-sqlite3",
             "sqlite3": "application/x-sqlite3",
             "db": "application/x-sqlite3",

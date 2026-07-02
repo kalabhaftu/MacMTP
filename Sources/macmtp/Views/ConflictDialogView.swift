@@ -1,6 +1,5 @@
 import SwiftUI
 
-// MARK: - Conflicting File Pair
 
 public struct ConflictingFilePair: Identifiable, Hashable {
     public let id = UUID()
@@ -39,9 +38,7 @@ public struct ConflictingFilePair: Identifiable, Hashable {
     }
 }
 
-// MARK: - Conflict Dialog View
 
-/// Presents a scrollable list of conflicting files with source vs destination comparison,
 struct ConflictDialogView: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -55,26 +52,21 @@ struct ConflictDialogView: View {
 
     @State private var expandedFileID: UUID? = nil
 
-    // MARK: - Body
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
             headerSection
 
             Divider()
 
-            // File conflict list
             conflictListSection
 
             Divider()
 
-            // Remember checkbox
             rememberSection
 
             Divider()
 
-            // Resolution buttons
             resolutionButtonsSection
         }
         .frame(minWidth: 560, idealWidth: 620, maxWidth: 720)
@@ -82,7 +74,6 @@ struct ConflictDialogView: View {
         .background(Color(NSColor.windowBackgroundColor))
     }
 
-    // MARK: - Header
 
     private var headerSection: some View {
         VStack(spacing: 8) {
@@ -115,7 +106,6 @@ struct ConflictDialogView: View {
         return "\(count) of \(totalFileCount) \(noun) at destination"
     }
 
-    // MARK: - Conflict List
 
     private var conflictListSection: some View {
         ScrollView {
@@ -134,7 +124,6 @@ struct ConflictDialogView: View {
         let isExpanded = expandedFileID == pair.id
 
         return VStack(spacing: 0) {
-            // Summary row
             Button(action: {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     expandedFileID = isExpanded ? nil : pair.id
@@ -184,7 +173,6 @@ struct ConflictDialogView: View {
             }
             .buttonStyle(.plain)
 
-            // Expanded detail
             if isExpanded {
                 VStack(spacing: 8) {
                     fileComparisonRow(
@@ -264,7 +252,6 @@ struct ConflictDialogView: View {
         )
     }
 
-    // MARK: - Remember Checkbox
 
     private var rememberSection: some View {
         HStack {
@@ -290,23 +277,19 @@ struct ConflictDialogView: View {
         .padding(.vertical, 12)
     }
 
-    // MARK: - Resolution Buttons
 
     private var resolutionButtonsSection: some View {
         VStack(spacing: 8) {
-            // Primary actions row
             HStack(spacing: 10) {
                 resolutionButton(for: .overwrite)
                 resolutionButton(for: .skip)
             }
 
-            // Secondary actions row
             HStack(spacing: 10) {
                 resolutionButton(for: .overwriteIfDifferent)
                 resolutionButton(for: .skipIfSameSize)
             }
 
-            // Cancel button (full width)
             resolutionButton(for: .cancel)
         }
         .padding(.horizontal, 24)
@@ -362,7 +345,6 @@ struct ConflictDialogView: View {
         .contentShape(Rectangle())
     }
 
-    // MARK: - Helpers
 
     private func buttonBackgroundColor(for option: ConflictResolution) -> Color {
         switch option {
