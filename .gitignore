@@ -17,7 +17,6 @@ DerivedData/
 macMTP.app/
 release/
 
-
 # IDE
 .vscode/
 .idea/
@@ -29,4 +28,7 @@ tmp/
 
 # AI agent config
 .opencode/
+.agents/
+
+# Kalam 
 Sources/CKalam/libkalam.a
