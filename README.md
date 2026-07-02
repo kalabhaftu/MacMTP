@@ -1,6 +1,10 @@
 # macMTP - Native macOS Android File Transfer
 
 <p align="center">
+  <img src="assets/screenshots/icon.png" width="128" alt="macMTP icon">
+</p>
+
+<p align="center">
   <strong>A native macOS utility for transferring files between a Mac and Android devices over USB MTP.</strong>
 </p>
 
@@ -24,6 +28,35 @@
   <a href="https://go.dev">
     <img src="https://img.shields.io/badge/Go-1.21+-00ADD8.svg" alt="Go">
   </a>
+</p>
+
+---
+
+## Screenshots
+
+<p align="center">
+  <img src="assets/screenshots/no-device-connected.png" width="700" alt="No device connected">
+  <br><em>Main window — no device connected</em>
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/external-device-connected.png" width="700" alt="External device connected">
+  <br><em>Main window — MTP device connected and browsing files</em>
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/perference.png" width="500" alt="Preferences">
+  <br><em>Preferences panel</em>
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/new-folder.png" width="400" alt="New folder dialog">
+  <br><em>New folder dialog</em>
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/about.png" width="380" alt="About macMTP">
+  <br><em>About macMTP</em>
 </p>
 
 ---
