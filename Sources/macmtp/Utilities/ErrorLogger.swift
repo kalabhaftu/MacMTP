@@ -4,8 +4,6 @@ import Sentry
 public struct ErrorLogger {
     public static func log(_ error: Error, message: String? = nil, userInfo: [String: Any]? = nil) {
         let errMsg = message != nil ? "\(message!): \(error.localizedDescription)" : error.localizedDescription
-        print("[ERROR] \(errMsg)")
-        
         let sendReports = UserDefaults.standard.object(forKey: "sendCrashReports") as? Bool ?? true
         if sendReports {
             let event = Event(level: .error)
@@ -27,8 +25,6 @@ public struct ErrorLogger {
     }
     
     public static func logMessage(_ message: String, level: SentryLevel = .error, userInfo: [String: Any]? = nil) {
-        print("[\(level == .info ? "INFO" : "ERROR")] \(message)")
-        
         let sendReports = UserDefaults.standard.object(forKey: "sendCrashReports") as? Bool ?? true
         if sendReports {
             let event = Event(level: level)

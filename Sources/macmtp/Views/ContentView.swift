@@ -2,7 +2,6 @@ import SwiftUI
 
 // MARK: - Content View
 
-/// sidebar, dual file explorer panes, toolbar, status bar, and modal dialogs
 struct ContentView: View {
     // MARK: - Active Pane
 
@@ -288,8 +287,7 @@ struct ContentView: View {
         .onAppear {
             installKeyboardMonitor()
             if !hasSeenPrivacyPrompt {
-                // slight delay to prevent overlapping alerts on launch
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                     showPrivacyPrompt = true
                 }
             }
@@ -380,7 +378,6 @@ struct ContentView: View {
 
     // MARK: - Keyboard Monitor
 
-    /// This catches Cmd+key combinations that SwiftUI doesn't natively support
     private func installKeyboardMonitor() {
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             let hasCmd = event.modifierFlags.contains(.command)
@@ -458,14 +455,12 @@ struct ContentView: View {
         switch activePane {
         case .local:
             let selectedNodes = localFiles.filter { selectedLocalItems.contains($0.path) }
-            guard !selectedNodes.isEmpty else { print("[Copy] No local items selected"); return }
+            guard !selectedNodes.isEmpty else { return }
             ClipboardManager.shared.copyItems(items: selectedNodes, from: currentLocalPath, isLocal: true)
-            print("[Copy] Copied \(selectedNodes.count) local items")
         case .mtp:
             let selectedNodes = mtpFiles.filter { selectedMTPItems.contains($0.path) }
-            guard !selectedNodes.isEmpty else { print("[Copy] No MTP items selected"); return }
+            guard !selectedNodes.isEmpty else { return }
             ClipboardManager.shared.copyItems(items: selectedNodes, from: currentMTPPath, isLocal: false)
-            print("[Copy] Copied \(selectedNodes.count) MTP items")
         }
     }
 
@@ -535,8 +530,6 @@ struct ContentView: View {
         } else if !ClipboardManager.shared.sourceIsLocal && !isDestLocal {
             if destinationPath == ClipboardManager.shared.sourcePath {
                 ClipboardManager.shared.clear()
-            } else {
-                print("MTP-to-MTP paste is not supported by the current MTP bridge.")
             }
         } else {
             // Cross-device transfer (local ↔ MTP) via FileTransferService.
@@ -644,7 +637,7 @@ struct ContentView: View {
                     try FileManager.default.moveItem(at: sourceURL, to: destURL)
                     handleRefresh()
                 } catch {
-                    print("Rename failed: \(error)")
+                    ErrorLogger.log(error, message: "Rename failed")
                 }
             } else {
                 Task {
@@ -664,7 +657,7 @@ struct ContentView: View {
                     try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: false)
                     handleRefresh()
                 } catch {
-                    print("Create folder failed: \(error)")
+                    ErrorLogger.log(error, message: "Create folder failed")
                 }
             } else {
                 let separator = parent == "/" ? "" : "/"
@@ -676,7 +669,7 @@ struct ContentView: View {
                         )
                         await MTPDeviceManager.shared.refreshFiles()
                     } catch {
-                        print("Create MTP folder failed: \(error)")
+                        ErrorLogger.log(error, message: "Create MTP folder failed")
                     }
                 }
             }
@@ -707,7 +700,7 @@ struct ContentView: View {
                             try FileManager.default.copyItem(at: url, to: destURL)
                             didCopy = true
                         } catch {
-                            print("Drop copy failed for \(file.name): \(error.localizedDescription)")
+                            ErrorLogger.log(error, message: "Drop copy failed for \(file.name)")
                         }
                     }
                     if didCopy {
@@ -772,8 +765,7 @@ struct ContentView: View {
                         destinationDate: destDate
                     ))
                 } catch {
-                    // If we can't read attributes, still flag it as a conflict
-                    conflicts.append(ConflictingFilePair(
+        conflicts.append(ConflictingFilePair(
                         fileName: fileName,
                         sourcePath: sourcePath,
                         sourceSize: 0,
@@ -799,7 +791,7 @@ struct ContentView: View {
                 do {
                     try fileManager.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
                 } catch {
-                    print("Delete failed for \(path): \(error.localizedDescription)")
+                    ErrorLogger.log(error, message: "Delete failed for \(path)")
                 }
             }
             selectedLocalItems.removeAll()
@@ -818,7 +810,7 @@ struct ContentView: View {
                     }
                     await MTPDeviceManager.shared.refreshFiles()
                 } catch {
-                    print("MTP delete failed: \(error.localizedDescription)")
+                    ErrorLogger.log(error, message: "MTP delete failed")
                     await MainActor.run {
                         pendingDeletePaths.removeAll()
                     }
@@ -865,7 +857,7 @@ struct ContentView: View {
                     try fileManager.copyItem(at: sourceURL, to: targetURL)
                 }
             } catch {
-                print("Paste operation failed for \(item.name): \(error.localizedDescription)")
+                ErrorLogger.log(error, message: "Paste operation failed for \(item.name)")
             }
         }
     }
@@ -887,7 +879,7 @@ struct ContentView: View {
                 try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: false)
                 handleRefresh()
             } catch {
-                print("Create folder failed: \(error)")
+                ErrorLogger.log(error, message: "Create folder failed")
             }
         } else {
             Task {

@@ -306,7 +306,6 @@ struct SidebarView: View {
                         )
                     )
                 } catch {
-                    print("[SidebarView] Error reading volume properties for \(url): \(error)")
                 }
             }
         }

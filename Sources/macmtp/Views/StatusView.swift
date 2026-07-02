@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// current item counts, and transfer status at a glance.
 struct StatusView: View {
     var localPath: String
     var mtpPath: String
@@ -205,7 +204,6 @@ struct StatusView: View {
                 localFreeBytes = Int64(available)
             }
         } catch {
-            print("[StatusView] Error reading disk capacity for \(path): \(error)")
         }
     }
     

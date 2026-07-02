@@ -1,6 +1,5 @@
 import Foundation
 import SwiftUI
-import Combine
 import UserNotifications
 
 extension Notification.Name {
@@ -37,10 +36,8 @@ public final class FileTransferService: ObservableObject {
     
     private var cutSourcePaths: [String] = []
     
-    // used to calculate overall progress.
     private var completedBytesAccumulated: Int64 = 0
     
-    // speed tracking
     private var speedSamples: [(time: Date, bytes: Int64)] = []
     private let maxSpeedSamples = 10
     
@@ -56,20 +53,17 @@ public final class FileTransferService: ObservableObject {
         guard activeBatch?.state == .transferring else { return }
         pauseRequested = true
         activeBatch?.pause()
-        print("FileTransferService: Pause requested")
     }
     
     public func resumeTransfer() {
         guard activeBatch?.state == .paused else { return }
         pauseRequested = false
         activeBatch?.resume()
-        print("FileTransferService: Resume requested")
     }
     
     public func cancelTransfer() {
         cancelRequested = true
         activeBatch?.cancel()
-        print("FileTransferService: Cancel requested")
         
         // If waiting in conflict dialog, cancel it
         if let continuation = conflictContinuation {
@@ -102,19 +96,16 @@ public final class FileTransferService: ObservableObject {
         storageId: UInt32? = nil,
         isCut: Bool = false
     ) {
-        print("[Transfer] initiateTransfer called: direction=\(direction) sources=\(sources.count) dest=\(destinationDir) storageId=\(storageId ?? 0) isCut=\(isCut)")
         self.isCutOperation = isCut
         self.cutSourcePaths = isCut ? sources.map { $0.path } : []
         Task {
             do {
-                print("[Transfer] Starting performTransfer...")
                 try await performTransfer(
                     sources: sources,
                     destinationDir: destinationDir,
                     direction: direction,
                     storageId: storageId
                 )
-                print("[Transfer] performTransfer completed successfully")
             } catch {
                 ErrorLogger.log(error, message: "File transfer failed")
                 activeBatch?.cancel()
@@ -161,9 +152,7 @@ public final class FileTransferService: ObservableObject {
         direction: TransferDirection,
         storageId: UInt32?
     ) async throws {
-        // Only reject if there's an actively transferring batch
         if let batch = activeBatch, !batch.state.isTerminal {
-            print("[Transfer] Concurrent transfer rejected — another transfer is in progress")
             throw KalamError.operationInProgress
         }
 
@@ -179,8 +168,7 @@ public final class FileTransferService: ObservableObject {
         showConflictDialog = false
         conflictingFiles = []
         totalFileCount = 0
-        // Clear any stale conflict continuation
-        if let oldContinuation = conflictContinuation {
+    if let oldContinuation = conflictContinuation {
             conflictContinuation = nil
             oldContinuation.resume(returning: (.cancel, true))
         }
@@ -191,21 +179,15 @@ public final class FileTransferService: ObservableObject {
         
         let mStorageId = storageId ?? 0
         
-        // 1. Pre-scan: Expand directories to get all files & folders
-        print("FileTransferService: Pre-scanning sources...")
         let expandedItems = try await expandSources(sources: sources, direction: direction, storageId: mStorageId)
         
         guard !expandedItems.isEmpty else {
-            print("FileTransferService: No files found to transfer")
             return
         }
         
-        // Set total file count for conflict summary (files only; directories created by ensureDirectoryExists)
         self.totalFileCount = expandedItems.filter { !$0.isDirectory }.count
         
-        // 2. Conflict Scan: Compare source and destination files
         let fileItems = expandedItems.filter { !$0.isDirectory }
-        print("FileTransferService: Scanning for conflicts over \(fileItems.count) files...")
         let conflicts = try await scanForConflicts(
             items: fileItems,
             destinationDir: destinationDir,
@@ -230,7 +212,6 @@ public final class FileTransferService: ObservableObject {
                 }
                 
                 if chosenResolution == .cancel {
-                    print("FileTransferService: Transfer cancelled by user in conflict dialog")
                     self.activeBatch = nil
                     return
                 }
@@ -297,12 +278,10 @@ public final class FileTransferService: ObservableObject {
             transferQueue.append(transItem)
         }
         
-        // 5. Create the active batch
         let batch = TransferBatch()
         batch.items = transferQueue
         self.activeBatch = batch
         
-        print("FileTransferService: Starting batch transfer of \(batch.items.count) items...")
         batch.start()
         
         // Start transferring files
@@ -429,9 +408,7 @@ public final class FileTransferService: ObservableObject {
             }
         }
         
-        // End of batch
         if cancelRequested {
-            print("FileTransferService: Batch transfer ended due to cancellation")
             batch.cancel()
             let completed = completedBytesAccumulated > 0 ? " (\(FormatUtils.formatBytes(completedBytesAccumulated)) transferred)" : ""
             postTransferNotification(
@@ -441,14 +418,12 @@ public final class FileTransferService: ObservableObject {
             )
         } else {
             let failedCount = batch.failedFileCount
-            print("FileTransferService: Batch transfer completed with \(failedCount) failures")
             batch.complete()
             
             // Handle cut operation: delete successfully transferred source files
             if shouldDeleteSourcesAfterTransfer && !sourcePathsToDeleteAfterTransfer.isEmpty {
                 let failedItems = batch.items.filter { $0.status == .failed }
                 if failedItems.isEmpty {
-                    print("FileTransferService: Cut operation - deleting \(sourcePathsToDeleteAfterTransfer.count) source paths")
                     do {
                         if direction == .mtpToLocal {
                             try await bridge.deleteFiles(
@@ -461,12 +436,9 @@ public final class FileTransferService: ObservableObject {
                                 try? fileManager.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
                             }
                         }
-                        print("FileTransferService: Source files deleted for cut operation")
                     } catch {
                         ErrorLogger.log(error, message: "FileTransferService: Failed to delete source files after cut")
                     }
-                } else {
-                    print("FileTransferService: Cut operation aborted for deletion due to failed items")
                 }
             }
             isCutOperation = false
@@ -560,13 +532,11 @@ public final class FileTransferService: ObservableObject {
     
     private func expandSources(sources: [FileNode], direction: TransferDirection, storageId: UInt32) async throws -> [ScannedItem] {
         var expanded: [ScannedItem] = []
-        print("[expandSources] direction=\(direction) sources=\(sources.count)")
         
-        for (i, source) in sources.enumerated() {
+        for source in sources {
             let parentDir = source.parentPath.isEmpty
                 ? (source.path as NSString).deletingLastPathComponent
                 : source.parentPath
-            print("[expandSources] [\(i)] path=\(source.path) parentDir=\(parentDir) isDir=\(source.isDirectory)")
             
             if direction == .localToMTP {
                 try expandLocalPath(
@@ -575,18 +545,15 @@ public final class FileTransferService: ObservableObject {
                     into: &expanded
                 )
             } else {
-                print("[expandSources] Calling expandMTPPath...")
                 try await expandMTPPath(
                     path: source.path,
                     baseParent: parentDir,
                     storageId: storageId,
                     into: &expanded
                 )
-                print("[expandSources] expandMTPPath returned, total expanded=\(expanded.count)")
             }
         }
         
-        print("[expandSources] Done, total expanded items=\(expanded.count)")
         return expanded
     }
     
@@ -623,30 +590,20 @@ public final class FileTransferService: ObservableObject {
     
     private func expandMTPPath(path: String, baseParent: String, storageId: UInt32, into list: inout [ScannedItem]) async throws {
         let relativePath = getRelativePath(path: path, baseParent: baseParent)
-        print("[expandMTPPath] path=\(path) baseParent=\(baseParent) relativePath=\(relativePath)")
-
         let parentDir = (path as NSString).deletingLastPathComponent
-        print("[expandMTPPath] parentDir=\(parentDir)")
         
         let parentContents: [GoFileInfo]
         do {
             parentContents = try await bridge.walk(storageId: storageId, path: parentDir, recursive: false, skipHidden: false)
-            print("[expandMTPPath] parentContents count=\(parentContents.count)")
         } catch {
-            ErrorLogger.log(error, message: "[expandMTPPath] bridge.walk(parentDir) failed")
+            ErrorLogger.log(error, message: "bridge.walk(parentDir) failed")
             throw error
         }
         
         guard let selfNode = parentContents.first(where: { $0.path == path }) else {
-            print("[expandMTPPath] selfNode NOT FOUND in parent contents, paths in parent:")
-            for node in parentContents {
-                print("[expandMTPPath]   node.path=\(node.path) isFolder=\(node.isFolder)")
-            }
-            // Fallback: assume it's a file
             list.append(ScannedItem(absolutePath: path, relativePath: relativePath, isDirectory: false, size: 0, modificationDate: Date()))
             return
         }
-        print("[expandMTPPath] selfNode found: path=\(selfNode.path) isFolder=\(selfNode.isFolder)")
         
         let date = parseGoDate(selfNode.dateAdded)
         
@@ -654,14 +611,13 @@ public final class FileTransferService: ObservableObject {
             list.append(ScannedItem(absolutePath: path, relativePath: relativePath, isDirectory: true, size: 0, modificationDate: date))
             do {
                 let children = try await bridge.walk(storageId: storageId, path: path, recursive: true, skipHidden: false)
-                print("[expandMTPPath] recursive walk returned \(children.count) children")
                 for child in children {
                     let childRel = getRelativePath(path: child.path, baseParent: baseParent)
                     let childDate = parseGoDate(child.dateAdded)
                     list.append(ScannedItem(absolutePath: child.path, relativePath: childRel, isDirectory: child.isFolder, size: child.size, modificationDate: childDate))
                 }
             } catch {
-                ErrorLogger.log(error, message: "[expandMTPPath] recursive walk failed")
+                ErrorLogger.log(error, message: "recursive walk failed")
                 throw error
             }
         } else {

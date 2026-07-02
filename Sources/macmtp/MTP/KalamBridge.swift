@@ -120,14 +120,10 @@ private final class KalamRegistry: @unchecked Sendable {
 
 // MARK: - Global C-convention callbacks
 
-// Go's send_cb_result stores the on_cb_result_t* and later calls send_cb_result(ptr, json)
-// which does: cb = (on_cb_result_t) ptr; cb(json). Resuming a Swift continuation from
-// inside that CGo callback triggers SIGURG preemption at the Swift Concurrency boundary.
-// We bounce to a GCD queue first to avoid that.
-
 private let bounceQueue = DispatchQueue(label: "com.macmtp.callback-bounce", qos: .userInitiated)
 
-private let cDoneCallback: @convention(c) (UnsafeMutablePointer<CChar>?) -> Void = { jsonPtr in
+@_cdecl("macMTP_done_callback")
+public func macMTP_done_callback(jsonPtr: UnsafeMutablePointer<CChar>?) {
     guard let jsonPtr = jsonPtr else { return }
     let json = String(cString: jsonPtr)
     free(jsonPtr)
@@ -136,7 +132,8 @@ private let cDoneCallback: @convention(c) (UnsafeMutablePointer<CChar>?) -> Void
     }
 }
 
-private let cPreprocessCallback: @convention(c) (UnsafeMutablePointer<CChar>?) -> Void = { jsonPtr in
+@_cdecl("macMTP_preprocess_callback")
+public func macMTP_preprocess_callback(jsonPtr: UnsafeMutablePointer<CChar>?) {
     guard let jsonPtr = jsonPtr else { return }
     let json = String(cString: jsonPtr)
     free(jsonPtr)
@@ -145,7 +142,8 @@ private let cPreprocessCallback: @convention(c) (UnsafeMutablePointer<CChar>?) -
     }
 }
 
-private let cProgressCallback: @convention(c) (UnsafeMutablePointer<CChar>?) -> Void = { jsonPtr in
+@_cdecl("macMTP_progress_callback")
+public func macMTP_progress_callback(jsonPtr: UnsafeMutablePointer<CChar>?) {
     guard let jsonPtr = jsonPtr else { return }
     let json = String(cString: jsonPtr)
     free(jsonPtr)
@@ -154,7 +152,8 @@ private let cProgressCallback: @convention(c) (UnsafeMutablePointer<CChar>?) -> 
     }
 }
 
-private let cTransferDoneCallback: @convention(c) (UnsafeMutablePointer<CChar>?) -> Void = { jsonPtr in
+@_cdecl("macMTP_transfer_done_callback")
+public func macMTP_transfer_done_callback(jsonPtr: UnsafeMutablePointer<CChar>?) {
     guard let jsonPtr = jsonPtr else { return }
     let json = String(cString: jsonPtr)
     free(jsonPtr)
@@ -163,25 +162,12 @@ private let cTransferDoneCallback: @convention(c) (UnsafeMutablePointer<CChar>?)
     }
 }
 
-// Stable callback pointers — Go stores these and dereferences them asynchronously
-// after the calling closure has returned. Must be nonisolated(unsafe) since they
-// cross the actor boundary from a C callback context.
-
-
-
-
-
-
-
-
 // MARK: - KalamBridge Actor
 
 public actor KalamBridge {
     public static let shared = KalamBridge()
 
     private let jsonDecoder: JSONDecoder
-
-    /// macOS 15+ Swift Concurrency cooperative threads interfere with Go's signal handling,
     private let mtpQueue: DispatchQueue
 
     private init() {
@@ -191,20 +177,19 @@ public actor KalamBridge {
 
     // MARK: - Helper execution wrappers
 
-    internal func executeMTP<T: Decodable>(_ operation: @escaping @Sendable (on_cb_result_t) -> Void) async throws -> T {
+    internal func executeMTP<T: Decodable>(_ operation: @escaping @Sendable () -> Void) async throws -> T {
         let jsonString = try await withCheckedThrowingContinuation { continuation in
             KalamRegistry.shared.setDoneContinuation(continuation)
             mtpQueue.async {
-                operation(cDoneCallback)
+                operation()
             }
         }
-
         return try decodeResponse(jsonString)
     }
 
     internal func executeMTPWithInput<T: Decodable, I: Encodable>(
         _ input: I,
-        _ operation: @escaping @Sendable (UnsafeMutablePointer<CChar>?, on_cb_result_t) -> Void
+        _ operation: @escaping @Sendable (UnsafeMutablePointer<CChar>?) -> Void
     ) async throws -> T {
         let inputData = try JSONEncoder().encode(input)
         guard let inputJson = String(data: inputData, encoding: .utf8) else {
@@ -216,16 +201,14 @@ public actor KalamBridge {
             mtpQueue.async {
                 var cInput = inputJson.utf8CString
                 cInput.withUnsafeMutableBufferPointer { buffer in
-                    operation(buffer.baseAddress, cDoneCallback)
+                    operation(buffer.baseAddress)
                 }
             }
         }
-
         return try decodeResponse(jsonString)
     }
 
     private func decodeResponse<T: Decodable>(_ json: String) throws -> T {
-        // First check for error response
         if let errResp = try? jsonDecoder.decode(GoErrorResponse.self, from: json.data(using: .utf8) ?? Data()),
            let errMsg = errResp.error, !errMsg.isEmpty {
             throw KalamError.operationFailed(errMsg)
@@ -234,7 +217,6 @@ public actor KalamBridge {
         do {
             return try jsonDecoder.decode(T.self, from: json.data(using: .utf8) ?? Data())
         } catch {
-            print("Failed to decode MTP response: \(json). Error: \(error)")
             throw KalamError.invalidResponse
         }
     }
@@ -242,8 +224,8 @@ public actor KalamBridge {
     // MARK: - Public APIs
 
     public func initialize() async throws -> GoDeviceInfoData {
-        let result: GoDeviceInfoResult = try await executeMTP { doneCb in
-            Initialize(doneCb)
+        let result: GoDeviceInfoResult = try await executeMTP {
+            Initialize()
         }
         guard let data = result.data else {
             throw KalamError.operationFailed(result.error ?? "Failed to initialize device")
@@ -252,8 +234,8 @@ public actor KalamBridge {
     }
 
     public func fetchStorages() async throws -> [GoStorageData] {
-        let result: GoStoragesResult = try await executeMTP { doneCb in
-            FetchStorages(doneCb)
+        let result: GoStoragesResult = try await executeMTP {
+            FetchStorages()
         }
         guard let data = result.data else {
             throw KalamError.operationFailed(result.error ?? "Failed to fetch storages")
@@ -278,8 +260,8 @@ public actor KalamBridge {
             skipHiddenFiles: false
         )
 
-        let result: GoWalkResult = try await executeMTPWithInput(input) { inputJson, doneCb in
-            Walk(inputJson, doneCb)
+        let result: GoWalkResult = try await executeMTPWithInput(input) { inputJson in
+            Walk(inputJson)
         }
         guard let data = result.data else {
             throw KalamError.operationFailed(result.error ?? "Failed to walk directory")
@@ -294,8 +276,8 @@ public actor KalamBridge {
         }
 
         let input = MakeDirectoryInput(storageId: storageId, fullPath: path)
-        let result: GoSimpleResult = try await executeMTPWithInput(input) { inputJson, doneCb in
-            MakeDirectory(inputJson, doneCb)
+        let result: GoSimpleResult = try await executeMTPWithInput(input) { inputJson in
+            MakeDirectory(inputJson)
         }
         if let err = result.error, !err.isEmpty {
             throw KalamError.operationFailed(err)
@@ -309,8 +291,8 @@ public actor KalamBridge {
         }
 
         let input = DeleteFileInput(storageId: storageId, Files: paths)
-        let result: GoSimpleResult = try await executeMTPWithInput(input) { inputJson, doneCb in
-            DeleteFile(inputJson, doneCb)
+        let result: GoSimpleResult = try await executeMTPWithInput(input) { inputJson in
+            DeleteFile(inputJson)
         }
         if let err = result.error, !err.isEmpty {
             throw KalamError.operationFailed(err)
@@ -325,8 +307,8 @@ public actor KalamBridge {
         }
 
         let input = RenameFileInput(storageId: storageId, fullPath: path, newFileName: newName)
-        let result: GoSimpleResult = try await executeMTPWithInput(input) { inputJson, doneCb in
-            RenameFile(inputJson, doneCb)
+        let result: GoSimpleResult = try await executeMTPWithInput(input) { inputJson in
+            RenameFile(inputJson)
         }
         if let err = result.error, !err.isEmpty {
             throw KalamError.operationFailed(err)
@@ -340,14 +322,13 @@ public actor KalamBridge {
         }
 
         let input = FileExistsInput(storageId: storageId, Files: paths)
-        let result: GoFileExistsResult = try await executeMTPWithInput(input) { inputJson, doneCb in
-            FileExists(inputJson, doneCb)
+        let result: GoFileExistsResult = try await executeMTPWithInput(input) { inputJson in
+            FileExists(inputJson)
         }
         guard let data = result.data else {
             throw KalamError.operationFailed(result.error ?? "Failed to check file existence")
         }
 
-        // Map them back to the input order
         var resultMap = [String: Bool]()
         for entry in data {
             resultMap[entry.fullpath] = entry.exists
@@ -409,7 +390,7 @@ public actor KalamBridge {
             mtpQueue.async {
                 var cInput = inputJson.utf8CString
                 cInput.withUnsafeMutableBufferPointer { buffer in
-                    UploadFiles(buffer.baseAddress, cPreprocessCallback, cProgressCallback, cTransferDoneCallback)
+                    UploadFiles(buffer.baseAddress)
                 }
             }
         }
@@ -469,7 +450,7 @@ public actor KalamBridge {
             mtpQueue.async {
                 var cInput = inputJson.utf8CString
                 cInput.withUnsafeMutableBufferPointer { buffer in
-                    DownloadFiles(buffer.baseAddress, cPreprocessCallback, cProgressCallback, cTransferDoneCallback)
+                    DownloadFiles(buffer.baseAddress)
                 }
             }
         }
@@ -480,8 +461,8 @@ public actor KalamBridge {
     }
 
     public func dispose() async throws {
-        let _: GoSimpleResult = try await executeMTP { doneCb in
-            Dispose(doneCb)
+        let _: GoSimpleResult = try await executeMTP {
+            Dispose()
         }
     }
 }

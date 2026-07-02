@@ -27,9 +27,6 @@ struct PreferencesView: View {
                 }
                 .pickerStyle(RadioGroupPickerStyle())
                 
-                Text("Note: Legacy mode is currently a placeholder for future implementation.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
             }
             .padding(.bottom, 10)
 

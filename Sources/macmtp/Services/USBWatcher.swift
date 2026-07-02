@@ -28,9 +28,7 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
     public func startWatching() {
         guard !isWatching else { return }
         
-        // Create notification port
         guard let port = IONotificationPortCreate(kIOMainPortDefault) else {
-            print("USBWatcher: Failed to create IONotificationPort")
             return
         }
         self.notificationPort = port
@@ -44,7 +42,6 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         // Android MTP devices typically present as USB devices.
         guard let matchingDict1 = IOServiceMatching(kIOUSBDeviceClassName),
               let matchingDict2 = IOServiceMatching(kIOUSBDeviceClassName) else {
-            print("USBWatcher: Failed to create matching dictionaries")
             return
         }
         
@@ -67,7 +64,6 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         )
         
         if addedResult != kIOReturnSuccess {
-            print("USBWatcher: Failed to register for device insertion notifications")
             stopWatching()
             return
         }
@@ -93,7 +89,6 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         )
         
         if removedResult != kIOReturnSuccess {
-            print("USBWatcher: Failed to register for device removal notifications")
             stopWatching()
             return
         }
@@ -104,7 +99,6 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         }
         
         isWatching = true
-        print("USBWatcher: Started monitoring USB ports")
     }
     
     public func stopWatching() {
@@ -131,7 +125,6 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         }
         
         isWatching = false
-        print("USBWatcher: Stopped monitoring USB ports")
     }
     
     // MARK: - Private Event Handlers
@@ -140,27 +133,16 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         var deviceCount = 0
         while case let device = IOIteratorNext(iterator), device != 0 {
             deviceCount += 1
-            
-            // Get device details if needed (e.g. name, vendor, product ID)
-            if let name = getDeviceName(device: device) {
-                print("USBWatcher: USB Device Connected - \(name)")
-            }
-            
             IOObjectRelease(device)
         }
         
-        // Trigger MTP scan when a new USB device is connected
         if deviceCount > 0 {
             let autoDetect = UserDefaults.standard.object(forKey: "autoDetectDevice") as? Bool ?? true
             if autoDetect {
-                print("USBWatcher: USB device detected, scanning MTP devices...")
-                // Wait briefly for the device descriptor to settle, unless it's already plugged in
                 if !isInitialScan {
-                    try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
                 }
                 await MTPDeviceManager.shared.connectDevice()
-            } else {
-                print("USBWatcher: Auto-detect disabled. Ignoring device.")
             }
         }
     }
@@ -169,16 +151,10 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         var deviceCount = 0
         while case let device = IOIteratorNext(iterator), device != 0 {
             deviceCount += 1
-            if let name = getDeviceName(device: device) {
-                print("USBWatcher: USB Device Disconnected - \(name)")
-            }
             IOObjectRelease(device)
         }
         
         if deviceCount > 0 {
-            print("USBWatcher: USB device removal detected, checking MTP connection...")
-            // Verify if device is still accessible, if not disconnect
-            // MTPDeviceManager will check connection or disconnect
             await verifyMtpConnection()
         }
     }
@@ -188,7 +164,6 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
 
         let result = try? await KalamBridge.shared.fetchStorages()
         if result == nil {
-            print("USBWatcher: Active MTP device is no longer reachable. Disconnecting...")
             await MTPDeviceManager.shared.disconnectDevice()
         }
     }

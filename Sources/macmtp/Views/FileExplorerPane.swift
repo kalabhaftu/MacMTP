@@ -3,7 +3,6 @@ import UniformTypeIdentifiers
 
 // MARK: - Dropped File
 
-/// whether it came from the local filesystem or an MTP device.
 struct DroppedFile {
     let path: String
     let isLocal: Bool
@@ -79,7 +78,6 @@ enum FileViewMode: String, CaseIterable {
 
 // MARK: - File Explorer Pane
 
-/// and MTP device file browsing. Features sortable columns, multi-selection,
 struct FileExplorerPane: View {
     // MARK: - Properties
 
@@ -101,7 +99,7 @@ struct FileExplorerPane: View {
     var onFileOperation: ((FileOperation) -> Void)? = nil
     var onPaste: (() -> Void)? = nil
     
-    // MARK: - Staternal State
+    // MARK: - Internal State
 
     @State private var loadingState: FileExplorerLoadingState = .idle
     @State private var displayedFiles: [FileNode] = []
@@ -947,7 +945,6 @@ struct FileExplorerPane: View {
         let cleanPath = path.isEmpty ? "/" : path
 
         if isLocal {
-            // Update history
             if pathHistoryIndex < pathHistory.count - 1 {
                 pathHistory.removeSubrange((pathHistoryIndex + 1)...)
             }
@@ -1188,8 +1185,6 @@ struct FileExplorerPane: View {
         }
     }
 
-    // Removed updateSelectionForMarquee
-
     private func dragProvider(for file: FileNode) -> NSItemProvider {
         let items: [FileNode]
         if selectedItems.contains(file.path) {
@@ -1203,8 +1198,7 @@ struct FileExplorerPane: View {
         let provider = NSItemProvider()
         
         if isLocal {
-            // For Finder compatibility when dragging multiple files
-            let paths = items.map { $0.path }
+        let paths = items.map { $0.path }
             if let data = try? PropertyListSerialization.data(fromPropertyList: paths, format: .xml, options: 0) {
                 provider.registerDataRepresentation(forTypeIdentifier: "NSFilenamesPboardType", visibility: .all) { completion in
                     completion(data, nil)
@@ -1212,7 +1206,6 @@ struct FileExplorerPane: View {
                 }
             }
             
-            // Still register the primary object for single-file drag scenarios
             if let firstLocal = items.first {
                 let url = URL(fileURLWithPath: firstLocal.path)
                 provider.registerObject(url as NSURL, visibility: .all)
@@ -1253,8 +1246,6 @@ struct FileExplorerPane: View {
             selectedItems.insert(displayedFiles[i].path)
         }
     }
-
-    // MARK: - Keyboard Letter Navigation
 
     private func handleKeyPress(_ key: String) {
         guard !key.isEmpty, !displayedFiles.isEmpty else { return }
@@ -1301,7 +1292,7 @@ struct FileExplorerPane: View {
                 try FileManager.default.moveItem(at: sourceURL, to: destURL)
                 loadDirectory()
             } catch {
-                print("Rename failed: \(error)")
+                ErrorLogger.log(error, message: "Rename failed")
             }
         } else {
             onFileOperation?(.rename(oldPath: file.path, newName: trimmed))
@@ -1318,7 +1309,7 @@ struct FileExplorerPane: View {
                 try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: false)
                 loadDirectory()
             } catch {
-                print("Create folder failed: \(error)")
+                ErrorLogger.log(error, message: "Create folder failed")
             }
         } else {
             onFileOperation?(.newFolder(parentPath: currentPath, name: trimmed))

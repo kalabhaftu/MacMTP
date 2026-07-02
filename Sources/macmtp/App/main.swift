@@ -1,6 +1,5 @@
 import Cocoa
 import SwiftUI
-import Darwin
 import Sentry
 
 // MARK: - Application Delegate
@@ -54,7 +53,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 
                 // Recommended by Sentry for performance profiling
                 options.tracesSampleRate = 1.0
-                options.profilesSampleRate = 1.0
+                
             }
         }
         
@@ -75,7 +74,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func applicationWillTerminate(_ notification: Notification) {
-        // Cleanup: dispose of any active MTP connections
     }
     
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
