@@ -162,6 +162,9 @@ build_kalam_arch() {
         if [[ -f "$PROJECT_ROOT/scripts/kalam.go.patched" ]]; then
             cp "$PROJECT_ROOT/scripts/kalam.go.patched" "kalam.go"
         fi
+        if [[ -f "$PROJECT_ROOT/scripts/send_to_js_main.go.patched" ]]; then
+            cp "$PROJECT_ROOT/scripts/send_to_js_main.go.patched" "send_to_js/main.go"
+        fi
         PKG_CONFIG_PATH="$pc_dir" \
         CGO_ENABLED=1 \
         GOARCH="$go_arch" \
