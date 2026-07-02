@@ -166,10 +166,29 @@ private func cTransferDoneCallback(jsonPtr: UnsafeMutablePointer<CChar>?) {
 // Stable callback pointers — Go stores these and dereferences them asynchronously
 // after the calling closure has returned. Must be nonisolated(unsafe) since they
 // cross the actor boundary from a C callback context.
-nonisolated(unsafe) private var globalDoneCb: on_cb_result_t? = cDoneCallback
-nonisolated(unsafe) private var globalPreprocessCb: on_cb_result_t? = cPreprocessCallback
-nonisolated(unsafe) private var globalProgressCb: on_cb_result_t? = cProgressCallback
-nonisolated(unsafe) private var globalTransferDoneCb: on_cb_result_t? = cTransferDoneCallback
+nonisolated(unsafe) private let globalDoneCbPtr: UnsafeMutablePointer<on_cb_result_t?> = {
+    let ptr = UnsafeMutablePointer<on_cb_result_t?>.allocate(capacity: 1)
+    ptr.initialize(to: cDoneCallback)
+    return ptr
+}()
+
+nonisolated(unsafe) private let globalPreprocessCbPtr: UnsafeMutablePointer<on_cb_result_t?> = {
+    let ptr = UnsafeMutablePointer<on_cb_result_t?>.allocate(capacity: 1)
+    ptr.initialize(to: cPreprocessCallback)
+    return ptr
+}()
+
+nonisolated(unsafe) private let globalProgressCbPtr: UnsafeMutablePointer<on_cb_result_t?> = {
+    let ptr = UnsafeMutablePointer<on_cb_result_t?>.allocate(capacity: 1)
+    ptr.initialize(to: cProgressCallback)
+    return ptr
+}()
+
+nonisolated(unsafe) private let globalTransferDoneCbPtr: UnsafeMutablePointer<on_cb_result_t?> = {
+    let ptr = UnsafeMutablePointer<on_cb_result_t?>.allocate(capacity: 1)
+    ptr.initialize(to: cTransferDoneCallback)
+    return ptr
+}()
 
 // MARK: - KalamBridge Actor
 
@@ -192,7 +211,7 @@ public actor KalamBridge {
         let jsonString = try await withCheckedThrowingContinuation { continuation in
             KalamRegistry.shared.setDoneContinuation(continuation)
             mtpQueue.async {
-                operation(&globalDoneCb)
+                operation(globalDoneCbPtr)
             }
         }
 
@@ -213,7 +232,7 @@ public actor KalamBridge {
             mtpQueue.async {
                 var cInput = inputJson.utf8CString
                 cInput.withUnsafeMutableBufferPointer { buffer in
-                    operation(buffer.baseAddress, &globalDoneCb)
+                    operation(buffer.baseAddress, globalDoneCbPtr)
                 }
             }
         }
@@ -406,7 +425,7 @@ public actor KalamBridge {
             mtpQueue.async {
                 var cInput = inputJson.utf8CString
                 cInput.withUnsafeMutableBufferPointer { buffer in
-                    UploadFiles(buffer.baseAddress, &globalPreprocessCb, &globalProgressCb, &globalTransferDoneCb)
+                    UploadFiles(buffer.baseAddress, globalPreprocessCbPtr, globalProgressCbPtr, globalTransferDoneCbPtr)
                 }
             }
         }
@@ -466,7 +485,7 @@ public actor KalamBridge {
             mtpQueue.async {
                 var cInput = inputJson.utf8CString
                 cInput.withUnsafeMutableBufferPointer { buffer in
-                    DownloadFiles(buffer.baseAddress, &globalPreprocessCb, &globalProgressCb, &globalTransferDoneCb)
+                    DownloadFiles(buffer.baseAddress, globalPreprocessCbPtr, globalProgressCbPtr, globalTransferDoneCbPtr)
                 }
             }
         }
