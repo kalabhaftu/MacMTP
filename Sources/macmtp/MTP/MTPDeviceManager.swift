@@ -164,9 +164,18 @@ public final class MTPDeviceManager: ObservableObject {
         isLoading = true
         errorMessage = nil
 
+        refreshGeneration += 1
+        let generation = refreshGeneration
+        let requestedPath = currentMTPPath
+
         do {
-            let goFiles = try await bridge.listDirectory(storageId: storageId, path: currentMTPPath)
-            
+            let goFiles = try await bridge.listDirectory(storageId: storageId, path: requestedPath)
+
+            // If the user navigated again while this request was in flight,
+            // a newer refreshFiles() call already owns the latest generation.
+            // Discard this stale result instead of clobbering mtpFiles.
+            guard generation == refreshGeneration else { return }
+
             let mapped = goFiles.map { item -> FileNode in
                 let modDate = dateFormatter.date(from: item.dateAdded) ?? Date()
                 return FileNode(
@@ -182,14 +191,17 @@ public final class MTPDeviceManager: ObservableObject {
                 )
             }
             self.mtpFiles = mapped
-            
+
         } catch {
+            guard generation == refreshGeneration else { return }
             ErrorLogger.log(error, message: "Failed to list MTP directory")
             self.errorMessage = "Failed to list directory: \(error.localizedDescription)"
             self.mtpFiles = []
         }
 
-        isLoading = false
+        if generation == refreshGeneration {
+            isLoading = false
+        }
     }
 
     public func navigateTo(path: String) async {

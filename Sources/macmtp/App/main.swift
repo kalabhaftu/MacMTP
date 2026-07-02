@@ -100,7 +100,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         let fileMenuItem = NSMenuItem()
         let fileMenu = NSMenu(title: "File")
-        fileMenu.addItem(withTitle: "New Folder", action: nil, keyEquivalent: "")
+        fileMenu.addItem(withTitle: "New Folder", action: #selector(menuNewFolder), keyEquivalent: "n")
         fileMenu.addItem(NSMenuItem.separator())
         fileMenu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         fileMenuItem.submenu = fileMenu
@@ -117,7 +117,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         let viewMenuItem = NSMenuItem()
         let viewMenu = NSMenu(title: "View")
-        viewMenu.addItem(withTitle: "Refresh", action: nil, keyEquivalent: "")
+        viewMenu.addItem(withTitle: "Refresh", action: #selector(menuRefresh), keyEquivalent: "r")
         viewMenu.addItem(NSMenuItem.separator())
         viewMenu.addItem(withTitle: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
         viewMenuItem.submenu = viewMenu
@@ -169,6 +169,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         UpdaterService.shared.checkForUpdates(silent: false)
     }
     
+    @objc private func menuNewFolder() {
+        NotificationCenter.default.post(name: .menuNewFolderRequested, object: nil)
+    }
+
+    @objc private func menuRefresh() {
+        NotificationCenter.default.post(name: .menuRefreshRequested, object: nil)
+    }
+
     @objc private func openIssueTracker() {
         if let url = URL(string: "https://github.com/kalabhaftu/MacMTP/issues") {
             NSWorkspace.shared.open(url)

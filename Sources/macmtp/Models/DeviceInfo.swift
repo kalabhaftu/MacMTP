@@ -72,6 +72,7 @@ public struct MTPStorageInfo: Identifiable, Codable, Hashable, Sendable {
 }
 
 
+#if DEBUG
 extension MTPStorageInfo {
     public static let mockInternal = MTPStorageInfo(
         storageId: 0x0001_0001,
@@ -89,6 +90,7 @@ extension MTPStorageInfo {
         storageType: .sdCard
     )
 }
+#endif
 
 
 public struct MTPDeviceInfo: Identifiable, Codable, Hashable, Sendable {
@@ -148,6 +150,7 @@ public struct MTPDeviceInfo: Identifiable, Codable, Hashable, Sendable {
 }
 
 
+#if DEBUG
 extension MTPDeviceInfo {
     public static let mock = MTPDeviceInfo(
         manufacturer: "Google",
@@ -168,3 +171,4 @@ extension MTPDeviceInfo {
         storages: []
     )
 }
+#endif

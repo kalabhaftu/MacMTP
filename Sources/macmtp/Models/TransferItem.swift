@@ -309,6 +309,7 @@ extension TransferItem {
 }
 
 
+#if DEBUG
 extension TransferItem {
     public static let mockData: [TransferItem] = [
         TransferItem(
@@ -348,3 +349,4 @@ extension TransferItem {
         ),
     ]
 }
+#endif

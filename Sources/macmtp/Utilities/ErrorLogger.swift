@@ -3,7 +3,7 @@ import Sentry
 
 public struct ErrorLogger {
     public static func log(_ error: Error, message: String? = nil, userInfo: [String: Any]? = nil) {
-        let errMsg = message != nil ? "\(message!): \(error.localizedDescription)" : error.localizedDescription
+        let errMsg = message.map { "\($0): \(error.localizedDescription)" } ?? error.localizedDescription
         let sendReports = UserDefaults.standard.object(forKey: "sendCrashReports") as? Bool ?? true
         if sendReports {
             let event = Event(level: .error)

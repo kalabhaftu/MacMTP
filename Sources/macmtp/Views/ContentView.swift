@@ -316,7 +316,14 @@ struct ContentView: View {
                 mtpTotalBytes = Int64(selected.totalCapacity)
                 mtpFreeBytes = Int64(selected.freeSpace)
             }
-        }// Observe FileTransferService for showing transfer progress and status bar
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .menuNewFolderRequested)) { _ in
+            handleNewFolder()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .menuRefreshRequested)) { _ in
+            handleRefresh()
+        }
+        // Observe FileTransferService for showing transfer progress and status bar
         .onReceive(FileTransferService.shared.$activeBatch) { batch in
             showTransferProgress = batch != nil
             statusIsTransferring = batch?.isActive ?? false

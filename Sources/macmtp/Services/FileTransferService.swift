@@ -4,6 +4,8 @@ import UserNotifications
 
 extension Notification.Name {
     static let localDirectoryNeedsRefresh = Notification.Name("localDirectoryNeedsRefresh")
+    static let menuNewFolderRequested = Notification.Name("menuNewFolderRequested")
+    static let menuRefreshRequested = Notification.Name("menuRefreshRequested")
 }
 
 @MainActor
@@ -73,7 +75,6 @@ public final class FileTransferService: ObservableObject {
     public func resolveConflicts(with resolution: ConflictResolution, rememberForBatch: Bool = true) {
         guard let continuation = conflictContinuation else { return }
         conflictContinuation = nil
-        self.conflictContinuation = nil
         continuation.resume(returning: (resolution, rememberForBatch))
         showConflictDialog = false
     }

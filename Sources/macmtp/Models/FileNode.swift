@@ -181,6 +181,7 @@ extension FileNode {
 }
 
 
+#if DEBUG
 extension FileNode {
     public static let mockData: [FileNode] = {
         let calendar = Calendar.current
@@ -294,3 +295,4 @@ extension FileNode {
         ]
     }()
 }
+#endif
