@@ -41,6 +41,9 @@ struct PreferencesView: View {
                     Toggle("Automatically check for updates", isOn: $autoCheckUpdates)
                     Toggle("Automatically download new updates", isOn: $autoDownloadUpdates)
                         .disabled(!autoCheckUpdates)
+                    Button("Check for Updates…") {
+                        UpdaterService.shared.checkForUpdates(silent: false)
+                    }
                 }
                 .padding(.bottom, 10)
 
