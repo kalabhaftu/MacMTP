@@ -96,6 +96,7 @@ public final class MTPDeviceManager: ObservableObject {
                 await refreshFiles()
             }
         } catch {
+            ErrorLogger.log(error, message: "MTP connection failed")
             self.errorMessage = "Failed to connect: \(error.localizedDescription)"
             self.isConnected = false
             self.deviceInfo = nil
@@ -126,7 +127,7 @@ public final class MTPDeviceManager: ObservableObject {
         do {
             try await bridge.dispose()
         } catch {
-            print("Failed to dispose MTP device cleanly: \(error)")
+            ErrorLogger.log(error, message: "Failed to dispose MTP device cleanly")
         }
         
         self.isConnected = false
@@ -166,7 +167,7 @@ public final class MTPDeviceManager: ObservableObject {
                 )
             }
         } catch {
-            print("Failed to refresh storages: \(error)")
+            ErrorLogger.log(error, message: "Failed to refresh storages")
         }
     }
 
@@ -199,6 +200,7 @@ public final class MTPDeviceManager: ObservableObject {
             
             // MTP directory sizes are too expensive to calculate automatically as recursive Walk blocks the single-threaded MTP session.
         } catch {
+            ErrorLogger.log(error, message: "Failed to list MTP directory")
             self.errorMessage = "Failed to list directory: \(error.localizedDescription)"
             self.mtpFiles = []
         }

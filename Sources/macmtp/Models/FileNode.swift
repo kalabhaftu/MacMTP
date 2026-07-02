@@ -200,14 +200,8 @@ extension FileNode {
                 return total
             }.value
         } else {
-            guard let storageId = storageId else { return nil }
-            do {
-                let files = try await KalamBridge.shared.listDirectory(storageId: storageId, path: path, recursive: true)
-                return files.reduce(0) { $0 + $1.size }
-            } catch {
-                print("Failed to calculate MTP directory size for \(path): \(error)")
-                return nil
-            }
+            // MTP directory size calculations are disabled because recursive Walk blocks the single-threaded MTP session.
+            return nil
         }
     }
 }

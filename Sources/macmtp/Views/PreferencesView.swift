@@ -8,7 +8,7 @@ struct PreferencesView: View {
     @AppStorage("autoCheckUpdates") private var autoCheckUpdates: Bool = true
     @AppStorage("autoDownloadUpdates") private var autoDownloadUpdates: Bool = false
     @AppStorage("autoDetectDevice") private var autoDetectDevice: Bool = true
-    @AppStorage("sendCrashReports") private var sendCrashReports: Bool = false
+    @AppStorage("sendCrashReports") private var sendCrashReports: Bool = true
 
     var body: some View {
         Form {

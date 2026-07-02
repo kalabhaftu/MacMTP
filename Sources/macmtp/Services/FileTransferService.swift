@@ -116,7 +116,7 @@ public final class FileTransferService: ObservableObject {
                 )
                 print("[Transfer] performTransfer completed successfully")
             } catch {
-                print("[Transfer] Transfer failed with error: \(error.localizedDescription)")
+                ErrorLogger.log(error, message: "File transfer failed")
                 activeBatch?.cancel()
                 postTransferNotification(
                     title: "Transfer Failed",
@@ -148,7 +148,7 @@ public final class FileTransferService: ObservableObject {
                 )
                 try await center.add(request)
             } catch {
-                print("Failed to post notification: \(error)")
+                ErrorLogger.log(error, message: "Failed to post notification")
             }
         }
     }
@@ -341,7 +341,7 @@ public final class FileTransferService: ObservableObject {
                 // Ensure destination parent directory exists
                 try await ensureDirectoryExists(path: destParent, direction: direction, storageId: storageId)
             } catch {
-                print("FileTransferService: Failed to create parent directory \(destParent): \(error.localizedDescription)")
+                ErrorLogger.log(error, message: "FileTransferService: Failed to create parent directory \(destParent)")
                 // Mark all items in this group as failed
                 for idx in indices {
                     var itm = batch.items[idx]
@@ -416,7 +416,7 @@ public final class FileTransferService: ObservableObject {
                     }
                     
                 } catch {
-                    print("FileTransferService: File copy failed for chunk in \(destParent). Error: \(error.localizedDescription)")
+                    ErrorLogger.log(error, message: "FileTransferService: File copy failed for chunk in \(destParent)")
                     // Mark items that didn't complete as failed
                     for idx in chunkIndices {
                         var itm = batch.items[idx]
@@ -463,7 +463,7 @@ public final class FileTransferService: ObservableObject {
                         }
                         print("FileTransferService: Source files deleted for cut operation")
                     } catch {
-                        print("FileTransferService: Failed to delete source files after cut: \(error)")
+                        ErrorLogger.log(error, message: "FileTransferService: Failed to delete source files after cut")
                     }
                 } else {
                     print("FileTransferService: Cut operation aborted for deletion due to failed items")
@@ -633,7 +633,7 @@ public final class FileTransferService: ObservableObject {
             parentContents = try await bridge.walk(storageId: storageId, path: parentDir, recursive: false, skipHidden: false)
             print("[expandMTPPath] parentContents count=\(parentContents.count)")
         } catch {
-            print("[expandMTPPath] bridge.walk(parentDir) failed: \(error)")
+            ErrorLogger.log(error, message: "[expandMTPPath] bridge.walk(parentDir) failed")
             throw error
         }
         
@@ -661,7 +661,7 @@ public final class FileTransferService: ObservableObject {
                     list.append(ScannedItem(absolutePath: child.path, relativePath: childRel, isDirectory: child.isFolder, size: child.size, modificationDate: childDate))
                 }
             } catch {
-                print("[expandMTPPath] recursive walk failed: \(error)")
+                ErrorLogger.log(error, message: "[expandMTPPath] recursive walk failed")
                 throw error
             }
         } else {

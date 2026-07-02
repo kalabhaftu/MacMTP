@@ -1077,6 +1077,7 @@ struct FileExplorerPane: View {
     }
 
     private func calculateDirectorySizesAsync() {
+        guard isLocal else { return }
         let gen = sizeGen
         let currentFiles = files
         let local = isLocal

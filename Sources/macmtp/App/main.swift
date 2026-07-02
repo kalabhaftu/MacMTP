@@ -43,13 +43,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Build the menu bar
         setupMainMenu()
         
-        // Initialize Sentry if privacy toggle is enabled
-        let sendReports = UserDefaults.standard.object(forKey: "sendCrashReports") as? Bool ?? false
+        // Initialize Sentry if privacy toggle is enabled (defaults to true)
+        let sendReports = UserDefaults.standard.object(forKey: "sendCrashReports") as? Bool ?? true
         if sendReports {
             SentrySDK.start { options in
                 options.dsn = "https://85a2a845bf5e0409b28e64c446f870e1@o4511628143820800.ingest.us.sentry.io/4511628158763008"
                 options.debug = false
                 options.sendDefaultPii = true
+                options.releaseName = AppVersion.current
             }
         }
         

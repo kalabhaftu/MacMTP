@@ -19,6 +19,8 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
                 
                 let (data, response) = try await URLSession.shared.data(for: request)
                 guard let httpResp = response as? HTTPURLResponse, httpResp.statusCode == 200 else {
+                    let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+                    ErrorLogger.logMessage("Failed to fetch update info. HTTP Status: \(status)")
                     if !silent { showNoUpdateAlert(message: "Failed to fetch update information from GitHub.") }
                     return
                 }
@@ -48,9 +50,11 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
                         if !silent { showNoUpdateAlert(message: "You are running the latest version of macMTP (\(AppVersion.current)).") }
                     }
                 } else {
+                    ErrorLogger.logMessage("Failed to parse update info from GitHub response payload.")
                     if !silent { showNoUpdateAlert(message: "Failed to parse update information.") }
                 }
             } catch {
+                ErrorLogger.log(error, message: "Error checking for updates")
                 if !silent { showNoUpdateAlert(message: "Error checking for updates: \(error.localizedDescription)") }
             }
         }
@@ -99,6 +103,7 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
                     }
                 }
             } catch {
+                ErrorLogger.log(error, message: "Download update error")
                 await MainActor.run {
                     NSApplication.shared.abortModal()
                     showNoUpdateAlert(message: "Download error: \(error.localizedDescription)")
