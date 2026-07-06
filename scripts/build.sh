@@ -273,9 +273,23 @@ else
     copy_libusb_for_bundle "$TARGET_ARCH" "$APP_BUNDLE/Contents/MacOS/libusb.dylib"
 fi
 
-install_name_tool -id "@executable_path/libusb.dylib" "$APP_BUNDLE/Contents/MacOS/libusb.dylib" 2>/dev/null || true
-install_name_tool -change "libusb-1.0.0.dylib" "@executable_path/libusb.dylib" "$APP_BUNDLE/Contents/MacOS/$APP_NAME" 2>/dev/null || true
-install_name_tool -change "libusb-1.0.dylib" "@executable_path/libusb.dylib" "$APP_BUNDLE/Contents/MacOS/$APP_NAME" 2>/dev/null || true
+EMBEDDED_LIBUSB="$(otool -L "$APP_BUNDLE/Contents/MacOS/$APP_NAME" \
+    | grep 'libusb' | awk '{print $1}')"
+
+if [[ -z "$EMBEDDED_LIBUSB" ]]; then
+    echo "ERROR: No libusb reference found in binary"
+    exit 1
+fi
+
+echo "  Rewriting dylib reference: $EMBEDDED_LIBUSB -> @executable_path/libusb.dylib"
+install_name_tool -id "@executable_path/libusb.dylib" "$APP_BUNDLE/Contents/MacOS/libusb.dylib"
+install_name_tool -change "$EMBEDDED_LIBUSB" "@executable_path/libusb.dylib" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+
+if otool -L "$APP_BUNDLE/Contents/MacOS/$APP_NAME" | grep 'libusb' | grep -qv '@executable_path'; then
+    echo "ERROR: libusb path was not rewritten. Binary still references:"
+    otool -L "$APP_BUNDLE/Contents/MacOS/$APP_NAME" | grep 'libusb' | grep -v '@executable_path'
+    exit 1
+fi
 echo -n "APPL????" > "$APP_BUNDLE/Contents/PkgInfo"
 
 echo ""
