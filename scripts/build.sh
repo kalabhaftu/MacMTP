@@ -227,11 +227,25 @@ fi
 
 cp "$KALAM_DIR/libkalam.h" "$KALAM_OUTPUT/include/kalam.h" 2>/dev/null || true
 
+rewrite_libusb_in_binary() {
+    local bin="$1"
+    local ref
+    ref="$(otool -L "$bin" | grep 'libusb' | awk '{print $1}')"
+    if [[ -z "$ref" ]]; then
+        echo "ERROR: No libusb reference found in $bin" >&2
+        exit 1
+    fi
+    echo "  Rewriting dylib reference in $(basename "$bin"): $ref -> @executable_path/libusb.dylib"
+    install_name_tool -change "$ref" "@executable_path/libusb.dylib" "$bin"
+}
+
 echo ""
 echo "Step 2: Build Swift"
 if [[ "$BUILD_UNIVERSAL" == true ]]; then
     ARM_BIN="$(build_swift_arch arm64 release)"
     X86_BIN="$(build_swift_arch x86_64 release)"
+    rewrite_libusb_in_binary "$ARM_BIN"
+    rewrite_libusb_in_binary "$X86_BIN"
     mkdir -p "$PROJECT_ROOT/.build/universal"
     lipo -create -output "$PROJECT_ROOT/.build/universal/macmtp" "$ARM_BIN" "$X86_BIN"
     SWIFT_BIN="$PROJECT_ROOT/.build/universal/macmtp"
@@ -273,17 +287,11 @@ else
     copy_libusb_for_bundle "$TARGET_ARCH" "$APP_BUNDLE/Contents/MacOS/libusb.dylib"
 fi
 
-EMBEDDED_LIBUSB="$(otool -L "$APP_BUNDLE/Contents/MacOS/$APP_NAME" \
-    | grep 'libusb' | awk '{print $1}')"
-
-if [[ -z "$EMBEDDED_LIBUSB" ]]; then
-    echo "ERROR: No libusb reference found in binary"
-    exit 1
-fi
-
-echo "  Rewriting dylib reference: $EMBEDDED_LIBUSB -> @executable_path/libusb.dylib"
 install_name_tool -id "@executable_path/libusb.dylib" "$APP_BUNDLE/Contents/MacOS/libusb.dylib"
-install_name_tool -change "$EMBEDDED_LIBUSB" "@executable_path/libusb.dylib" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+
+if [[ "$BUILD_UNIVERSAL" != true ]]; then
+    rewrite_libusb_in_binary "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+fi
 
 if otool -L "$APP_BUNDLE/Contents/MacOS/$APP_NAME" | grep 'libusb' | grep -qv '@executable_path'; then
     echo "ERROR: libusb path was not rewritten. Binary still references:"
