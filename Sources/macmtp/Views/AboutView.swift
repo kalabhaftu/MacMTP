@@ -21,17 +21,31 @@ struct AboutView: View {
                 .multilineTextAlignment(.center)
                 .padding(.top, 4)
             
-            Link(destination: URL(string: "https://github.com/kalabhaftu/MacMTP")!) {
-                HStack {
-                    Image(systemName: "link")
-                    Text("GitHub Repository")
+            HStack(spacing: 12) {
+                Link(destination: URL(string: "https://github.com/kalabhaftu/MacMTP")!) {
+                    HStack {
+                        Image(systemName: "link")
+                        Text("GitHub Repository")
+                    }
+                    .padding(.vertical, 4)
+                    .padding(.horizontal, 12)
+                    .background(Color.accentColor.opacity(0.1))
+                    .cornerRadius(6)
                 }
-                .padding(.vertical, 4)
-                .padding(.horizontal, 12)
-                .background(Color.accentColor.opacity(0.1))
-                .cornerRadius(6)
+                .buttonStyle(.plain)
+
+                Link(destination: URL(string: "https://github.com/kalabhaftu/MacMTP/issues")!) {
+                    HStack {
+                        Image(systemName: "exclamationmark.bubble")
+                        Text("Report an Issue")
+                    }
+                    .padding(.vertical, 4)
+                    .padding(.horizontal, 12)
+                    .background(Color.red.opacity(0.1))
+                    .cornerRadius(6)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
             .padding(.top, 4)
             
             Text("Powered by Kalam MTP engine and OpenMTP.")

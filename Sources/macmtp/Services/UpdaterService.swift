@@ -36,7 +36,8 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
                     let localVersion = AppVersion.current.replacingOccurrences(of: "v", with: "")
                     
                     let assets = json["assets"] as? [[String: Any]] ?? []
-                    let dmgAsset = assets.first { ($0["name"] as? String ?? "").hasSuffix(".dmg") }
+                    let dmgAsset = assets.first { ($0["name"] as? String ?? "").hasSuffix("-universal.dmg") } ??
+                                   assets.first { ($0["name"] as? String ?? "").hasSuffix(".dmg") }
                     let dmgDownloadUrlString = dmgAsset?["browser_download_url"] as? String
                     
                     if remoteVersion.compare(localVersion, options: .numeric) == .orderedDescending {
@@ -87,7 +88,9 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
                     try fileManager.moveItem(at: tempURL, to: destURL)
                     
                     await MainActor.run {
-                        NSApplication.shared.abortModal()
+                        NSApplication.shared.stopModal(withCode: .OK)
+                        alert.window.close()
+                        
                         let finishAlert = NSAlert()
                         finishAlert.messageText = "Download Complete"
                         finishAlert.informativeText = "The installer has been downloaded to your Downloads folder and will now open. Please drag macMTP to your Applications folder to update."
@@ -97,14 +100,17 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
                     }
                 } else {
                     await MainActor.run {
-                        NSApplication.shared.abortModal()
-                        showNoUpdateAlert(message: "Failed to download update.")
+                        NSApplication.shared.stopModal(withCode: .cancel)
+                        alert.window.close()
+                        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+                        showNoUpdateAlert(message: "Failed to download update. HTTP Status: \(status)")
                     }
                 }
             } catch {
                 ErrorLogger.log(error, message: "Download update error")
                 await MainActor.run {
-                    NSApplication.shared.abortModal()
+                    NSApplication.shared.stopModal(withCode: .cancel)
+                    alert.window.close()
                     showNoUpdateAlert(message: "Download error: \(error.localizedDescription)")
                 }
             }
@@ -113,6 +119,8 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
         let response = alert.runModal()
         if response == .alertFirstButtonReturn {
             downloadTask.cancel()
+            NSApplication.shared.stopModal(withCode: .cancel)
+            alert.window.close()
         }
     }
     
