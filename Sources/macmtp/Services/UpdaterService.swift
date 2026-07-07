@@ -76,7 +76,9 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
         
         let downloadTask = Task {
             do {
-                let (tempURL, response) = try await URLSession.shared.download(from: url)
+                var request = URLRequest(url: url)
+                request.setValue("macMTP/\(AppVersion.current)", forHTTPHeaderField: "User-Agent")
+                let (tempURL, response) = try await URLSession.shared.download(for: request)
                 if let httpResp = response as? HTTPURLResponse, httpResp.statusCode == 200 {
                     let fileManager = FileManager.default
                     let downloadsDir = fileManager.urls(for: .downloadsDirectory, in: .userDomainMask).first!
