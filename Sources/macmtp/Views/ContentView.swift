@@ -67,6 +67,10 @@ struct ContentView: View {
 
     @AppStorage("hasSeenPrivacyPrompt") private var hasSeenPrivacyPrompt: Bool = false
     @AppStorage("sendCrashReports") private var sendCrashReports: Bool = false
+    @AppStorage("swapPanels") private var swapPanels: Bool = false
+    @AppStorage("showHiddenFilesLocal") private var showHiddenFilesLocal: Bool = false
+    @AppStorage("showHiddenFilesMTP") private var showHiddenFilesMTP: Bool = false
+    @AppStorage("appFontScale") private var appFontScale: Double = 1.0
     @State private var showPrivacyPrompt: Bool = false
 
 
@@ -104,79 +108,13 @@ struct ContentView: View {
                 .layoutPriority(0)
 
                 HSplitView {
-                    FileExplorerPane(
-                        title: "Local Files",
-                        currentPath: $currentLocalPath,
-                        selectedItems: $selectedLocalItems,
-                        isLocal: true,
-                        isDisabled: false,
-                        files: $localFiles,
-                        isActivePane: activePane == .local,
-                        clipboardManager: ClipboardManager.shared,
-                        onFilesDropped: { files, destination in
-                            handleFilesDropped(files: files, destination: destination, isLocal: true)
-                        },
-                        onFileOperation: { operation in
-                            handleFileOperation(operation, isLocal: true)
-                        },
-                        onPaste: handlePaste
-                    )
-                    .frame(minWidth: 350, idealWidth: 420)
-                    .layoutPriority(1)
-                    .simultaneousGesture(
-                        TapGesture().onEnded { activePane = .local },
-                        including: .all
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 0)
-                            .stroke(activePane == .local ? Color.accentColor.opacity(0.4) : Color.clear, lineWidth: 2)
-                    )
-                    .onChange(of: selectedLocalItems) { _, _ in activePane = .local }
-
-                    VStack(spacing: 0) {
-                        if isMTPConnected && mtpStorages.count > 1 {
-                            StorageSelectorView(
-                                storages: mtpStorages,
-                                selectedStorageId: mtpSelectedStorageId,
-                                onSelect: { storageId in
-                                    MTPDeviceManager.shared.selectedStorageId = storageId
-                                    Task {
-                                        await MTPDeviceManager.shared.navigateTo(path: "/")
-                                    }
-                                }
-                            )
-                        }
-                        
-                        FileExplorerPane(
-                            title: isMTPConnected ? connectedDeviceName : "MTP Device",
-                            currentPath: $currentMTPPath,
-                            selectedItems: $selectedMTPItems,
-                            isLocal: false,
-                            isDisabled: !isMTPConnected,
-                            files: $mtpFiles,
-                            isActivePane: activePane == .mtp,
-                            clipboardManager: ClipboardManager.shared,
-                            onFilesDropped: { files, destination in
-                                handleFilesDropped(files: files, destination: destination, isLocal: false)
-                            },
-                            onFileOperation: { operation in
-                                handleFileOperation(operation, isLocal: false)
-                            },
-                            onPaste: handlePaste
-                        )
+                    if swapPanels {
+                        mtpPane
+                        localPane
+                    } else {
+                        localPane
+                        mtpPane
                     }
-                    .frame(minWidth: 350, idealWidth: 420)
-                    .layoutPriority(1)
-                    .simultaneousGesture(
-                        TapGesture().onEnded { activePane = .mtp },
-                        including: .all
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 0)
-                            .stroke(activePane == .mtp ? Color.accentColor.opacity(0.4) : Color.clear, lineWidth: 2)
-                    )
-                    .onChange(of: selectedMTPItems) { _, _ in activePane = .mtp }
-
                 }
             }
 
@@ -201,11 +139,11 @@ struct ContentView: View {
                 localPath: currentLocalPath,
                 mtpPath: currentMTPPath,
                 isMTPConnected: isMTPConnected,
-                localItemCount: localFiles.count,
+                localItemCount: showHiddenFilesLocal ? localFiles.count : localFiles.filter { !$0.name.hasPrefix(".") }.count,
                 localSelectedCount: selectedLocalItems.count,
                 localSelectedSize: selectedLocalSize,
                 localDirSize: localDirSize,
-                mtpItemCount: mtpFiles.count,
+                mtpItemCount: showHiddenFilesMTP ? mtpFiles.count : mtpFiles.filter { !$0.name.hasPrefix(".") }.count,
                 mtpSelectedCount: selectedMTPItems.count,
                 mtpSelectedSize: selectedMTPSize,
                 mtpDirSize: mtpDirSize,
@@ -351,6 +289,84 @@ struct ContentView: View {
         }
     }
 
+    @ViewBuilder
+    private var localPane: some View {
+        FileExplorerPane(
+            title: "Local Files",
+            currentPath: $currentLocalPath,
+            selectedItems: $selectedLocalItems,
+            isLocal: true,
+            isDisabled: false,
+            files: $localFiles,
+            isActivePane: activePane == .local,
+            clipboardManager: ClipboardManager.shared,
+            onFilesDropped: { files, destination in
+                handleFilesDropped(files: files, destination: destination, isLocal: true)
+            },
+            onFileOperation: { operation in
+                handleFileOperation(operation, isLocal: true)
+            },
+            onPaste: handlePaste
+        )
+        .frame(minWidth: 350, idealWidth: 420)
+        .layoutPriority(1)
+        .simultaneousGesture(
+            TapGesture().onEnded { activePane = .local },
+            including: .all
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 0)
+                .stroke(activePane == .local ? Color.accentColor.opacity(0.4) : Color.clear, lineWidth: 2)
+        )
+        .onChange(of: selectedLocalItems) { _, _ in activePane = .local }
+    }
+
+    @ViewBuilder
+    private var mtpPane: some View {
+        VStack(spacing: 0) {
+            if isMTPConnected && mtpStorages.count > 1 {
+                StorageSelectorView(
+                    storages: mtpStorages,
+                    selectedStorageId: mtpSelectedStorageId,
+                    onSelect: { storageId in
+                        MTPDeviceManager.shared.selectedStorageId = storageId
+                        Task {
+                            await MTPDeviceManager.shared.navigateTo(path: "/")
+                        }
+                    }
+                )
+            }
+            
+            FileExplorerPane(
+                title: isMTPConnected ? connectedDeviceName : "MTP Device",
+                currentPath: $currentMTPPath,
+                selectedItems: $selectedMTPItems,
+                isLocal: false,
+                isDisabled: !isMTPConnected,
+                files: $mtpFiles,
+                isActivePane: activePane == .mtp,
+                clipboardManager: ClipboardManager.shared,
+                onFilesDropped: { files, destination in
+                    handleFilesDropped(files: files, destination: destination, isLocal: false)
+                },
+                onFileOperation: { operation in
+                    handleFileOperation(operation, isLocal: false)
+                },
+                onPaste: handlePaste
+            )
+        }
+        .frame(minWidth: 350, idealWidth: 420)
+        .layoutPriority(1)
+        .simultaneousGesture(
+            TapGesture().onEnded { activePane = .mtp },
+            including: .all
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 0)
+                .stroke(activePane == .mtp ? Color.accentColor.opacity(0.4) : Color.clear, lineWidth: 2)
+        )
+        .onChange(of: selectedMTPItems) { _, _ in activePane = .mtp }
+    }
 
     private func installKeyboardMonitor() {
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in

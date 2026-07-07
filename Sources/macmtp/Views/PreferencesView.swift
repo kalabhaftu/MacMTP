@@ -9,6 +9,8 @@ struct PreferencesView: View {
     @AppStorage("autoDownloadUpdates") private var autoDownloadUpdates: Bool = false
     @AppStorage("autoDetectDevice") private var autoDetectDevice: Bool = true
     @AppStorage("sendCrashReports") private var sendCrashReports: Bool = true
+    @AppStorage("swapPanels") private var swapPanels: Bool = false
+    @AppStorage("appFontScale") private var appFontScale: Double = 1.0
 
     var body: some View {
         ScrollView {
@@ -19,7 +21,7 @@ struct PreferencesView: View {
                 .padding(.bottom, 10)
 
                 Section(header: Text("MTP Engine").font(.headline)) {
-                    Picker("Engine Type", selection: Binding(
+                    Picker("", selection: Binding(
                         get: { UserDefaults.standard.string(forKey: "mtpEngine") ?? "Kalam" },
                         set: { UserDefaults.standard.set($0, forKey: "mtpEngine") }
                     )) {
@@ -34,6 +36,22 @@ struct PreferencesView: View {
                 Section(header: Text("File Explorer").font(.headline)) {
                     Toggle("Show hidden files on Local Mac", isOn: $showHiddenFilesLocal)
                     Toggle("Show hidden files on Android Device", isOn: $showHiddenFilesMTP)
+                    Toggle("Swap Local and MTP panels (MTP on Left)", isOn: $swapPanels)
+                    
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Font Size Scale: \(appFontScale, specifier: "%.1f")x")
+                            Spacer()
+                            Button("Reset") {
+                                appFontScale = 1.0
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundColor(.accentColor)
+                            .font(.caption)
+                        }
+                        Slider(value: $appFontScale, in: 0.7...2.0, step: 0.1)
+                    }
+                    .padding(.top, 4)
                 }
                 .padding(.bottom, 10)
 

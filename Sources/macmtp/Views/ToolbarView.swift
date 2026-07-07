@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct ToolbarView: View {
+    @AppStorage("appFontScale") private var appFontScale: Double = 1.0
     var isMTPConnected: Bool
     var deviceName: String
     var onRefresh: () -> Void
@@ -34,7 +35,7 @@ struct ToolbarView: View {
         HStack(spacing: 10) {
             ZStack {
                 Image(systemName: isMTPConnected ? "ipad.and.iphone" : "ipad.and.iphone.slash")
-                    .font(.system(size: 22, weight: .medium))
+                    .font(.system(size: 22 * appFontScale, weight: .medium))
                     .foregroundColor(isMTPConnected ? .green : .secondary)
                     .symbolEffect(.pulse, isActive: isMTPConnected)
                 
@@ -48,11 +49,11 @@ struct ToolbarView: View {
             
             VStack(alignment: .leading, spacing: 2) {
                 Text(isMTPConnected ? deviceName : "No Device Detected")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 13 * appFontScale, weight: .semibold))
                     .lineLimit(1)
                 
                 Text(isMTPConnected ? "Connected via USB" : "Connect your Android device via USB cable")
-                    .font(.system(size: 11))
+                    .font(.system(size: 11 * appFontScale))
                     .foregroundColor(.secondary)
                     .lineLimit(1)
             }
@@ -124,7 +125,7 @@ struct ToolbarView: View {
                 }
             }) {
                 Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.system(size: 14 * appFontScale, weight: .medium))
                     .rotationEffect(.degrees(isRefreshing ? 360 : 0))
                     .animation(.easeInOut(duration: 0.3), value: isRefreshing)
             }
@@ -140,7 +141,7 @@ struct ToolbarView: View {
                 }
             }) {
                 Image(systemName: "gearshape")
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.system(size: 16 * appFontScale, weight: .medium))
                     .foregroundColor(.accentColor)
             }
             .buttonStyle(.plain)
@@ -153,7 +154,7 @@ struct ToolbarView: View {
                 }
             }) {
                 Image(systemName: "info.circle")
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.system(size: 16 * appFontScale, weight: .medium))
                     .foregroundColor(.accentColor)
             }
             .buttonStyle(.plain)
@@ -173,6 +174,7 @@ struct ToolbarView: View {
 
 
 struct ToolbarButton: View {
+    @AppStorage("appFontScale") private var appFontScale: Double = 1.0
     let icon: String
     let label: String
     var shortcut: String = ""
@@ -188,11 +190,11 @@ struct ToolbarButton: View {
         }) {
             VStack(spacing: 2) {
                 Image(systemName: icon)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.system(size: 14 * appFontScale, weight: .medium))
                     .foregroundColor(buttonColor)
                 
                 Text(label)
-                    .font(.system(size: 9, weight: .medium))
+                    .font(.system(size: 9 * appFontScale, weight: .medium))
                     .foregroundColor(buttonColor)
             }
             .frame(width: 52, height: 40)

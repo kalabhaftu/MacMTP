@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct StatusView: View {
+    @AppStorage("appFontScale") private var appFontScale: Double = 1.0
+    @AppStorage("swapPanels") private var swapPanels: Bool = false
     var localPath: String
     var mtpPath: String
     var isMTPConnected: Bool
@@ -23,8 +25,13 @@ struct StatusView: View {
     
     var body: some View {
         HStack(spacing: 0) {
-            localStatusPanel
-                .frame(maxWidth: .infinity)
+            if swapPanels {
+                mtpStatusPanel
+                    .frame(maxWidth: .infinity)
+            } else {
+                localStatusPanel
+                    .frame(maxWidth: .infinity)
+            }
             
             Divider()
                 .frame(height: 16)
@@ -37,8 +44,13 @@ struct StatusView: View {
                     .frame(height: 16)
             }
             
-            mtpStatusPanel
-                .frame(maxWidth: .infinity)
+            if swapPanels {
+                localStatusPanel
+                    .frame(maxWidth: .infinity)
+            } else {
+                mtpStatusPanel
+                    .frame(maxWidth: .infinity)
+            }
         }
         .frame(height: 28)
         .background(Color(NSColor.windowBackgroundColor))
@@ -57,20 +69,20 @@ struct StatusView: View {
     private var localStatusPanel: some View {
         HStack(spacing: 8) {
             Image(systemName: "laptopcomputer")
-                .font(.system(size: 11))
+                .font(.system(size: 11 * appFontScale))
                 .foregroundColor(.secondary)
 
             VStack(alignment: .leading, spacing: 0) {
                 Text(itemCountText(total: localItemCount, selected: localSelectedCount))
-                    .font(.system(size: 11))
+                    .font(.system(size: 11 * appFontScale))
                     .foregroundColor(.secondary)
                 if localSelectedCount > 0 {
                     Text("\(formatBytes(localSelectedSize)) selected")
-                        .font(.system(size: 9))
+                        .font(.system(size: 9 * appFontScale))
                         .foregroundColor(.accentColor)
                 } else {
                     Text("\(formatBytes(localDirSize)) total")
-                        .font(.system(size: 9))
+                        .font(.system(size: 9 * appFontScale))
                         .foregroundColor(.secondary.opacity(0.7))
                 }
             }
@@ -81,7 +93,7 @@ struct StatusView: View {
                 capacityBar(free: localFreeBytes, total: localTotalBytes)
 
                 Text("\(formatBytes(localFreeBytes)) free")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(.system(size: 10 * appFontScale, weight: .medium))
                     .foregroundColor(.secondary)
             }
         }
@@ -94,7 +106,7 @@ struct StatusView: View {
             if isMTPConnected {
                 HStack(spacing: 4) {
                     Text("\(formatBytes(mtpFreeBytes)) free")
-                        .font(.system(size: 10, weight: .medium))
+                        .font(.system(size: 10 * appFontScale, weight: .medium))
                         .foregroundColor(.secondary)
 
                     capacityBar(free: mtpFreeBytes, total: mtpTotalBytes)
@@ -106,26 +118,26 @@ struct StatusView: View {
             if isMTPConnected {
                 VStack(alignment: .trailing, spacing: 0) {
                     Text(itemCountText(total: mtpItemCount, selected: mtpSelectedCount))
-                        .font(.system(size: 11))
+                        .font(.system(size: 11 * appFontScale))
                         .foregroundColor(.secondary)
                     if mtpSelectedCount > 0 {
                         Text("\(formatBytes(mtpSelectedSize)) selected")
-                            .font(.system(size: 9))
+                            .font(.system(size: 9 * appFontScale))
                             .foregroundColor(.accentColor)
                     } else {
                         Text("\(formatBytes(mtpDirSize)) total")
-                            .font(.system(size: 9))
+                            .font(.system(size: 9 * appFontScale))
                             .foregroundColor(.secondary.opacity(0.7))
                     }
                 }
             } else {
                 Text("No device connected")
-                    .font(.system(size: 11))
+                    .font(.system(size: 11 * appFontScale))
                     .foregroundColor(.secondary)
             }
 
             Image(systemName: isMTPConnected ? "ipad.and.iphone" : "ipad.and.iphone.slash")
-                .font(.system(size: 11))
+                .font(.system(size: 11 * appFontScale))
                 .foregroundColor(isMTPConnected ? .green : .secondary)
         }
         .padding(.horizontal, 12)
@@ -139,13 +151,13 @@ struct StatusView: View {
                 .frame(width: 80)
             
             Text(transferFileName)
-                .font(.system(size: 10))
+                .font(.system(size: 10 * appFontScale))
                 .foregroundColor(.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
             
             Text("\(Int(transferProgress * 100))%")
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .font(.system(size: 10 * appFontScale, weight: .semibold, design: .monospaced))
                 .foregroundColor(.accentColor)
         }
         .padding(.horizontal, 8)

@@ -22,6 +22,7 @@ enum SidebarSection: String, CaseIterable {
 
 
 struct SidebarView: View {
+    @AppStorage("appFontScale") private var appFontScale: Double = 1.0
     @Binding var selectedItem: String?
     @Binding var currentLocalPath: String
     
@@ -109,9 +110,9 @@ struct SidebarView: View {
                     HStack(spacing: 8) {
                         Image(systemName: "ipad.and.iphone")
                             .foregroundColor(.green)
-                            .font(.system(size: 14))
+                            .font(.system(size: 14 * appFontScale))
                         Text(mtpDeviceName)
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(.system(size: 12 * appFontScale, weight: .semibold))
                             .foregroundColor(.primary)
                     }
                     .padding(.vertical, 2)
@@ -123,11 +124,11 @@ struct SidebarView: View {
                             HStack(spacing: 8) {
                                 Image(systemName: storageIcon(for: storage))
                                     .foregroundColor(.accentColor)
-                                    .font(.system(size: 13))
+                                    .font(.system(size: 13 * appFontScale))
                                 
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(storage.description)
-                                        .font(.system(size: 12))
+                                        .font(.system(size: 12 * appFontScale))
                                         .lineLimit(1)
                                     
                                     GeometryReader { geo in
@@ -144,7 +145,7 @@ struct SidebarView: View {
                                     .frame(height: 4)
                                     
                                     Text("\(storage.formattedFree) free of \(storage.formattedTotal)")
-                                        .font(.system(size: 10))
+                                        .font(.system(size: 10 * appFontScale))
                                         .foregroundColor(.secondary)
                                 }
                             }
@@ -173,16 +174,16 @@ struct SidebarView: View {
         HStack(spacing: 8) {
             Image(systemName: item.iconName)
                 .foregroundColor(item.isVolume ? .orange : .accentColor)
-                .font(.system(size: 13))
+                .font(.system(size: 13 * appFontScale))
             
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.name)
-                    .font(.system(size: 12))
+                    .font(.system(size: 12 * appFontScale))
                     .lineLimit(1)
                 
                 if item.isVolume && item.totalCapacity > 0 {
                     Text("\(formatBytes(item.freeSpace)) free")
-                        .font(.system(size: 10))
+                        .font(.system(size: 10 * appFontScale))
                         .foregroundColor(.secondary)
                 }
             }
@@ -194,7 +195,7 @@ struct SidebarView: View {
                     ejectVolume(path: item.path)
                 }) {
                     Image(systemName: "eject.fill")
-                        .font(.system(size: 10))
+                        .font(.system(size: 10 * appFontScale))
                         .foregroundColor(.secondary)
                 }
                 .buttonStyle(.plain)
@@ -209,9 +210,9 @@ struct SidebarView: View {
     private func sectionHeader(_ title: String, icon: String) -> some View {
         HStack(spacing: 4) {
             Image(systemName: icon)
-                .font(.system(size: 9))
+                .font(.system(size: 9 * appFontScale))
             Text(title)
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 11 * appFontScale, weight: .semibold))
         }
         .foregroundColor(.secondary)
     }

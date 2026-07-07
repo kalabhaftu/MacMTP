@@ -74,6 +74,7 @@ enum FileViewMode: String, CaseIterable {
 
 
 struct FileExplorerPane: View {
+    @AppStorage("appFontScale") private var appFontScale: Double = 1.0
 
     var title: String
 
@@ -259,7 +260,7 @@ struct FileExplorerPane: View {
         HStack(spacing: 6) {
             Button(action: navigateBack) {
                 Image(systemName: "chevron.left")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 12 * appFontScale, weight: .semibold))
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(.plain)
@@ -268,7 +269,7 @@ struct FileExplorerPane: View {
 
             Button(action: navigateForward) {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 12 * appFontScale, weight: .semibold))
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(.plain)
@@ -277,7 +278,7 @@ struct FileExplorerPane: View {
 
             Button(action: navigateUp) {
                 Image(systemName: "arrow.up")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 12 * appFontScale, weight: .semibold))
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(.plain)
@@ -290,7 +291,7 @@ struct FileExplorerPane: View {
                     navigateTo(path: editablePathText)
                 })
                 .textFieldStyle(.roundedBorder)
-                .font(.system(size: 12))
+                .font(.system(size: 12 * appFontScale))
                 .onExitCommand {
                     isEditingPath = false
                 }
@@ -310,7 +311,7 @@ struct FileExplorerPane: View {
                 viewMode = modes[(idx + 1) % modes.count]
             }) {
                 Image(systemName: viewMode.iconName)
-                    .font(.system(size: 13))
+                    .font(.system(size: 13 * appFontScale))
                     .foregroundColor(.secondary)
             }
             .buttonStyle(.plain)
@@ -323,7 +324,7 @@ struct FileExplorerPane: View {
                 }
             }) {
                 Image(systemName: isFilterVisible ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
-                    .font(.system(size: 14))
+                    .font(.system(size: 14 * appFontScale))
                     .foregroundColor(isFilterVisible ? .accentColor : .secondary)
             }
             .buttonStyle(.plain)
@@ -346,7 +347,7 @@ struct FileExplorerPane: View {
                 ForEach(Array(components.enumerated()), id: \.offset) { index, component in
                     if index > 0 {
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 8))
+                            .font(.system(size: 8 * appFontScale))
                             .foregroundColor(.secondary)
                     }
 
@@ -357,10 +358,10 @@ struct FileExplorerPane: View {
                         HStack(spacing: 3) {
                             if index == 0 {
                                 Image(systemName: isLocal ? "laptopcomputer" : "ipad.and.iphone")
-                                    .font(.system(size: 10))
+                                    .font(.system(size: 10 * appFontScale))
                             }
                             Text(component.isEmpty ? "/" : component)
-                                .font(.system(size: 11))
+                                .font(.system(size: 11 * appFontScale))
                                 .lineLimit(1)
                         }
                         .padding(.horizontal, 4)
@@ -409,7 +410,7 @@ struct FileExplorerPane: View {
 
             TextField("Filter by name or extension (e.g. .mp4)", text: $filterText)
                 .textFieldStyle(.roundedBorder)
-                .font(.system(size: 11))
+                .font(.system(size: 11 * appFontScale))
 
             if !filterText.isEmpty {
                 Button(action: { filterText = "" }) {
@@ -452,12 +453,12 @@ struct FileExplorerPane: View {
         }) {
             HStack(spacing: 4) {
                 Text(title)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 11 * appFontScale, weight: .medium))
                     .foregroundColor(.secondary)
 
                 if sortColumn == column {
                     Image(systemName: sortDirection.iconName)
-                        .font(.system(size: 8, weight: .bold))
+                        .font(.system(size: 8 * appFontScale, weight: .bold))
                         .foregroundColor(.accentColor)
                 }
 
@@ -627,7 +628,7 @@ struct FileExplorerPane: View {
 
             if viewMode == .largeIcons {
                 Text(fileSizeDisplay(for: file))
-                    .font(.system(size: 8))
+                    .font(.system(size: 8 * appFontScale))
                     .foregroundColor(.secondary)
                     .monospacedDigit()
             }
@@ -670,12 +671,12 @@ struct FileExplorerPane: View {
         HStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: file.iconName)
-                    .font(.system(size: 14))
+                    .font(.system(size: 14 * appFontScale))
                     .foregroundColor(file.iconColor)
                     .frame(width: 20)
 
                 Text(file.name)
-                    .font(.system(size: 12))
+                    .font(.system(size: 12 * appFontScale))
                     .lineLimit(1)
                     .truncationMode(.middle)
 
@@ -684,20 +685,20 @@ struct FileExplorerPane: View {
             .frame(minWidth: 180, maxWidth: .infinity)
 
             Text(fileSizeDisplay(for: file))
-                .font(.system(size: 11))
+                .font(.system(size: 11 * appFontScale))
                 .foregroundColor(.secondary)
                 .monospacedDigit()
                 .frame(minWidth: 70, maxWidth: 90, alignment: .trailing)
                 .padding(.horizontal, 8)
 
             Text(file.isDirectory ? "Folder" : file.extensionName)
-                .font(.system(size: 11))
+                .font(.system(size: 11 * appFontScale))
                 .foregroundColor(.secondary)
                 .frame(minWidth: 60, maxWidth: 80, alignment: .leading)
                 .padding(.horizontal, 8)
 
             Text(formatDate(file.modificationDate))
-                .font(.system(size: 11))
+                .font(.system(size: 11 * appFontScale))
                 .foregroundColor(.secondary)
                 .frame(minWidth: 120, maxWidth: 140, alignment: .leading)
                 .padding(.horizontal, 8)
@@ -811,7 +812,7 @@ struct FileExplorerPane: View {
         VStack(spacing: 16) {
             Spacer()
             Image(systemName: isLocal ? "externaldrive.badge.xmark" : "cable.connector.horizontal")
-                .font(.system(size: 48))
+                .font(.system(size: 48 * appFontScale))
                 .foregroundColor(.secondary)
                 .symbolRenderingMode(.hierarchical)
 
@@ -849,7 +850,7 @@ struct FileExplorerPane: View {
         VStack(spacing: 16) {
             Spacer()
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 40))
+                .font(.system(size: 40 * appFontScale))
                 .foregroundColor(.orange)
                 .symbolRenderingMode(.multicolor)
 
@@ -879,7 +880,7 @@ struct FileExplorerPane: View {
         VStack(spacing: 12) {
             Spacer()
             Image(systemName: "folder")
-                .font(.system(size: 44))
+                .font(.system(size: 44 * appFontScale))
                 .foregroundColor(.secondary)
                 .symbolRenderingMode(.hierarchical)
 
@@ -929,9 +930,25 @@ struct FileExplorerPane: View {
         pathHistoryIndex = pathHistory.count - 1
         currentPath = cleanPath
         selectedItems.removeAll()
-        loadingState = .loading
-        Task {
-            await MTPDeviceManager.shared.navigateTo(path: cleanPath)
+        
+        let manager = MTPDeviceManager.shared
+        if cleanPath == manager.currentMTPPath && !manager.isLoading {
+            let currentFiles = manager.mtpFiles
+            applyFilterAndSort(using: currentFiles)
+            if currentFiles.isEmpty {
+                if let err = manager.errorMessage {
+                    loadingState = .error(err)
+                } else {
+                    loadingState = .empty
+                }
+            } else {
+                loadingState = .loaded
+            }
+        } else {
+            loadingState = .loading
+            Task {
+                await manager.navigateTo(path: cleanPath)
+            }
         }
     }
     }
@@ -1434,6 +1451,7 @@ struct FileExplorerPane: View {
 
 
 struct FilePropertiesView: View {
+    @AppStorage("appFontScale") private var appFontScale: Double = 1.0
     let file: FileNode
     let isLocal: Bool
     @Environment(\.dismiss) private var dismiss
@@ -1442,7 +1460,7 @@ struct FilePropertiesView: View {
         VStack(spacing: 0) {
             HStack {
                 Image(systemName: file.iconName)
-                    .font(.system(size: 32))
+                    .font(.system(size: 32 * appFontScale))
                     .foregroundColor(file.iconColor)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(file.name)
