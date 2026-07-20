@@ -61,6 +61,7 @@ struct ContentView: View {
     @State private var pendingDeletePaths: [String] = []
     @State private var showNewFolderDialog: Bool = false
     @State private var newFolderName: String = "New Folder"
+    @State private var operationErrorMessage: String?
 
 
     @State private var eventMonitor: Any? = nil
@@ -98,9 +99,8 @@ struct ContentView: View {
                     mtpDeviceName: connectedDeviceName,
                     mtpStorages: MTPDeviceManager.shared.storages,
                     onMTPStorageSelected: { storageId in
-                        MTPDeviceManager.shared.selectedStorageId = storageId
                         Task {
-                            await MTPDeviceManager.shared.navigateTo(path: "/")
+                            await MTPDeviceManager.shared.selectStorage(storageId)
                         }
                     }
                 )
@@ -187,6 +187,7 @@ struct ContentView: View {
             Button("I Agree") {
                 sendCrashReports = true
                 hasSeenPrivacyPrompt = true
+                ErrorLogger.startIfEnabled()
             }
             Button("No Thanks", role: .cancel) {
                 sendCrashReports = false
@@ -194,6 +195,19 @@ struct ContentView: View {
             }
         } message: {
             Text("Would you like to help improve macMTP by sending anonymous crash reports and error logs? We genuinely do not collect any personal data.")
+        }
+        .alert(
+            "Operation Failed",
+            isPresented: Binding(
+                get: { operationErrorMessage != nil },
+                set: { if !$0 { operationErrorMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {
+                operationErrorMessage = nil
+            }
+        } message: {
+            Text(operationErrorMessage ?? "The operation could not be completed.")
         }
         .onAppear {
             installKeyboardMonitor()
@@ -329,9 +343,8 @@ struct ContentView: View {
                     storages: mtpStorages,
                     selectedStorageId: mtpSelectedStorageId,
                     onSelect: { storageId in
-                        MTPDeviceManager.shared.selectedStorageId = storageId
                         Task {
-                            await MTPDeviceManager.shared.navigateTo(path: "/")
+                            await MTPDeviceManager.shared.selectStorage(storageId)
                         }
                     }
                 )
@@ -369,6 +382,7 @@ struct ContentView: View {
     }
 
     private func installKeyboardMonitor() {
+        guard eventMonitor == nil else { return }
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             let hasCmd = event.modifierFlags.contains(.command)
             let hasShift = event.modifierFlags.contains(.shift)
@@ -596,9 +610,13 @@ struct ContentView: View {
     func handleSelectAll() {
         switch activePane {
         case .local:
-            selectedLocalItems = Set(localFiles.map { $0.path })
+            selectedLocalItems = Set(localFiles.filter {
+                showHiddenFilesLocal || !$0.name.hasPrefix(".")
+            }.map(\.path))
         case .mtp:
-            selectedMTPItems = Set(mtpFiles.map { $0.path })
+            selectedMTPItems = Set(mtpFiles.filter {
+                showHiddenFilesMTP || !$0.name.hasPrefix(".")
+            }.map(\.path))
         }
     }
 
@@ -611,6 +629,10 @@ struct ContentView: View {
 
         case .rename(let oldPath, let newName):
             if isLocal {
+                guard isValidChildName(newName) else {
+                    operationErrorMessage = "A file or folder name must not be empty or contain path separators."
+                    return
+                }
                 let sourceURL = URL(fileURLWithPath: oldPath)
                 let destURL = sourceURL.deletingLastPathComponent().appendingPathComponent(newName)
                 do {
@@ -621,35 +643,39 @@ struct ContentView: View {
                 }
             } else {
                 Task {
-                    try? await KalamBridge.shared.renameFile(
-                        storageId: MTPDeviceManager.shared.selectedStorageId ?? 0,
-                        path: oldPath,
-                        newName: newName
-                    )
-                    await MTPDeviceManager.shared.refreshFiles()
+                    do {
+                        try await MTPDeviceManager.shared.renameFile(path: oldPath, newName: newName)
+                    } catch {
+                        ErrorLogger.log(error, message: "Rename failed")
+                        operationErrorMessage = error.localizedDescription
+                    }
                 }
             }
 
         case .newFolder(let parent, let name):
             if isLocal {
+                guard isValidChildName(name) else {
+                    operationErrorMessage = "A file or folder name must not be empty or contain path separators."
+                    return
+                }
                 let folderURL = URL(fileURLWithPath: parent).appendingPathComponent(name)
                 do {
                     try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: false)
                     handleRefresh()
                 } catch {
                     ErrorLogger.log(error, message: "Create folder failed")
+                    operationErrorMessage = error.localizedDescription
                 }
             } else {
-                let separator = parent == "/" ? "" : "/"
                 Task {
                     do {
-                        try await KalamBridge.shared.makeDirectory(
-                            storageId: MTPDeviceManager.shared.selectedStorageId ?? 0,
-                            path: "\(parent)\(separator)\(name)"
-                        )
-                        await MTPDeviceManager.shared.refreshFiles()
+                        guard parent == MTPDeviceManager.shared.currentMTPPath else {
+                            throw KalamError.invalidPath("The destination folder changed. Please retry.")
+                        }
+                        try await MTPDeviceManager.shared.createFolder(name: name)
                     } catch {
                         ErrorLogger.log(error, message: "Create MTP folder failed")
+                        operationErrorMessage = error.localizedDescription
                     }
                 }
             }
@@ -786,6 +812,7 @@ struct ContentView: View {
                     await MTPDeviceManager.shared.refreshFiles()
                 } catch {
                     ErrorLogger.log(error, message: "MTP delete failed")
+                    operationErrorMessage = error.localizedDescription
                     await MainActor.run {
                         pendingDeletePaths.removeAll()
                     }
@@ -817,9 +844,9 @@ struct ContentView: View {
                         let sourceSize = ((try? fileManager.attributesOfItem(atPath: sourceURL.path)[.size]) as? Int64) ?? 0
                         let targetSize = ((try? fileManager.attributesOfItem(atPath: targetURL.path)[.size]) as? Int64) ?? 0
                         if sourceSize == targetSize { continue }
-                        try fileManager.removeItem(at: targetURL)
+                        try fileManager.trashItem(at: targetURL, resultingItemURL: nil)
                     case .overwrite:
-                        try fileManager.removeItem(at: targetURL)
+                        try fileManager.trashItem(at: targetURL, resultingItemURL: nil)
                     case .cancel:
                         return
                     case .askEach, .none:
@@ -833,13 +860,17 @@ struct ContentView: View {
                 }
             } catch {
                 ErrorLogger.log(error, message: "Paste operation failed for \(item.name)")
+                operationErrorMessage = error.localizedDescription
             }
         }
     }
 
     private func performNewFolder() {
         let trimmedName = newFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty else { return }
+        guard isValidChildName(trimmedName) else {
+            operationErrorMessage = "A file or folder name must not be empty or contain path separators."
+            return
+        }
 
         let parentPath: String
         switch activePane {
@@ -858,12 +889,18 @@ struct ContentView: View {
             }
         } else {
             Task {
-                try? await KalamBridge.shared.makeDirectory(
-                    storageId: MTPDeviceManager.shared.selectedStorageId ?? 0,
-                    path: folderURL.path
-                )
-                await MTPDeviceManager.shared.refreshFiles()
+                do {
+                    try await MTPDeviceManager.shared.createFolder(name: trimmedName)
+                } catch {
+                    ErrorLogger.log(error, message: "Create MTP folder failed")
+                    operationErrorMessage = error.localizedDescription
+                }
             }
         }
+    }
+
+    private func isValidChildName(_ name: String) -> Bool {
+        !name.isEmpty && name != "." && name != ".." &&
+            !name.contains("/") && !name.contains("\\")
     }
 }

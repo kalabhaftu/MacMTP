@@ -8,7 +8,7 @@ struct PreferencesView: View {
     @AppStorage("autoCheckUpdates") private var autoCheckUpdates: Bool = true
     @AppStorage("autoDownloadUpdates") private var autoDownloadUpdates: Bool = false
     @AppStorage("autoDetectDevice") private var autoDetectDevice: Bool = true
-    @AppStorage("sendCrashReports") private var sendCrashReports: Bool = true
+    @AppStorage("sendCrashReports") private var sendCrashReports: Bool = false
     @AppStorage("swapPanels") private var swapPanels: Bool = false
     @AppStorage("appFontScale") private var appFontScale: Double = 1.0
 
@@ -17,19 +17,6 @@ struct PreferencesView: View {
             Form {
                 Section(header: Text("General").font(.headline)) {
                     Toggle("Auto-detect and connect MTP device on launch", isOn: $autoDetectDevice)
-                }
-                .padding(.bottom, 10)
-
-                Section(header: Text("MTP Engine").font(.headline)) {
-                    Picker("", selection: Binding(
-                        get: { UserDefaults.standard.string(forKey: "mtpEngine") ?? "Kalam" },
-                        set: { UserDefaults.standard.set($0, forKey: "mtpEngine") }
-                    )) {
-                        Text("Kalam (Modern, Fast, >4GB support)").tag("Kalam")
-                        Text("Legacy (Fallback for older devices)").tag("Legacy")
-                    }
-                    .pickerStyle(RadioGroupPickerStyle())
-
                 }
                 .padding(.bottom, 10)
 

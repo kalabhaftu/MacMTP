@@ -57,4 +57,4 @@ jobs:
       run: bash scripts/build.sh release --universal
 
     - name: Run tests
-      run: swift test -v 2>/dev/null || echo "No tests found - skipping"
+      run: swift test -v

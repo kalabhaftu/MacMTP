@@ -32,8 +32,8 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
                     
                     let releaseBody = (json["body"] as? String) ?? "No release notes available."
                     
-                    let remoteVersion = tagName.replacingOccurrences(of: "v", with: "")
-                    let localVersion = AppVersion.current.replacingOccurrences(of: "v", with: "")
+                    let remoteVersion = normalizedVersion(tagName)
+                    let localVersion = normalizedVersion(AppVersion.current)
                     
                     let assets = json["assets"] as? [[String: Any]] ?? []
                     let dmgAsset = assets.first { ($0["name"] as? String ?? "").hasSuffix("-universal.dmg") } ??
@@ -42,7 +42,10 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
                     
                     if remoteVersion.compare(localVersion, options: .numeric) == .orderedDescending {
                         let autoDownload = UserDefaults.standard.object(forKey: "autoDownloadUpdates") as? Bool ?? false
-                        if autoDownload, let dmgUrlStr = dmgDownloadUrlString, let dmgUrl = URL(string: dmgUrlStr) {
+                        if autoDownload,
+                           let dmgUrlStr = dmgDownloadUrlString,
+                           let dmgUrl = URL(string: dmgUrlStr),
+                           dmgUrl.scheme == "https" {
                             downloadAndOpenDMG(url: dmgUrl, version: tagName)
                         } else {
                             showUpdateAlert(version: tagName, releaseNotes: releaseBody, url: htmlUrl)
@@ -81,8 +84,11 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
                 let (tempURL, response) = try await URLSession.shared.download(for: request)
                 if let httpResp = response as? HTTPURLResponse, httpResp.statusCode == 200 {
                     let fileManager = FileManager.default
-                    let downloadsDir = fileManager.urls(for: .downloadsDirectory, in: .userDomainMask).first!
-                    let destURL = downloadsDir.appendingPathComponent("macMTP-\(version).dmg")
+                    guard let downloadsDir = fileManager.urls(for: .downloadsDirectory, in: .userDomainMask).first else {
+                        throw CocoaError(.fileNoSuchFile, userInfo: [NSLocalizedDescriptionKey: "The Downloads folder is unavailable."])
+                    }
+                    let safeVersion = version.replacingOccurrences(of: "/", with: "-")
+                    let destURL = downloadsDir.appendingPathComponent("macMTP-\(safeVersion).dmg")
                     
                     if fileManager.fileExists(atPath: destURL.path) {
                         try fileManager.removeItem(at: destURL)
@@ -108,6 +114,8 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
                         showNoUpdateAlert(message: "Failed to download update. HTTP Status: \(status)")
                     }
                 }
+            } catch is CancellationError {
+                return
             } catch {
                 ErrorLogger.log(error, message: "Download update error")
                 await MainActor.run {
@@ -160,5 +168,9 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         alert.runModal()
+    }
+
+    private func normalizedVersion(_ version: String) -> String {
+        version.hasPrefix("v") ? String(version.dropFirst()) : version
     }
 }

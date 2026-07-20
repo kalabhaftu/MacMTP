@@ -203,7 +203,12 @@ struct FileExplorerPane: View {
             if isLocal { applyFilterAndSort() }
         }
         .onChange(of: showHiddenFilesMTP) { _, _ in
-            if !isLocal { applyFilterAndSort() }
+            if !isLocal {
+                applyFilterAndSort()
+                Task {
+                    await MTPDeviceManager.shared.refreshFiles()
+                }
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .localDirectoryNeedsRefresh)) { _ in
             if isLocal {
@@ -1257,7 +1262,7 @@ struct FileExplorerPane: View {
 
     private func commitRename(file: FileNode) {
         let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed != file.name else {
+        guard isValidChildName(trimmed), trimmed != file.name else {
             return
         }
 
@@ -1277,7 +1282,7 @@ struct FileExplorerPane: View {
 
     private func commitNewFolder() {
         let trimmed = newFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard isValidChildName(trimmed) else { return }
 
         if isLocal {
             let folderURL = URL(fileURLWithPath: currentPath).appendingPathComponent(trimmed)
@@ -1354,11 +1359,13 @@ struct FileExplorerPane: View {
         return true
     }
 
-    nonisolated private static func appendLocalDroppedFile(url: URL, suggestedName: String, to files: ThreadSafeArray<DroppedFile>) {
+    nonisolated private static func appendLocalDroppedFile(url: URL, suggestedName _: String, to files: ThreadSafeArray<DroppedFile>) {
         var isDir: ObjCBool = false
         let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
         let isDirectory = exists && isDir.boolValue
-        let name = suggestedName.isEmpty ? url.lastPathComponent : suggestedName
+        // Finder controls the URL; use its final component instead of the
+        // provider's free-form suggested name for destination path safety.
+        let name = url.lastPathComponent
         files.append(DroppedFile(path: url.path, isLocal: true, name: name, isDirectory: isDirectory))
     }
 
@@ -1388,6 +1395,11 @@ struct FileExplorerPane: View {
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return formatter.string(from: date)
+    }
+
+    private func isValidChildName(_ name: String) -> Bool {
+        !name.isEmpty && name != "." && name != ".." &&
+            !name.contains("/") && !name.contains("\\")
     }
 }
 

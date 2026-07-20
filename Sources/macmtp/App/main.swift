@@ -1,6 +1,5 @@
 import Cocoa
 import SwiftUI
-import Sentry
 
 
 class AppDelegate: NSObject, NSApplicationDelegate {
@@ -37,18 +36,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         setupMainMenu()
         
-        let sendReports = UserDefaults.standard.object(forKey: "sendCrashReports") as? Bool ?? true
-        if sendReports {
-            SentrySDK.start { options in
-                options.dsn = "https://85a2a845bf5e0409b28e64c446f870e1@o4511628143820800.ingest.us.sentry.io/4511628158763008"
-                options.debug = false
-                options.sendDefaultPii = true
-                options.releaseName = AppVersion.current
-                
-                options.tracesSampleRate = 1.0
-                
-            }
-        }
+        ErrorLogger.startIfEnabled()
         
         USBWatcher.shared.startWatching()
         
@@ -64,6 +52,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func applicationWillTerminate(_ notification: Notification) {
+        USBWatcher.shared.stopWatching()
     }
     
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

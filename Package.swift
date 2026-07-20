@@ -66,5 +66,10 @@ let package = Package(
                 .linkedFramework("IOKit"),
             ]
         ),
+        .testTarget(
+            name: "macmtpTests",
+            dependencies: ["macmtp"],
+            path: "Tests/macmtpTests"
+        ),
     ]
 )

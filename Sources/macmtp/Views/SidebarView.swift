@@ -308,6 +308,7 @@ struct SidebarView: View {
     
     
     private func startVolumeRefreshTimer() {
+        guard refreshTimer == nil else { return }
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
             Task { @MainActor in
                 refreshVolumes()

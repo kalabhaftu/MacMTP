@@ -13,11 +13,9 @@
 git clone https://github.com/kalabhaftu/MacMTP.git
 cd MacMTP
 
-# Build
-swift build
-
-# Run
-open .build/debug/macMTP.app
+# Build and run
+bash scripts/build.sh debug --arch "$(uname -m)"
+open macMTP.app
 ```
 
 ## Code Style
@@ -31,7 +29,7 @@ open .build/debug/macMTP.app
 
 1. Fork the repo and create a feature branch (`feature/my-change`).
 2. Make your changes.
-3. Run `swift build` — it must compile without errors or warnings.
+3. Run `swift build` and `swift test` — both must pass.
 4. Open a PR against `main`.
 5. A maintainer will review within 7 days.
 6. Address review feedback if requested.

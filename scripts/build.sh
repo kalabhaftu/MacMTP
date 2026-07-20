@@ -148,7 +148,7 @@ fi
 build_kalam_arch() {
     local arch="$1"
     local output="$2"
-    local go_arch pc_dir cflags ldflags sysroot
+    local go_arch pc_dir cflags ldflags sysroot staging_dir build_status
 
     go_arch="$(go_arch_for "$arch")"
     pc_dir="$(libusb_pc_dir_for "$arch")"
@@ -157,14 +157,18 @@ build_kalam_arch() {
     ldflags="$(PKG_CONFIG_PATH="$pc_dir" pkg-config --libs libusb-1.0) -arch $arch -mmacosx-version-min=14.0 -isysroot $sysroot"
 
     echo "  Building libkalam.a for $arch using $pc_dir"
-    (
-        cd "$KALAM_DIR"
-        if [[ -f "$PROJECT_ROOT/scripts/kalam.go.patched" ]]; then
-            cp "$PROJECT_ROOT/scripts/kalam.go.patched" "kalam.go"
-        fi
-        if [[ -f "$PROJECT_ROOT/scripts/send_to_js_main.go.patched" ]]; then
-            cp "$PROJECT_ROOT/scripts/send_to_js_main.go.patched" "send_to_js/main.go"
-        fi
+    staging_dir="$(mktemp -d "${TMPDIR:-/tmp}/macmtp-kalam.XXXXXX")"
+    cp -R "$KALAM_DIR"/. "$staging_dir"/
+    if [[ -f "$PROJECT_ROOT/scripts/kalam.go.patched" ]]; then
+        cp "$PROJECT_ROOT/scripts/kalam.go.patched" "$staging_dir/kalam.go"
+    fi
+    if [[ -f "$PROJECT_ROOT/scripts/send_to_js_main.go.patched" ]]; then
+        mkdir -p "$staging_dir/send_to_js"
+        cp "$PROJECT_ROOT/scripts/send_to_js_main.go.patched" "$staging_dir/send_to_js/main.go"
+    fi
+
+    if (
+        cd "$staging_dir"
         PKG_CONFIG_PATH="$pc_dir" \
         CGO_ENABLED=1 \
         GOARCH="$go_arch" \
@@ -173,7 +177,13 @@ build_kalam_arch() {
         CGO_CFLAGS="$cflags" \
         CGO_LDFLAGS="$ldflags" \
         go build -tags nosigsegv -buildmode=c-archive -o "$output" ./*.go
-    )
+    ); then
+        build_status=0
+    else
+        build_status=$?
+    fi
+    rm -rf "$staging_dir"
+    return "$build_status"
 }
 
 build_swift_arch() {

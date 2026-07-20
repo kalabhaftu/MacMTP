@@ -9,6 +9,7 @@ public enum KalamError: Error, LocalizedError {
     case serializationError
     case operationInProgress
     case timedOut(String)
+    case invalidPath(String)
 
     public var errorDescription: String? {
         switch self {
@@ -26,6 +27,8 @@ public enum KalamError: Error, LocalizedError {
             return "Another MTP operation is currently in progress."
         case .timedOut(let msg):
             return "MTP operation timed out: \(msg)"
+        case .invalidPath(let msg):
+            return "Invalid path: \(msg)"
         }
     }
 }
@@ -36,6 +39,7 @@ private final class KalamRegistry: @unchecked Sendable {
     private let lock = NSLock()
 
     private var doneContinuation: CheckedContinuation<String, Error>?
+    private var transferContinuation: CheckedContinuation<Void, Error>?
     
     private var preprocessCallback: ((String) -> Void)?
     private var progressCallback: ((String) -> Void)?
@@ -51,6 +55,25 @@ private final class KalamRegistry: @unchecked Sendable {
             return
         }
         doneContinuation = continuation
+        lock.unlock()
+    }
+
+    func setTransferCallbacks(
+        continuation: CheckedContinuation<Void, Error>,
+        preprocess: @escaping (String) -> Void,
+        progress: @escaping (String) -> Void,
+        done: @escaping (String) -> Void
+    ) {
+        lock.lock()
+        guard doneContinuation == nil, transferContinuation == nil else {
+            lock.unlock()
+            continuation.resume(throwing: KalamError.operationInProgress)
+            return
+        }
+        transferContinuation = continuation
+        preprocessCallback = preprocess
+        progressCallback = progress
+        transferDoneCallback = done
         lock.unlock()
     }
 
@@ -70,24 +93,21 @@ private final class KalamRegistry: @unchecked Sendable {
         continuation?.resume(throwing: error)
     }
 
-    func setTransferCallbacks(
-        preprocess: @escaping (String) -> Void,
-        progress: @escaping (String) -> Void,
-        done: @escaping (String) -> Void
-    ) {
+    func finishTransfer(with result: Result<Void, Error>) {
         lock.lock()
-        defer { lock.unlock() }
-        self.preprocessCallback = preprocess
-        self.progressCallback = progress
-        self.transferDoneCallback = done
-    }
+        let continuation = transferContinuation
+        transferContinuation = nil
+        preprocessCallback = nil
+        progressCallback = nil
+        transferDoneCallback = nil
+        lock.unlock()
 
-    func clearTransferCallbacks() {
-        lock.lock()
-        defer { lock.unlock() }
-        self.preprocessCallback = nil
-        self.progressCallback = nil
-        self.transferDoneCallback = nil
+        switch result {
+        case .success:
+            continuation?.resume(returning: ())
+        case .failure(let error):
+            continuation?.resume(throwing: error)
+        }
     }
 
     func triggerPreprocess(_ json: String) {
@@ -164,20 +184,71 @@ public actor KalamBridge {
 
     private let jsonDecoder: JSONDecoder
     private let mtpQueue: DispatchQueue
+    private var operationInFlight = false
+
+    private let commandTimeoutNanoseconds: UInt64 = 30_000_000_000
+    private let transferTimeoutNanoseconds: UInt64 = 86_400_000_000_000
 
     private init() {
         self.jsonDecoder = JSONDecoder()
         self.mtpQueue = DispatchQueue(label: "com.macmtp.kalam", qos: .userInitiated)
     }
 
+    private func beginOperation() throws {
+        guard !operationInFlight else {
+            throw KalamError.operationInProgress
+        }
+        operationInFlight = true
+    }
 
-    internal func executeMTP<T: Decodable>(_ operation: @escaping @Sendable () -> Void) async throws -> T {
-        let jsonString = try await withCheckedThrowingContinuation { continuation in
-            KalamRegistry.shared.setDoneContinuation(continuation)
-            mtpQueue.async {
-                operation()
+    private func endOperation() {
+        operationInFlight = false
+    }
+
+    private func waitForDone(
+        timeoutNanoseconds: UInt64,
+        timeoutMessage: String,
+        startOperation: @escaping @Sendable () -> Void
+    ) async throws -> String {
+        let waiter = Task<String, Error> {
+            try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
+                    if Task.isCancelled {
+                        continuation.resume(throwing: CancellationError())
+                    } else {
+                        KalamRegistry.shared.setDoneContinuation(continuation)
+                        startOperation()
+                    }
+                }
+            } onCancel: {
+                KalamRegistry.shared.rejectDone(with: CancellationError())
             }
         }
+
+        let timeoutTask = Task {
+            try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+            guard !Task.isCancelled else { return }
+            KalamRegistry.shared.rejectDone(with: KalamError.timedOut(timeoutMessage))
+        }
+
+        defer {
+            timeoutTask.cancel()
+            waiter.cancel()
+        }
+
+        return try await waiter.value
+    }
+
+
+    internal func executeMTP<T: Decodable>(_ operation: @escaping @Sendable () -> Void) async throws -> T {
+        try beginOperation()
+        defer { endOperation() }
+
+        let jsonString = try await waitForDone(
+            timeoutNanoseconds: commandTimeoutNanoseconds,
+            timeoutMessage: "The MTP command did not respond.",
+            startOperation: { self.mtpQueue.async { operation() } }
+        )
         return try decodeResponse(jsonString)
     }
 
@@ -190,15 +261,21 @@ public actor KalamBridge {
             throw KalamError.serializationError
         }
 
-        let jsonString = try await withCheckedThrowingContinuation { continuation in
-            KalamRegistry.shared.setDoneContinuation(continuation)
-            mtpQueue.async {
-                var cInput = inputJson.utf8CString
-                cInput.withUnsafeMutableBufferPointer { buffer in
-                    operation(buffer.baseAddress)
+        try beginOperation()
+        defer { endOperation() }
+
+        let jsonString = try await waitForDone(
+            timeoutNanoseconds: commandTimeoutNanoseconds,
+            timeoutMessage: "The MTP command did not respond.",
+            startOperation: {
+                self.mtpQueue.async {
+                    var cInput = inputJson.utf8CString
+                    cInput.withUnsafeMutableBufferPointer { buffer in
+                        operation(buffer.baseAddress)
+                    }
                 }
             }
-        }
+        )
         return try decodeResponse(jsonString)
     }
 
@@ -236,7 +313,12 @@ public actor KalamBridge {
         return data
     }
 
-    public func listDirectory(storageId: UInt32, path: String, recursive: Bool = false) async throws -> [GoFileInfo] {
+    public func listDirectory(
+        storageId: UInt32,
+        path: String,
+        recursive: Bool = false,
+        skipHidden: Bool = false
+    ) async throws -> [GoFileInfo] {
         struct WalkInput: Encodable {
             let storageId: UInt32
             let fullPath: String
@@ -250,7 +332,7 @@ public actor KalamBridge {
             fullPath: path,
             recursive: recursive,
             skipDisallowedFiles: true,
-            skipHiddenFiles: false
+            skipHiddenFiles: skipHidden
         )
 
         let result: GoWalkResult = try await executeMTPWithInput(input) { inputJson in
@@ -355,8 +437,14 @@ public actor KalamBridge {
             throw KalamError.serializationError
         }
 
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            KalamRegistry.shared.setTransferCallbacks(
+        try beginOperation()
+        defer { endOperation() }
+
+        let waiter = Task<Void, Error> {
+            try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    KalamRegistry.shared.setTransferCallbacks(
+                        continuation: continuation,
                 preprocess: { json in
                     if let result = try? self.jsonDecoder.decode(GoPreprocessResult.self, from: json.data(using: .utf8) ?? Data()),
                        let data = result.data {
@@ -370,23 +458,36 @@ public actor KalamBridge {
                     }
                 },
                 done: { json in
-                    KalamRegistry.shared.clearTransferCallbacks()
                     if let errResp = try? self.jsonDecoder.decode(GoErrorResponse.self, from: json.data(using: .utf8) ?? Data()),
                        let errMsg = errResp.error, !errMsg.isEmpty {
-                        continuation.resume(throwing: KalamError.transferFailed(errMsg))
+                        KalamRegistry.shared.finishTransfer(with: .failure(KalamError.transferFailed(errMsg)))
                     } else {
-                        continuation.resume(returning: ())
+                        KalamRegistry.shared.finishTransfer(with: .success(()))
+                    }
+                })
+
+                    mtpQueue.async {
+                        var cInput = inputJson.utf8CString
+                        cInput.withUnsafeMutableBufferPointer { buffer in
+                            UploadFiles(buffer.baseAddress)
+                        }
                     }
                 }
-            )
-
-            mtpQueue.async {
-                var cInput = inputJson.utf8CString
-                cInput.withUnsafeMutableBufferPointer { buffer in
-                    UploadFiles(buffer.baseAddress)
-                }
+            } onCancel: {
+                KalamRegistry.shared.finishTransfer(with: .failure(CancellationError()))
             }
         }
+
+        let timeoutTask = Task {
+            try? await Task.sleep(nanoseconds: transferTimeoutNanoseconds)
+            guard !Task.isCancelled else { return }
+            KalamRegistry.shared.finishTransfer(with: .failure(KalamError.timedOut("The upload did not finish.")))
+        }
+        defer {
+            timeoutTask.cancel()
+            waiter.cancel()
+        }
+        try await waiter.value
     }
 
     public func downloadFiles(
@@ -415,8 +516,14 @@ public actor KalamBridge {
             throw KalamError.serializationError
         }
 
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            KalamRegistry.shared.setTransferCallbacks(
+        try beginOperation()
+        defer { endOperation() }
+
+        let waiter = Task<Void, Error> {
+            try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    KalamRegistry.shared.setTransferCallbacks(
+                        continuation: continuation,
                 preprocess: { json in
                     if let result = try? self.jsonDecoder.decode(GoPreprocessResult.self, from: json.data(using: .utf8) ?? Data()),
                        let data = result.data {
@@ -430,27 +537,45 @@ public actor KalamBridge {
                     }
                 },
                 done: { json in
-                    KalamRegistry.shared.clearTransferCallbacks()
                     if let errResp = try? self.jsonDecoder.decode(GoErrorResponse.self, from: json.data(using: .utf8) ?? Data()),
                        let errMsg = errResp.error, !errMsg.isEmpty {
-                        continuation.resume(throwing: KalamError.transferFailed(errMsg))
+                        KalamRegistry.shared.finishTransfer(with: .failure(KalamError.transferFailed(errMsg)))
                     } else {
-                        continuation.resume(returning: ())
+                        KalamRegistry.shared.finishTransfer(with: .success(()))
+                    }
+                })
+
+                    mtpQueue.async {
+                        var cInput = inputJson.utf8CString
+                        cInput.withUnsafeMutableBufferPointer { buffer in
+                            DownloadFiles(buffer.baseAddress)
+                        }
                     }
                 }
-            )
-
-            mtpQueue.async {
-                var cInput = inputJson.utf8CString
-                cInput.withUnsafeMutableBufferPointer { buffer in
-                    DownloadFiles(buffer.baseAddress)
-                }
+            } onCancel: {
+                KalamRegistry.shared.finishTransfer(with: .failure(CancellationError()))
             }
         }
+
+        let timeoutTask = Task {
+            try? await Task.sleep(nanoseconds: transferTimeoutNanoseconds)
+            guard !Task.isCancelled else { return }
+            KalamRegistry.shared.finishTransfer(with: .failure(KalamError.timedOut("The download did not finish.")))
+        }
+        defer {
+            timeoutTask.cancel()
+            waiter.cancel()
+        }
+        try await waiter.value
     }
 
     func walk(storageId: UInt32, path: String, recursive: Bool, skipHidden: Bool) async throws -> [GoFileInfo] {
-        return try await listDirectory(storageId: storageId, path: path, recursive: recursive)
+        return try await listDirectory(
+            storageId: storageId,
+            path: path,
+            recursive: recursive,
+            skipHidden: skipHidden
+        )
     }
 
     public func dispose() async throws {

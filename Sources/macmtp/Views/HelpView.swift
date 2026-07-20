@@ -8,7 +8,7 @@ struct HelpView: View {
                     Text("Getting Started").font(.title2).fontWeight(.bold)
 
                     Text("""
-                    Connect your Android device via USB. Make sure USB debugging is enabled on your Android device.
+                    Connect your Android device via USB and select File Transfer (MTP) on the device.
                     """)
                     .font(.body)
 
@@ -49,7 +49,7 @@ struct HelpView: View {
                     • If your device is not detected, try reconnecting the USB cable.
                     • Make sure your device is unlocked and USB file transfer mode is selected.
                     • If transfers fail, try restarting both the app and your device.
-                    • For security, macMTP runs in a sandbox and can only access files you explicitly grant access to.
+                    • If macOS reports that another app has claimed the device, close Image Capture, Preview, or other photo-import apps and reconnect it.
                     """)
                     .font(.body)
                 }

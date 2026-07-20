@@ -35,12 +35,8 @@ public final class FileTransferService: ObservableObject {
     
     private var cutSourcePaths: [String] = []
     
-    private var completedBytesAccumulated: Int64 = 0
-    
-    private var speedSamples: [(time: Date, bytes: Int64)] = []
-    private let maxSpeedSamples = 10
-    
     private var verifiedDirectories = Set<String>()
+    private var transferInFlight = false
     
     
     private init() {}
@@ -87,9 +83,16 @@ public final class FileTransferService: ObservableObject {
         storageId: UInt32? = nil,
         isCut: Bool = false
     ) {
+        guard !transferInFlight else {
+            ErrorLogger.logMessage("Ignored transfer request while another transfer is active.")
+            return
+        }
+
         self.isCutOperation = isCut
         self.cutSourcePaths = isCut ? sources.map { $0.path } : []
+        transferInFlight = true
         Task {
+            defer { self.transferInFlight = false }
             do {
                 try await performTransfer(
                     sources: sources,
@@ -150,8 +153,6 @@ public final class FileTransferService: ObservableObject {
 
         cancelRequested = false
         pauseRequested = false
-        completedBytesAccumulated = 0
-        speedSamples.removeAll()
         verifiedDirectories.removeAll()
         showConflictDialog = false
         conflictingFiles = []
@@ -169,6 +170,7 @@ public final class FileTransferService: ObservableObject {
         
         let expandedItems = try await expandSources(sources: sources, direction: direction, storageId: mStorageId)
         
+        if cancelRequested { return }
         guard !expandedItems.isEmpty else {
             return
         }
@@ -182,6 +184,7 @@ public final class FileTransferService: ObservableObject {
             direction: direction,
             storageId: mStorageId
         )
+        if cancelRequested { return }
         
         var chosenResolution: ConflictResolution = .askEach
         var rememberForBatch = true
@@ -249,7 +252,7 @@ public final class FileTransferService: ObservableObject {
                 }
             }
             
-            let transItem = TransferItem(
+            var transItem = TransferItem(
                 sourcePath: sourceFull,
                 destinationPath: destPath,
                 fileName: fileName,
@@ -257,6 +260,9 @@ public final class FileTransferService: ObservableObject {
                 direction: direction,
                 status: status
             )
+            if status == .skipped {
+                transItem.markSkipped()
+            }
             transferQueue.append(transItem)
         }
         
@@ -284,15 +290,20 @@ public final class FileTransferService: ObservableObject {
         guard let batch = activeBatch else { return }
         
         var groups: [String: [Int]] = [:] // destParent -> array of indices
+        var groupOrder: [String] = []
         for index in batch.items.indices {
             if batch.items[index].status == .skipped { continue }
             let destParent = (batch.items[index].destinationPath as NSString).deletingLastPathComponent
+            if groups[destParent] == nil {
+                groupOrder.append(destParent)
+            }
             groups[destParent, default: []].append(index)
         }
         
         let chunkSize = 50 // Balance between bulk performance and cancellation responsiveness
         
-        for (destParent, indices) in groups {
+        for destParent in groupOrder {
+            guard let indices = groups[destParent] else { continue }
             if cancelRequested { break }
             
             do {
@@ -364,7 +375,6 @@ public final class FileTransferService: ObservableObject {
                         if itm.status != .completed {
                             itm.markCompleted()
                             batch.items[idx] = itm
-                            completedBytesAccumulated += itm.fileSize
                         }
                     }
                     
@@ -383,7 +393,9 @@ public final class FileTransferService: ObservableObject {
         
         if cancelRequested {
             batch.cancel()
-            let completed = completedBytesAccumulated > 0 ? " (\(FormatUtils.formatBytes(completedBytesAccumulated)) transferred)" : ""
+            let completed = batch.totalBytesTransferred > 0
+                ? " (\(FormatUtils.formatBytes(batch.totalBytesTransferred)) transferred)"
+                : ""
             postTransferNotification(
                 title: "Transfer Cancelled",
                 body: "\(batch.completedFileCount) of \(batch.totalFileCount) files copied\(completed)",
@@ -405,7 +417,11 @@ public final class FileTransferService: ObservableObject {
                         } else {
                             let fileManager = FileManager.default
                             for path in sourcePathsToDeleteAfterTransfer {
-                                try? fileManager.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
+                                do {
+                                    try fileManager.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
+                                } catch {
+                                    ErrorLogger.log(error, message: "FileTransferService: Failed to trash cut source \(path)")
+                                }
                             }
                         }
                     } catch {
@@ -614,10 +630,18 @@ public final class FileTransferService: ObservableObject {
             
             var mtpFilesMetadata = [String: GoFileInfo]()
             for parent in parentDirsToWalk {
-                if let contents = try? await bridge.walk(storageId: storageId, path: parent, recursive: false, skipHidden: false) {
+                do {
+                    let contents = try await bridge.walk(
+                        storageId: storageId,
+                        path: parent,
+                        recursive: false,
+                        skipHidden: false
+                    )
                     for node in contents {
                         mtpFilesMetadata[node.path] = node
                     }
+                } catch {
+                    ErrorLogger.log(error, message: "FileTransferService: Failed to read conflict metadata for \(parent)")
                 }
             }
             

@@ -28,12 +28,14 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
             return
         }
         self.notificationPort = port
+        self.isWatching = true
         
         self.runLoopSource = IONotificationPortGetRunLoopSource(port).takeUnretainedValue()
         CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
         
         guard let matchingDict1 = IOServiceMatching(kIOUSBDeviceClassName),
               let matchingDict2 = IOServiceMatching(kIOUSBDeviceClassName) else {
+            cleanupWatchingResources()
             return
         }
         
@@ -54,7 +56,7 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         )
         
         if addedResult != kIOReturnSuccess {
-            stopWatching()
+            cleanupWatchingResources()
             return
         }
         
@@ -77,7 +79,7 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         )
         
         if removedResult != kIOReturnSuccess {
-            stopWatching()
+            cleanupWatchingResources()
             return
         }
         
@@ -85,11 +87,14 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
             await handleDevicesRemoved(iterator: removedIterator)
         }
         
-        isWatching = true
     }
     
     public func stopWatching() {
-        guard isWatching else { return }
+        guard isWatching || notificationPort != nil || addedIterator != 0 || removedIterator != 0 else { return }
+        cleanupWatchingResources()
+    }
+
+    private func cleanupWatchingResources() {
         
         if let source = runLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes)
@@ -122,7 +127,7 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
             IOObjectRelease(device)
         }
         
-        if deviceCount > 0 {
+        if deviceCount > 0, !getConnectedAndroidVendorIDs().isEmpty {
             let autoDetect = UserDefaults.standard.object(forKey: "autoDetectDevice") as? Bool ?? true
             if autoDetect {
                 if !isInitialScan {
@@ -140,7 +145,7 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
             IOObjectRelease(device)
         }
         
-        if deviceCount > 0 {
+        if deviceCount > 0, getConnectedAndroidVendorIDs().isEmpty {
             await verifyMtpConnection()
         }
     }
@@ -162,5 +167,29 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
                 .trimmingCharacters(in: .controlCharacters)
         }
         return nil
+    }
+
+    public func getConnectedAndroidVendorIDs() -> [UInt16] {
+        guard let matchingDict = IOServiceMatching(kIOUSBDeviceClassName) as? [String: Any] else {
+            return []
+        }
+
+        var iterator: io_iterator_t = 0
+        let result = IOServiceGetMatchingServices(kIOMainPortDefault, matchingDict as CFDictionary, &iterator)
+
+        if result != kIOReturnSuccess {
+            return []
+        }
+        defer { IOObjectRelease(iterator) }
+
+        var vids: [UInt16] = []
+        while case let device = IOIteratorNext(iterator), device != 0 {
+            defer { IOObjectRelease(device) }
+
+            if let vendorIDNum = IORegistryEntryCreateCFProperty(device, "idVendor" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? NSNumber {
+                vids.append(vendorIDNum.uint16Value)
+            }
+        }
+        return vids
     }
 }

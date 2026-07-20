@@ -85,7 +85,20 @@ public final class MTPDeviceManager: ObservableObject {
             }
         } catch {
             ErrorLogger.log(error, message: "MTP connection failed")
-            self.errorMessage = "Failed to connect: \(error.localizedDescription)"
+
+            // Initialization can succeed before storage enumeration fails. Release
+            // the native handle so a retry does not inherit a stale session.
+            try? await bridge.dispose()
+
+            let androidVendorIDs = USBWatcher.shared.getConnectedAndroidVendorIDs()
+            let isConflict = PTPConflictDetector.classifyError(error.localizedDescription, ptpVendorIDs: androidVendorIDs)
+
+            if isConflict {
+                self.errorMessage = "Connection Failed: macOS has blocked access to the device.\n\nmacOS automatically claims PTP/MTP devices if apps like Image Capture or Preview are open. Please close them.\n\nYou may need to physically disconnect and reconnect your phone, or ensure its USB connection mode is set to \"File Transfer\" or \"MTP\", then click Retry."
+            } else {
+                self.errorMessage = "Failed to connect: \(error.localizedDescription)"
+            }
+
             self.isConnected = false
             self.deviceInfo = nil
             self.storages = []
@@ -144,6 +157,13 @@ public final class MTPDeviceManager: ObservableObject {
                 )
             }
             self.storages = mappedStorages
+            if let selectedStorageId,
+               !mappedStorages.contains(where: { $0.storageId == selectedStorageId }) {
+                self.selectedStorageId = mappedStorages.first?.storageId
+                self.currentMTPPath = "/"
+                self.backHistory.removeAll()
+                self.forwardHistory.removeAll()
+            }
             if let dev = self.deviceInfo {
                 self.deviceInfo = MTPDeviceInfo(
                     manufacturer: dev.manufacturer,
@@ -169,7 +189,12 @@ public final class MTPDeviceManager: ObservableObject {
         let requestedPath = currentMTPPath
 
         do {
-            let goFiles = try await bridge.listDirectory(storageId: storageId, path: requestedPath)
+            let showHidden = UserDefaults.standard.object(forKey: "showHiddenFilesMTP") as? Bool ?? false
+            let goFiles = try await bridge.listDirectory(
+                storageId: storageId,
+                path: requestedPath,
+                skipHidden: !showHidden
+            )
 
             // If the user navigated again while this request was in flight,
             // a newer refreshFiles() call already owns the latest generation.
@@ -243,7 +268,11 @@ public final class MTPDeviceManager: ObservableObject {
     }
 
     public func selectStorage(_ storageId: UInt32) async {
-        guard selectedStorageId != storageId else { return }
+        guard storages.contains(where: { $0.storageId == storageId }) else { return }
+        guard selectedStorageId != storageId || currentMTPPath != "/" else {
+            await refreshFiles()
+            return
+        }
         selectedStorageId = storageId
         currentMTPPath = "/"
         backHistory.removeAll()
@@ -257,6 +286,7 @@ public final class MTPDeviceManager: ObservableObject {
             throw KalamError.deviceNotConnected
         }
         
+        try validateChildName(name)
         let pathSeparator = currentMTPPath == "/" ? "" : "/"
         let fullPath = "\(currentMTPPath)\(pathSeparator)\(name)"
         
@@ -269,6 +299,7 @@ public final class MTPDeviceManager: ObservableObject {
             throw KalamError.deviceNotConnected
         }
         
+        guard !paths.isEmpty else { return }
         try await bridge.deleteFiles(storageId: storageId, paths: paths)
         await refreshFiles()
     }
@@ -278,6 +309,7 @@ public final class MTPDeviceManager: ObservableObject {
             throw KalamError.deviceNotConnected
         }
         
+        try validateChildName(newName)
         try await bridge.renameFile(storageId: storageId, path: path, newName: newName)
         await refreshFiles()
     }
@@ -288,5 +320,16 @@ public final class MTPDeviceManager: ObservableObject {
         }
         
         return try await bridge.checkFilesExist(storageId: storageId, paths: files)
+    }
+
+    private func validateChildName(_ name: String) throws {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              trimmed != ".",
+              trimmed != "..",
+              !trimmed.contains("/"),
+              !trimmed.contains("\\") else {
+            throw KalamError.invalidPath("A file or folder name must not be empty or contain path separators.")
+        }
     }
 }

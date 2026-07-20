@@ -268,13 +268,14 @@ extension TransferItem {
     }
 
     public mutating func updateProgress(bytesTransferred bytes: Int64) {
-        bytesTransferred = bytes
+        let clampedBytes = max(0, min(bytes, fileSize))
+        self.bytesTransferred = clampedBytes
         if let start = startTime {
             let elapsed = Date().timeIntervalSince(start)
             if elapsed > 0 {
-                speed = Double(bytes) / elapsed
-                let remaining = Double(fileSize - bytes)
-                estimatedTimeRemaining = remaining / speed
+                speed = Double(clampedBytes) / elapsed
+                let remaining = Double(max(0, fileSize - clampedBytes))
+                estimatedTimeRemaining = speed > 0 ? remaining / speed : nil
             }
         }
     }
@@ -294,6 +295,7 @@ extension TransferItem {
 
     public mutating func markSkipped() {
         status = .skipped
+        bytesTransferred = fileSize
         speed = 0
         estimatedTimeRemaining = nil
     }

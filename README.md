@@ -194,7 +194,7 @@ bash scripts/build.sh release --arch arm64
 bash scripts/build.sh release --arch x86_64
 ```
 
-`swift build` only works after `Sources/CKalam/libkalam.a` has been generated for the target architecture. The build script handles that step.
+The build script stages and patches the sibling Kalam sources in a temporary directory, so the OpenMTP checkout is not modified. `swift build` is useful for validating an already-generated `libkalam.a`; use the build script for a fresh app bundle.
 
 ### Universal Builds
 
