@@ -77,7 +77,7 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
         
         _ = alert.addButton(withTitle: "Cancel")
         
-        let downloadTask = Task {
+        let downloadTask = Task.detached(priority: .userInitiated) {
             do {
                 var request = URLRequest(url: url)
                 request.setValue("macMTP/\(AppVersion.current)", forHTTPHeaderField: "User-Agent")
@@ -111,7 +111,7 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
                         NSApplication.shared.stopModal(withCode: .cancel)
                         alert.window.close()
                         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-                        showNoUpdateAlert(message: "Failed to download update. HTTP Status: \(status)")
+                        self.showNoUpdateAlert(message: "Failed to download update. HTTP Status: \(status)")
                     }
                 }
             } catch is CancellationError {
@@ -121,7 +121,7 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
                 await MainActor.run {
                     NSApplication.shared.stopModal(withCode: .cancel)
                     alert.window.close()
-                    showNoUpdateAlert(message: "Download error: \(error.localizedDescription)")
+                    self.showNoUpdateAlert(message: "Download error: \(error.localizedDescription)")
                 }
             }
         }
