@@ -121,7 +121,6 @@ struct FileExplorerPane: View {
 
     @State private var isCreatingNewFolder: Bool = false
     @State private var newFolderName: String = ""
-    @State private var showProperties: Bool = false
     @State private var propertiesFile: FileNode?
 
     @State private var isDropTargeted: Bool = false
@@ -233,10 +232,8 @@ struct FileExplorerPane: View {
         .onChange(of: isActivePane) { _, active in
             if active { lastKeyTime = Date.distantPast }
         }
-        .sheet(isPresented: $showProperties) {
-            if let file = propertiesFile {
-                FilePropertiesView(file: file, isLocal: isLocal)
-            }
+        .sheet(item: $propertiesFile) { file in
+            FilePropertiesView(file: file, isLocal: isLocal)
         }
         .alert("Rename", isPresented: $showRenameDialog) {
             TextField("New name", text: $renameText)
@@ -732,6 +729,12 @@ struct FileExplorerPane: View {
         }
 
         Button(action: {
+            copyPaths(targetedItems(for: file).map(\.path))
+        }) {
+            Label(targetedItems(for: file).count == 1 ? "Copy Path" : "Copy Paths", systemImage: "doc.on.clipboard")
+        }
+
+        Button(action: {
             ClipboardManager.shared.cutItems(items: targetedItems(for: file), from: currentPath, isLocal: isLocal)
         }) {
             Label("Cut", systemImage: "scissors")
@@ -775,11 +778,18 @@ struct FileExplorerPane: View {
             Label("Select All", systemImage: "checkmark.circle")
         }
 
+        if isLocal {
+            Button(action: {
+                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file.path)])
+            }) {
+                Label("Show in Finder", systemImage: "finder")
+            }
+        }
+
         Divider()
 
         Button(action: {
             propertiesFile = targetedItems(for: file).first ?? file
-            showProperties = true
         }) {
             Label("Properties", systemImage: "info.circle")
         }
@@ -801,6 +811,12 @@ struct FileExplorerPane: View {
             Label("Paste", systemImage: "doc.on.clipboard")
         }
         .disabled(!ClipboardManager.shared.hasContent)
+
+        Button(action: {
+            copyPaths([currentPath])
+        }) {
+            Label("Copy Current Path", systemImage: "doc.on.clipboard")
+        }
         
         Divider()
         
@@ -810,6 +826,25 @@ struct FileExplorerPane: View {
         }) {
             Label("New Folder", systemImage: "folder.badge.plus")
         }
+
+        Button(action: {
+            selectedItems = Set(displayedFiles.map { $0.path })
+        }) {
+            Label("Select All", systemImage: "checkmark.circle")
+        }
+        .disabled(displayedFiles.isEmpty)
+
+        Button(action: {
+            navigateTo(path: currentPath)
+        }) {
+            Label("Refresh", systemImage: "arrow.clockwise")
+        }
+    }
+
+    private func copyPaths(_ paths: [String]) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(paths.joined(separator: "\n"), forType: .string)
     }
 
 
@@ -1467,6 +1502,8 @@ struct FilePropertiesView: View {
     let file: FileNode
     let isLocal: Bool
     @Environment(\.dismiss) private var dismiss
+    @State private var localDetails: LocalFileDetails?
+    @State private var detailsError: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1489,9 +1526,9 @@ struct FilePropertiesView: View {
 
             Divider()
 
-            Group {
+            VStack(spacing: 0) {
                 propertyRow(label: "Kind", value: file.isDirectory ? "Folder" : "Document")
-                propertyRow(label: "Size", value: file.formattedSize)
+                propertyRow(label: "Size", value: displaySize)
                 propertyRow(label: "Modified", value: file.formattedDate)
                 propertyRow(label: "Path", value: file.path)
                 if !file.parentPath.isEmpty {
@@ -1500,19 +1537,38 @@ struct FilePropertiesView: View {
                 if !file.extensionName.isEmpty {
                     propertyRow(label: "Extension", value: file.extensionName)
                 }
+                if let localDetails {
+                    propertyRow(label: "Created", value: FormatUtils.formatDate(localDetails.creationDate))
+                    propertyRow(label: "Permissions", value: localDetails.permissions)
+                    propertyRow(label: "Owner", value: localDetails.owner)
+                }
+                if let detailsError {
+                    propertyRow(label: "Details", value: detailsError)
+                }
             }
+            .padding(.vertical, 6)
 
             Divider()
 
             HStack {
+                Button("Copy Path") { copyPath() }
+                if isLocal {
+                    Button("Show in Finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file.path)])
+                    }
+                }
                 Spacer()
                 Button("Close") { dismiss() }
                     .keyboardShortcut(.defaultAction)
             }
             .padding()
         }
-        .frame(width: 380)
+        .frame(width: 480)
+        .frame(minHeight: 320)
         .background(Color(NSColor.windowBackgroundColor))
+        .task(id: file.path) {
+            await loadDetails()
+        }
     }
 
     private func propertyRow(label: String, value: String) -> some View {
@@ -1529,6 +1585,82 @@ struct FilePropertiesView: View {
         }
         .padding(.horizontal)
         .padding(.vertical, 6)
+    }
+
+    private var displaySize: String {
+        if let byteCount = localDetails?.byteCount {
+            return FormatUtils.formatBytes(byteCount)
+        }
+        return file.formattedSize
+    }
+
+    private func copyPath() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(file.path, forType: .string)
+    }
+
+    private func loadDetails() async {
+        guard isLocal else { return }
+        do {
+            let details = try await Task.detached(priority: .utility) {
+                try LocalFileDetails.load(path: file.path, isDirectory: file.isDirectory)
+            }.value
+            await MainActor.run {
+                localDetails = details
+                detailsError = nil
+            }
+        } catch {
+            await MainActor.run {
+                detailsError = error.localizedDescription
+            }
+        }
+    }
+}
+
+private struct LocalFileDetails: Sendable {
+    let byteCount: Int64
+    let creationDate: Date
+    let permissions: String
+    let owner: String
+
+    static func load(path: String, isDirectory: Bool) throws -> LocalFileDetails {
+        let fileManager = FileManager.default
+        let attributes = try fileManager.attributesOfItem(atPath: path)
+        let creationDate = (attributes[.creationDate] as? Date) ?? Date()
+        let permissionsValue = (attributes[.posixPermissions] as? NSNumber)?.uint16Value ?? 0
+        let owner = (attributes[.ownerAccountName] as? String) ?? "Unknown"
+        let byteCount: Int64
+
+        if isDirectory {
+            byteCount = directoryByteCount(path: path)
+        } else {
+            byteCount = (attributes[.size] as? NSNumber)?.int64Value ?? 0
+        }
+
+        return LocalFileDetails(
+            byteCount: byteCount,
+            creationDate: creationDate,
+            permissions: String(format: "%04o", permissionsValue),
+            owner: owner
+        )
+    }
+
+    private static func directoryByteCount(path: String) -> Int64 {
+        guard let enumerator = FileManager.default.enumerator(
+            at: URL(fileURLWithPath: path),
+            includingPropertiesForKeys: [.fileSizeKey, .isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else { return 0 }
+
+        var total: Int64 = 0
+        for case let url as URL in enumerator {
+            guard let values = try? url.resourceValues(forKeys: [.fileSizeKey, .isDirectoryKey]),
+                  values.isDirectory == false,
+                  let fileSize = values.fileSize else { continue }
+            total += Int64(fileSize)
+        }
+        return total
     }
 }
 
