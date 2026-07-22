@@ -51,9 +51,12 @@ if [[ ${#TARGETS[@]} -eq 0 ]]; then
     TARGETS=("$(uname -m)")
 fi
 
-if [[ -z "${SENTRY_DSN:-}" || -z "${SENTRY_AUTH_TOKEN:-}" || -z "${SENTRY_ORG:-}" || -z "${SENTRY_PROJECT:-}" ]]; then
-    echo "WARNING: Sentry release tracking variables are incomplete. Proceeding without Sentry symbol upload." >&2
-fi
+for required_name in SENTRY_DSN SENTRY_AUTH_TOKEN SENTRY_ORG SENTRY_PROJECT; do
+    if [[ -z "${!required_name:-}" ]]; then
+        echo "ERROR: $required_name is required for release error tracking." >&2
+        exit 1
+    fi
+done
 
 if ! command -v sentry-cli >/dev/null 2>&1; then
     echo "ERROR: sentry-cli is required to upload release symbols." >&2
@@ -119,15 +122,13 @@ package_target() {
         ditto -c -k --keepParent "$APP_DSYM" "$RELEASE_DIR/$dsym_name"
     )
 
-    if [[ -n "${SENTRY_AUTH_TOKEN:-}" && -n "${SENTRY_ORG:-}" && -n "${SENTRY_PROJECT:-}" ]] && command -v sentry-cli >/dev/null 2>&1; then
-        echo "Uploading $target debug symbols to Sentry..."
-        sentry-cli debug-files upload \
-            --org "$SENTRY_ORG" \
-            --project "$SENTRY_PROJECT" \
-            --type dsym \
-            --wait-for 60 \
-            "$APP_DSYM"
-    fi
+    echo "Uploading $target debug symbols to Sentry..."
+    sentry-cli debug-files upload \
+        --org "$SENTRY_ORG" \
+        --project "$SENTRY_PROJECT" \
+        --type dsym \
+        --wait-for 60 \
+        "$APP_DSYM"
 
     echo "Packaging $target DMG..."
     rm -f "$RELEASE_DIR/$dmg_name"
