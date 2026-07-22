@@ -190,9 +190,12 @@ public final class MTPDeviceManager: ObservableObject {
 
         do {
             let showHidden = UserDefaults.standard.object(forKey: "showHiddenFilesMTP") as? Bool ?? false
+            // Keep browsing shallow. Some Android MTP implementations reject a
+            // recursive root walk with InvalidObjectHandle, despite remaining connected.
             let goFiles = try await bridge.listDirectory(
                 storageId: storageId,
                 path: requestedPath,
+                recursive: false,
                 skipHidden: !showHidden
             )
 
@@ -292,6 +295,7 @@ public final class MTPDeviceManager: ObservableObject {
         
         try await bridge.makeDirectory(storageId: storageId, path: fullPath)
         await refreshFiles()
+        await refreshStorages()
     }
 
     public func deleteFiles(paths: [String]) async throws {
@@ -302,6 +306,7 @@ public final class MTPDeviceManager: ObservableObject {
         guard !paths.isEmpty else { return }
         try await bridge.deleteFiles(storageId: storageId, paths: paths)
         await refreshFiles()
+        await refreshStorages()
     }
 
     public func renameFile(path: String, newName: String) async throws {

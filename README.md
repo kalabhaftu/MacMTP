@@ -99,8 +99,10 @@ This is size-based conflict handling. It is useful for skipping already-copied f
 - Dual-pane layout: local filesystem on the left, Android device on the right.
 - Sidebar with common local folders and mounted volumes.
 - List and icon views.
-- Sorting by name, size, type, or modified date in list view.
-- Filter bar for names or extensions such as `.mp4`.
+- Sorting by name, size, type, or modified date in every view, with folders kept first.
+- Icon-view grouping by kind, extension, size range, or modified date.
+- Filename search plus a separate extension filter, while folders remain available for navigation.
+- Status-bar sizes total the files in the current directory without recursively scanning folders; local folder sizes are calculated on demand from Properties, while MTP folder sizes are unavailable.
 - Hidden-file toggles for local and MTP panes.
 - macOS dark mode via system colors.
 

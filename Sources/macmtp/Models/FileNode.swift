@@ -14,8 +14,6 @@ public struct FileNode: Identifiable, Hashable, Sendable {
 
     public let size: Int64
 
-    public var calculatedSize: Int64?
-
     public let modificationDate: Date
 
 
@@ -39,8 +37,7 @@ public struct FileNode: Identifiable, Hashable, Sendable {
         modificationDate: Date = Date(),
         objectId: UInt32 = 0,
         parentId: UInt32 = 0,
-        isSelected: Bool = false,
-        calculatedSize: Int64? = nil
+        isSelected: Bool = false
     ) {
         self.name = name
         self.path = path
@@ -51,7 +48,6 @@ public struct FileNode: Identifiable, Hashable, Sendable {
         self.objectId = objectId
         self.parentId = parentId
         self.isSelected = isSelected
-        self.calculatedSize = calculatedSize
     }
 
 
@@ -68,9 +64,6 @@ public struct FileNode: Identifiable, Hashable, Sendable {
     }
 
     public var formattedSize: String {
-        if let calculatedSize = calculatedSize {
-            return FormatUtils.formatBytes(calculatedSize)
-        }
         guard !isDirectory else { return "—" }
         return FormatUtils.formatBytes(size)
     }
@@ -121,6 +114,29 @@ extension FileNode: Comparable {
     }
 }
 
+struct FileSizeSummary: Equatable {
+    let bytes: Int64
+    let fileCount: Int
+    let folderCount: Int
+
+    static func directItems(in files: [FileNode], selectedPaths: Set<String>? = nil) -> FileSizeSummary {
+        var bytes: Int64 = 0
+        var fileCount = 0
+        var folderCount = 0
+
+        for file in files where selectedPaths?.contains(file.path) ?? true {
+            if file.isDirectory {
+                folderCount += 1
+                continue
+            }
+            fileCount += 1
+            let (sum, overflow) = bytes.addingReportingOverflow(max(0, file.size))
+            bytes = overflow ? Int64.max : sum
+        }
+        return FileSizeSummary(bytes: bytes, fileCount: fileCount, folderCount: folderCount)
+    }
+}
+
 
 extension FileNode {
     public static func fromLocalURL(_ url: URL) -> FileNode? {
@@ -150,33 +166,6 @@ extension FileNode {
             parentPath: (parentPath as NSString).deletingLastPathComponent,
             isDirectory: true
         )
-    }
-}
-
-
-extension FileNode {
-
-    public static func calculateDirectorySize(path: String, isLocal: Bool, storageId: UInt32?) async -> Int64? {
-        if isLocal {
-            return await Task.detached {
-                let fileManager = FileManager.default
-                guard let enumerator = fileManager.enumerator(
-                    at: URL(fileURLWithPath: path),
-                    includingPropertiesForKeys: [.fileSizeKey, .isDirectoryKey]
-                ) else { return nil }
-                var total: Int64 = 0
-                while let fileURL = enumerator.nextObject() as? URL {
-                    guard let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .isDirectoryKey]),
-                          let isDir = values.isDirectory,
-                          !isDir,
-                          let fileSize = values.fileSize else { continue }
-                    total += Int64(fileSize)
-                }
-                return total
-            }.value
-        } else {
-            return nil
-        }
     }
 }
 

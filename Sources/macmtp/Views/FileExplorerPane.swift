@@ -37,27 +37,6 @@ enum FileExplorerLoadingState: Equatable {
 }
 
 
-enum FileSortColumn: String, CaseIterable {
-    case name = "Name"
-    case size = "Size"
-    case type = "Type"
-    case dateModified = "Date Modified"
-}
-
-enum FileSortDirection {
-    case ascending
-    case descending
-
-    var toggled: FileSortDirection {
-        self == .ascending ? .descending : .ascending
-    }
-
-    var iconName: String {
-        self == .ascending ? "chevron.up" : "chevron.down"
-    }
-}
-
-
 enum FileViewMode: String, CaseIterable {
     case list = "List"
     case icons = "Icons"
@@ -97,9 +76,13 @@ struct FileExplorerPane: View {
 
     @State private var loadingState: FileExplorerLoadingState = .idle
     @State private var displayedFiles: [FileNode] = []
+    @State private var ungroupedFiles: [FileNode] = []
+    @State private var displayedGroups: [FileGroup] = []
 
     @State private var sortColumn: FileSortColumn = .name
     @State private var sortDirection: FileSortDirection = .ascending
+    @State private var grouping: FileGrouping = .none
+    @State private var extensionFilter: String?
 
     @State private var viewMode: FileViewMode = .icons
 
@@ -125,14 +108,11 @@ struct FileExplorerPane: View {
 
     @State private var isDropTargeted: Bool = false
 
-    @State private var sizeGen: UInt64 = 0
+    @State private var loadGeneration: UInt64 = 0
 
     @State private var contextMenuTargetID: String? = nil
 
     @State private var lastClickedItemID: String? = nil
-
-    @State private var directorySizes: [String: Int64] = [:]
-
 
     @State private var dragRect: CGRect? = nil
     @State private var ignoreMarqueeDrag: Bool = false
@@ -195,8 +175,6 @@ struct FileExplorerPane: View {
             } else {
                 loadingState = .loaded
             }
-            sizeGen &+= 1
-            calculateDirectorySizesAsync()
         }
         .onChange(of: showHiddenFilesLocal) { _, _ in
             if isLocal { applyFilterAndSort() }
@@ -214,13 +192,10 @@ struct FileExplorerPane: View {
                 loadDirectory()
             }
         }
-        .onChange(of: filterText) { _, _ in
+        .onChange(of: browserOrganization) { _, _ in
             applyFilterAndSort()
         }
-        .onChange(of: sortColumn) { _, _ in
-            applyFilterAndSort()
-        }
-        .onChange(of: sortDirection) { _, _ in
+        .onChange(of: viewMode) { _, _ in
             applyFilterAndSort()
         }
         .background(
@@ -325,12 +300,14 @@ struct FileExplorerPane: View {
                     if !isFilterVisible { filterText = "" }
                 }
             }) {
-                Image(systemName: isFilterVisible ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                Image(systemName: isFilterVisible ? "magnifyingglass.circle.fill" : "magnifyingglass")
                     .font(.system(size: 14 * appFontScale))
                     .foregroundColor(isFilterVisible ? .accentColor : .secondary)
             }
             .buttonStyle(.plain)
-            .help("Filter files")
+            .help("Search files")
+
+            organizationMenu
 
             Text(itemCountText)
                 .font(.caption2)
@@ -410,7 +387,7 @@ struct FileExplorerPane: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
 
-            TextField("Filter by name or extension (e.g. .mp4)", text: $filterText)
+            TextField("Search file names", text: $filterText)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: 11 * appFontScale))
 
@@ -427,6 +404,85 @@ struct FileExplorerPane: View {
         .padding(.vertical, 5)
         .background(Color(NSColor.controlBackgroundColor).opacity(0.7))
         .transition(.move(edge: .top).combined(with: .opacity))
+    }
+
+    private var organizationMenu: some View {
+        Menu {
+            Section("Sort By") {
+                ForEach(FileSortColumn.allCases) { column in
+                    Button {
+                        if sortColumn == column {
+                            sortDirection = sortDirection.toggled
+                        } else {
+                            sortColumn = column
+                            sortDirection = .ascending
+                        }
+                    } label: {
+                        if sortColumn == column {
+                            Label(column.rawValue, systemImage: sortDirection.iconName)
+                        } else {
+                            Text(column.rawValue)
+                        }
+                    }
+                }
+                Divider()
+                Picker("Direction", selection: $sortDirection) {
+                    ForEach(FileSortDirection.allCases) { direction in
+                        Text(direction.rawValue).tag(direction)
+                    }
+                }
+            }
+
+            Section("Group in Icon Views") {
+                Picker("Group By", selection: $grouping) {
+                    ForEach(FileGrouping.allCases) { option in
+                        Text(option.rawValue).tag(option)
+                    }
+                }
+            }
+
+            Section("File Extension") {
+                Button("All Extensions") { extensionFilter = nil }
+                ForEach(availableExtensions, id: \.self) { ext in
+                    Button {
+                        extensionFilter = ext
+                    } label: {
+                        if extensionFilter == ext {
+                            Label(".\(ext)", systemImage: "checkmark")
+                        } else {
+                            Text(".\(ext)")
+                        }
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: organizationIsActive ? "arrow.up.arrow.down.circle.fill" : "arrow.up.arrow.down.circle")
+                .font(.system(size: 14 * appFontScale))
+                .foregroundColor(organizationIsActive ? .accentColor : .secondary)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Sort, group, and filter by extension")
+    }
+
+    private var availableExtensions: [String] {
+        Array(Set(files.lazy.filter { !$0.isDirectory && !$0.extensionName.isEmpty }.map(\.extensionName))).sorted {
+            $0.localizedStandardCompare($1) == .orderedAscending
+        }
+    }
+
+    private var organizationIsActive: Bool {
+        sortColumn != .name || sortDirection != .ascending || grouping != .none || extensionFilter != nil
+    }
+
+    private var browserOrganization: FileBrowserOrganization {
+        FileBrowserOrganization(
+            searchText: filterText,
+            extensionFilter: extensionFilter,
+            sortColumn: sortColumn,
+            sortDirection: sortDirection,
+            grouping: grouping
+        )
     }
 
 
@@ -498,16 +554,16 @@ struct FileExplorerPane: View {
     }
 
     private var listView: some View {
-        List(displayedFiles, selection: $selectedItems) { file in
-            fileRow(for: file)
-                .contextMenu { contextMenuItems(for: file) }
-                .listRowSeparator(.visible)
-                .onTapGesture(count: 2) {
-                    handleDoubleClick(file: file)
-                }
-                .onTapGesture(count: 1) {
-                    handleSingleClick(file: file)
-                }
+        List(selection: $selectedItems) {
+            ForEach(ungroupedFiles) { file in
+                fileRow(for: file)
+                    .tag(file.path)
+                    .contextMenu { contextMenuItems(for: file) }
+                    .listRowSeparator(.visible)
+                    .onTapGesture(count: 2) {
+                        handleDoubleClick(file: file)
+                    }
+            }
         }
         .listStyle(.inset)
         .contextMenu { emptySpaceContextMenuItems }
@@ -526,8 +582,14 @@ struct FileExplorerPane: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     LazyVGrid(columns: columns, spacing: 8) {
-                        ForEach(displayedFiles) { file in
-                            gridItemWithPreference(for: file)
+                        ForEach(displayedGroups) { group in
+                            if grouping != .none {
+                                groupHeader(group)
+                                    .gridCellColumns(columns.count)
+                            }
+                            ForEach(group.files) { file in
+                                gridItemWithPreference(for: file)
+                            }
                         }
                     }
                     Spacer()
@@ -609,6 +671,19 @@ struct FileExplorerPane: View {
         .onDrop(of: [.fileURL, .utf8PlainText], isTargeted: $isDropTargeted) { providers in
             handleDrop(providers: providers)
         }
+    }
+
+    private func groupHeader(_ group: FileGroup) -> some View {
+        HStack {
+            Text(group.title)
+                .font(.system(size: 11 * appFontScale, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Text("\(group.files.count)")
+                .font(.system(size: 10 * appFontScale))
+                .foregroundStyle(.tertiary)
+            Spacer()
+        }
+        .padding(.vertical, 3)
     }
 
     private func gridItemWithPreference(for file: FileNode) -> some View {
@@ -928,13 +1003,16 @@ struct FileExplorerPane: View {
                 .font(.headline)
                 .foregroundColor(.secondary)
 
-            if !filterText.isEmpty {
-                Text("No files match the filter \"\(filterText)\"")
+            if !filterText.isEmpty || extensionFilter != nil {
+                Text(emptyFilterMessage)
                     .font(.caption)
                     .foregroundColor(.secondary)
 
-                Button(action: { filterText = "" }) {
-                    Label("Clear Filter", systemImage: "xmark.circle")
+                Button(action: {
+                    filterText = ""
+                    extensionFilter = nil
+                }) {
+                    Label("Clear Filters", systemImage: "xmark.circle")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -944,6 +1022,14 @@ struct FileExplorerPane: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(NSColor.controlBackgroundColor))
+    }
+
+    private var emptyFilterMessage: String {
+        if let extensionFilter, !filterText.isEmpty {
+            return "No .\(extensionFilter) files match \"\(filterText)\""
+        }
+        if let extensionFilter { return "No .\(extensionFilter) files in this folder" }
+        return "No files match \"\(filterText)\""
     }
 
 
@@ -1040,20 +1126,18 @@ struct FileExplorerPane: View {
         if isLocal {
             loadingState = .loading
             let path = currentPath
-            sizeGen &+= 1
-            let gen = sizeGen
+            loadGeneration &+= 1
+            let generation = loadGeneration
             DispatchQueue.global(qos: .userInitiated).async {
                 let result = self.listLocalDirectory(path: path)
                 DispatchQueue.main.async {
-                    guard self.sizeGen == gen else { return }
+                    guard self.loadGeneration == generation else { return }
                     if case .failure(let error) = result {
                         self.loadingState = .error(error.localizedDescription)
                     } else if case .success(let items) = result {
-                        self.directorySizes.removeAll()
                         self.files = items
                         self.applyFilterAndSort()
                         self.loadingState = self.files.isEmpty ? .empty : .loaded
-                        self.calculateDirectorySizesAsync()
                     }
                 }
             }
@@ -1096,68 +1180,25 @@ struct FileExplorerPane: View {
         }
     }
 
-    private func calculateDirectorySizesAsync() {
-        guard isLocal else { return }
-        let gen = sizeGen
-        let currentFiles = files
-        let local = isLocal
-        let storageId = MTPDeviceManager.shared.selectedStorageId
-        Task {
-            for i in currentFiles.indices where currentFiles[i].isDirectory {
-                let isStale = await MainActor.run { self.sizeGen != gen }
-                if isStale { break }
-
-                let size = await FileNode.calculateDirectorySize(
-                    path: currentFiles[i].path,
-                    isLocal: local,
-                    storageId: storageId
-                )
-                if let size = size {
-                    await MainActor.run {
-                        guard self.sizeGen == gen else { return }
-                        self.directorySizes[currentFiles[i].path] = size
-                    }
-                }
-            }
-        }
-    }
-
-
     @AppStorage("showHiddenFilesLocal") private var showHiddenFilesLocal: Bool = false
     @AppStorage("showHiddenFilesMTP") private var showHiddenFilesMTP: Bool = false
 
     private func applyFilterAndSort(using input: [FileNode]? = nil) {
-        var result = input ?? files
-
         let showHidden = isLocal ? showHiddenFilesLocal : showHiddenFilesMTP
-        if !showHidden {
-            result = result.filter { !$0.name.hasPrefix(".") }
+        let organization = browserOrganization
+        displayedGroups = organization.organize(input ?? files, showHidden: showHidden)
+        var ungroupedOrganization = organization
+        ungroupedOrganization.grouping = .none
+        ungroupedFiles = ungroupedOrganization.organize(input ?? files, showHidden: showHidden).flatMap(\.files)
+        displayedFiles = viewMode == .list ? ungroupedFiles : displayedGroups.flatMap(\.files)
+
+        let visiblePaths = Set(displayedFiles.map(\.path))
+        selectedItems.formIntersection(visiblePaths)
+        if let lastClickedItemID, !visiblePaths.contains(lastClickedItemID) {
+            self.lastClickedItemID = nil
         }
 
-        if !filterText.isEmpty {
-            let query = filterText.lowercased()
-            if query.hasPrefix(".") {
-                let ext = String(query.dropFirst())
-                result = result.filter {
-                    $0.extensionName.lowercased() == ext || $0.isDirectory
-                }
-            } else {
-                result = result.filter {
-                    $0.name.lowercased().contains(query)
-                }
-            }
-        }
-
-        result.sort { a, b in
-            if a.isDirectory != b.isDirectory {
-                return a.isDirectory
-            }
-            return compareFiles(a, b)
-        }
-
-        displayedFiles = result
-
-        if displayedFiles.isEmpty && !files.isEmpty && !filterText.isEmpty {
+        if displayedFiles.isEmpty && !files.isEmpty && (!filterText.isEmpty || extensionFilter != nil) {
             loadingState = .empty
         } else if displayedFiles.isEmpty && files.isEmpty {
             loadingState = .empty
@@ -1165,22 +1206,6 @@ struct FileExplorerPane: View {
             loadingState = .loaded
         }
     }
-
-    private func compareFiles(_ a: FileNode, _ b: FileNode) -> Bool {
-        let ascending: Bool
-        switch sortColumn {
-        case .name:
-            ascending = a.name.localizedStandardCompare(b.name) == .orderedAscending
-        case .size:
-            ascending = a.size < b.size
-        case .type:
-            ascending = a.extensionName.localizedStandardCompare(b.extensionName) == .orderedAscending
-        case .dateModified:
-            ascending = a.modificationDate < b.modificationDate
-        }
-        return sortDirection == .ascending ? ascending : !ascending
-    }
-
 
     private func handleDoubleClick(file: FileNode) {
         if file.isDirectory {
@@ -1192,10 +1217,10 @@ struct FileExplorerPane: View {
 
     private func handleSingleClick(file: FileNode) {
         let flags = NSEvent.modifierFlags
-        if flags.contains(.command) {
+        if flags.contains(.shift) {
+            handleShiftClick(file: file, additive: flags.contains(.command))
+        } else if flags.contains(.command) {
             handleCommandClick(file: file)
-        } else if flags.contains(.shift) {
-            handleShiftClick(file: file)
         } else {
             selectedItems = [file.path]
             lastClickedItemID = file.path
@@ -1248,19 +1273,22 @@ struct FileExplorerPane: View {
         lastClickedItemID = file.path
     }
 
-    private func handleShiftClick(file: FileNode) {
+    private func handleShiftClick(file: FileNode, additive: Bool) {
         guard let lastID = lastClickedItemID,
-              let lastIndex = displayedFiles.firstIndex(where: { $0.path == lastID }),
-              let currentIndex = displayedFiles.firstIndex(where: { $0.path == file.path })
-        else {
+              let rangeSelection = FileSelectionRules.range(
+                in: displayedFiles.map(\.path),
+                from: lastID,
+                through: file.path
+              ) else {
             selectedItems = [file.path]
             lastClickedItemID = file.path
             return
         }
 
-        let range = min(lastIndex, currentIndex)...max(lastIndex, currentIndex)
-        for i in range {
-            selectedItems.insert(displayedFiles[i].path)
+        if additive {
+            selectedItems.formUnion(rangeSelection)
+        } else {
+            selectedItems = rangeSelection
         }
     }
 
@@ -1271,7 +1299,7 @@ struct FileExplorerPane: View {
         let timeDiff = now.timeIntervalSince(lastKeyTime)
         lastKeyTime = now
 
-        if timeDiff < 1.0 {
+        if timeDiff < 1.0, keySearchBuffer != key.lowercased() {
             keySearchBuffer += key.lowercased()
         } else {
             keySearchBuffer = key.lowercased()
@@ -1413,16 +1441,7 @@ struct FileExplorerPane: View {
     }
 
     private func fileSizeDisplay(for file: FileNode) -> String {
-        if file.isDirectory {
-            if let size = directorySizes[file.path] {
-                return formatBytes(size)
-            }
-            if let calculatedSize = file.calculatedSize {
-                return formatBytes(calculatedSize)
-            }
-            return "—"
-        }
-        return formatBytes(file.size)
+        file.isDirectory ? "—" : formatBytes(file.size)
     }
 
     private func formatDate(_ date: Date) -> String {
@@ -1649,16 +1668,18 @@ private struct LocalFileDetails: Sendable {
     private static func directoryByteCount(path: String) -> Int64 {
         guard let enumerator = FileManager.default.enumerator(
             at: URL(fileURLWithPath: path),
-            includingPropertiesForKeys: [.fileSizeKey, .isDirectoryKey],
-            options: [.skipsHiddenFiles]
+            includingPropertiesForKeys: [.isRegularFileKey, .totalFileSizeKey, .fileSizeKey],
+            options: [],
+            errorHandler: { _, _ in true }
         ) else { return 0 }
 
         var total: Int64 = 0
         for case let url as URL in enumerator {
-            guard let values = try? url.resourceValues(forKeys: [.fileSizeKey, .isDirectoryKey]),
-                  values.isDirectory == false,
-                  let fileSize = values.fileSize else { continue }
-            total += Int64(fileSize)
+            guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .totalFileSizeKey, .fileSizeKey]),
+                  values.isRegularFile == true else { continue }
+            let fileSize = Int64(values.totalFileSize ?? values.fileSize ?? 0)
+            let (sum, overflow) = total.addingReportingOverflow(fileSize)
+            total = overflow ? Int64.max : sum
         }
         return total
     }

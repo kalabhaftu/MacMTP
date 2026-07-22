@@ -38,12 +38,6 @@ struct ContentView: View {
     @State private var statusTransferProgress: Double = 0
     @State private var statusTransferFileName: String = ""
 
-    @State private var selectedLocalSize: Int64 = 0
-    @State private var selectedMTPSize: Int64 = 0
-    @State private var localDirSize: Int64 = 0
-    @State private var mtpDirSize: Int64 = 0
-
-
     @State private var activePane: ActivePane = .local
 
 
@@ -141,12 +135,12 @@ struct ContentView: View {
                 isMTPConnected: isMTPConnected,
                 localItemCount: showHiddenFilesLocal ? localFiles.count : localFiles.filter { !$0.name.hasPrefix(".") }.count,
                 localSelectedCount: selectedLocalItems.count,
-                localSelectedSize: selectedLocalSize,
-                localDirSize: localDirSize,
+                localSelectedSize: fileSizeSummary(of: localFiles, showHidden: showHiddenFilesLocal, selectedPaths: selectedLocalItems),
+                localDirSize: fileSizeSummary(of: localFiles, showHidden: showHiddenFilesLocal),
                 mtpItemCount: showHiddenFilesMTP ? mtpFiles.count : mtpFiles.filter { !$0.name.hasPrefix(".") }.count,
                 mtpSelectedCount: selectedMTPItems.count,
-                mtpSelectedSize: selectedMTPSize,
-                mtpDirSize: mtpDirSize,
+                mtpSelectedSize: fileSizeSummary(of: mtpFiles, showHidden: showHiddenFilesMTP, selectedPaths: selectedMTPItems),
+                mtpDirSize: fileSizeSummary(of: mtpFiles, showHidden: showHiddenFilesMTP),
                 isTransferring: statusIsTransferring,
                 transferProgress: statusTransferProgress,
                 transferFileName: statusTransferFileName,
@@ -288,12 +282,6 @@ struct ContentView: View {
                 statusTransferProgress = batch.overallProgress
                 statusTransferFileName = batch.currentItem?.fileName ?? ""
             }
-            selectedLocalSize = localFiles.filter { selectedLocalItems.contains($0.path) }
-                .reduce(0) { $0 + ($1.calculatedSize ?? $1.size) }
-            selectedMTPSize = mtpFiles.filter { selectedMTPItems.contains($0.path) }
-                .reduce(0) { $0 + ($1.calculatedSize ?? $1.size) }
-            localDirSize = localFiles.reduce(0) { $0 + ($1.calculatedSize ?? $1.size) }
-            mtpDirSize = mtpFiles.reduce(0) { $0 + ($1.calculatedSize ?? $1.size) }
         }
         .onReceive(FileTransferService.shared.$showConflictDialog) { show in
             showConflictDialog = show
@@ -301,6 +289,15 @@ struct ContentView: View {
                 conflictRememberForBatch = false
             }
         }
+    }
+
+    private func fileSizeSummary(
+        of files: [FileNode],
+        showHidden: Bool,
+        selectedPaths: Set<String>? = nil
+    ) -> FileSizeSummary {
+        let visible = showHidden ? files : files.filter { !$0.name.hasPrefix(".") }
+        return FileSizeSummary.directItems(in: visible, selectedPaths: selectedPaths)
     }
 
     @ViewBuilder

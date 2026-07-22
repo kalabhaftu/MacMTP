@@ -8,12 +8,12 @@ struct StatusView: View {
     var isMTPConnected: Bool
     var localItemCount: Int = 0
     var localSelectedCount: Int = 0
-    var localSelectedSize: Int64 = 0
-    var localDirSize: Int64 = 0
+    var localSelectedSize: FileSizeSummary
+    var localDirSize: FileSizeSummary
     var mtpItemCount: Int = 0
     var mtpSelectedCount: Int = 0
-    var mtpSelectedSize: Int64 = 0
-    var mtpDirSize: Int64 = 0
+    var mtpSelectedSize: FileSizeSummary
+    var mtpDirSize: FileSizeSummary
     var isTransferring: Bool = false
     var transferProgress: Double = 0
     var transferFileName: String = ""
@@ -77,11 +77,11 @@ struct StatusView: View {
                     .font(.system(size: 11 * appFontScale))
                     .foregroundColor(.secondary)
                 if localSelectedCount > 0 {
-                    Text("\(formatBytes(localSelectedSize)) selected")
+                    Text(sizeText(localSelectedSize, isSelection: true))
                         .font(.system(size: 9 * appFontScale))
                         .foregroundColor(.accentColor)
                 } else {
-                    Text("\(formatBytes(localDirSize)) total")
+                    Text(sizeText(localDirSize, isSelection: false))
                         .font(.system(size: 9 * appFontScale))
                         .foregroundColor(.secondary.opacity(0.7))
                 }
@@ -121,11 +121,11 @@ struct StatusView: View {
                         .font(.system(size: 11 * appFontScale))
                         .foregroundColor(.secondary)
                     if mtpSelectedCount > 0 {
-                        Text("\(formatBytes(mtpSelectedSize)) selected")
+                        Text(sizeText(mtpSelectedSize, isSelection: true))
                             .font(.system(size: 9 * appFontScale))
                             .foregroundColor(.accentColor)
                     } else {
-                        Text("\(formatBytes(mtpDirSize)) total")
+                        Text(sizeText(mtpDirSize, isSelection: false))
                             .font(.system(size: 9 * appFontScale))
                             .foregroundColor(.secondary.opacity(0.7))
                     }
@@ -207,9 +207,16 @@ struct StatusView: View {
     }
     
     private func formatBytes(_ bytes: Int64) -> String {
-        let formatter = ByteCountFormatter()
-        formatter.allowedUnits = [.useGB, .useTB, .useMB]
-        formatter.countStyle = .file
-        return formatter.string(fromByteCount: bytes)
+        FormatUtils.formatBytes(bytes)
+    }
+
+    private func sizeText(_ summary: FileSizeSummary, isSelection: Bool) -> String {
+        if summary.fileCount == 0, summary.folderCount > 0 {
+            return summary.folderCount == 1 ? "Folder size unavailable" : "Folder sizes unavailable"
+        }
+        if summary.folderCount > 0 {
+            return "\(formatBytes(summary.bytes)) in \(isSelection ? "selected files" : "files")"
+        }
+        return "\(formatBytes(summary.bytes)) \(isSelection ? "selected" : "total")"
     }
 }

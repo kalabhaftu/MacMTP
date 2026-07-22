@@ -447,11 +447,10 @@ public final class FileTransferService: ObservableObject {
                 )
             }
             await MainActor.run {
-                switch direction {
-                case .localToMTP:
-                    Task { await MTPDeviceManager.shared.refreshFiles() }
-                case .mtpToLocal:
-                    NotificationCenter.default.post(name: .localDirectoryNeedsRefresh, object: nil)
+                NotificationCenter.default.post(name: .localDirectoryNeedsRefresh, object: nil)
+                Task {
+                    await MTPDeviceManager.shared.refreshFiles()
+                    await MTPDeviceManager.shared.refreshStorages()
                 }
             }
         }
