@@ -286,8 +286,7 @@ if [[ -n "${SENTRY_DSN:-}" ]]; then
     /usr/libexec/PlistBuddy -c "Add :SentryDSN string $SENTRY_DSN" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null \
         || /usr/libexec/PlistBuddy -c "Set :SentryDSN $SENTRY_DSN" "$APP_BUNDLE/Contents/Info.plist"
 elif [[ "$BUILD_MODE" == "release" ]]; then
-    echo "ERROR: SENTRY_DSN is required for a release build." >&2
-    exit 1
+    echo "WARNING: SENTRY_DSN is missing. App will build without embedded Sentry DSN." >&2
 fi
 
 if [[ -f "$PROJECT_ROOT/Resources/AppIcon.icns" ]]; then
