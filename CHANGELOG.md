@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Nothing yet.
+
 ## 1.6.2 - 2026-07-22
 
 - Added filename-only search, separate extension filtering, and sort/group controls for name, size, type, and modified date.
