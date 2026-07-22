@@ -29,6 +29,7 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
                 guard let url = URL(string: repoURL) else { return }
                 var request = URLRequest(url: url)
                 request.setValue("application/vnd.github.v3+json", forHTTPHeaderField: "Accept")
+                request.setValue("macMTP/\(AppVersion.current)", forHTTPHeaderField: "User-Agent")
                 request.timeoutInterval = 10
                 
                 let (data, response) = try await URLSession.shared.data(for: request)

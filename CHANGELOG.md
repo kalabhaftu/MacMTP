@@ -12,5 +12,6 @@
 - Fixed MTP directory refresh behavior to avoid recursive root walks that can trigger invalid object handle errors on some Android devices.
 - Fixed updater download progress so downloads show determinate progress when possible and only become installable after the artifact is staged.
 - Added opt-in Sentry crash/error reporting with path redaction, project validation, test reporting, and dSYM upload support in release packaging.
+- Fixed GitHub API update checks by adding the required User-Agent header to UpdaterService requests.
 - Added reusable screenshot demo mode and replaced old manual screenshots with generated mock screenshots.
 - Added a static Vercel-ready website that mirrors the README without overstating current features.
