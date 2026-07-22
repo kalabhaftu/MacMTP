@@ -152,6 +152,10 @@ Dragging MTP files directly to Finder is not implemented yet; use the local pane
 
 ## Installation
 
+> [!IMPORTANT]
+> **Notice for v1.6.1 Users**:  
+> Due to a missing `User-Agent` header bug in v1.6.1, the in-app "Check for Updates" button cannot fetch update information automatically from GitHub. If you are currently on version 1.6.1, please **manually download and install `macMTP-1.6.2-mac-universal.dmg`** below. Version 1.6.2 restores automatic update checking for all future releases.
+
 Download the latest release from the [Releases](https://github.com/kalabhaftu/MacMTP/releases) page.
 
 Release artifacts are built for:
