@@ -48,7 +48,7 @@ struct AboutView: View {
             }
             .padding(.top, 4)
             
-            Text("Powered by Kalam MTP engine and OpenMTP.")
+            Text("Native SwiftUI app with a bundled Kalam/go-mtpx MTP bridge.")
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .padding(.top, 8)

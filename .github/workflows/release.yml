@@ -14,6 +14,8 @@ jobs:
     env:
       MACMTP_ARM64_LIBUSB_PKGCONFIG: /opt/homebrew/opt/libusb/lib/pkgconfig
       MACMTP_X86_64_LIBUSB_PKGCONFIG: /usr/local/opt/libusb/lib/pkgconfig
+      SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+      SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
 
     steps:
     - name: Checkout MacMTP
@@ -35,7 +37,7 @@ jobs:
 
     - name: Install dependencies
       run: |
-        brew install pkg-config libusb create-dmg
+        brew install pkg-config libusb create-dmg sentry-cli
         softwareupdate --install-rosetta --agree-to-license || true
         if [ ! -x /usr/local/bin/brew ]; then
           NONINTERACTIVE=1 arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
@@ -44,6 +46,9 @@ jobs:
 
     - name: Build and package all release targets
       run: bash scripts/release.sh "${{ github.ref_name }}" --all
+      env:
+        SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+        SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
 
     - name: Release
       uses: softprops/action-gh-release@v2

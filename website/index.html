@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>macMTP - Native macOS Android File Transfer</title>
+  <meta name="description" content="macMTP is a native macOS utility for transferring files between a Mac and Android devices over USB MTP.">
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #101113;
+      --panel: #1b1c1f;
+      --text: #f4f4f5;
+      --muted: #a4a7ae;
+      --line: #303238;
+      --blue: #0a84ff;
+      --green: #32d74b;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+
+    a { color: inherit; }
+
+    .wrap {
+      width: min(1120px, calc(100% - 32px));
+      margin: 0 auto;
+    }
+
+    header {
+      border-bottom: 1px solid var(--line);
+      background: rgba(16, 17, 19, 0.88);
+      position: sticky;
+      top: 0;
+      backdrop-filter: blur(16px);
+      z-index: 10;
+    }
+
+    nav {
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    .brand img {
+      width: 34px;
+      height: 34px;
+      border-radius: 7px;
+    }
+
+    .links {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 38px;
+      padding: 0 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #24262b;
+      text-decoration: none;
+      font-weight: 650;
+      color: var(--text);
+    }
+
+    .button.primary {
+      border-color: #0a68ca;
+      background: var(--blue);
+      color: white;
+    }
+
+    .hero {
+      padding: 72px 0 40px;
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 0.78fr) minmax(420px, 1.22fr);
+      gap: 34px;
+      align-items: center;
+    }
+
+    h1 {
+      margin: 0 0 14px;
+      font-size: clamp(40px, 6vw, 72px);
+      line-height: 0.95;
+      letter-spacing: 0;
+    }
+
+    .lead {
+      margin: 0 0 22px;
+      color: var(--muted);
+      font-size: 19px;
+      max-width: 620px;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 24px 0 14px;
+    }
+
+    .note {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .screen {
+      width: 100%;
+      display: block;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      box-shadow: 0 22px 70px rgba(0, 0, 0, 0.34);
+    }
+
+    section {
+      padding: 52px 0;
+      border-top: 1px solid var(--line);
+    }
+
+    h2 {
+      margin: 0 0 18px;
+      font-size: 28px;
+      letter-spacing: 0;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 18px;
+    }
+
+    .card h3 {
+      margin: 0 0 8px;
+      font-size: 17px;
+    }
+
+    .card p, li {
+      color: var(--muted);
+      margin: 0;
+    }
+
+    ul {
+      margin: 0;
+      padding-left: 19px;
+    }
+
+    li + li { margin-top: 8px; }
+
+    .gallery {
+      columns: 2 320px;
+      column-gap: 16px;
+    }
+
+    .gallery figure {
+      display: inline-block;
+      width: 100%;
+      margin: 0 0 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--panel);
+      break-inside: avoid;
+    }
+
+    .gallery img {
+      width: 100%;
+      display: block;
+    }
+
+    figcaption {
+      padding: 10px 12px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    footer {
+      padding: 34px 0 46px;
+      color: var(--muted);
+      border-top: 1px solid var(--line);
+      font-size: 14px;
+    }
+
+    @media (max-width: 880px) {
+      .hero-grid, .cards {
+        grid-template-columns: 1fr;
+      }
+
+      .hero {
+        padding-top: 44px;
+      }
+
+      .links a:not(.button) {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <nav class="wrap">
+      <a class="brand" href="#">
+        <img src="assets/screenshots/icon.png" alt="">
+        <span>macMTP</span>
+      </a>
+      <div class="links">
+        <a href="https://github.com/kalabhaftu/MacMTP">GitHub</a>
+        <a href="https://github.com/kalabhaftu/MacMTP/issues">Issues</a>
+        <a class="button primary" href="https://github.com/kalabhaftu/MacMTP/releases/latest">Download</a>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="wrap hero-grid">
+        <div>
+          <h1>Native macOS Android file transfer.</h1>
+          <p class="lead">macMTP is a focused SwiftUI utility for moving files between a Mac and Android devices over USB MTP.</p>
+          <div class="actions">
+            <a class="button primary" id="primary-download" href="https://github.com/kalabhaftu/MacMTP/releases/latest">Download latest release</a>
+            <a class="button" href="https://github.com/kalabhaftu/MacMTP">View source</a>
+          </div>
+          <p class="note" id="download-note">Requires macOS 14.0 or later, a USB cable, and an Android device set to File Transfer / MTP mode.</p>
+        </div>
+        <img class="screen" src="assets/screenshots/macmtp-main.png" alt="macMTP main window showing local and Android panes">
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <h2>Download</h2>
+        <div class="cards" id="download-cards">
+          <div class="card">
+            <h3>Recommended for this Mac</h3>
+            <p id="recommended-download-text">Fetching the latest GitHub release...</p>
+            <div class="actions">
+              <a class="button primary" id="recommended-download" href="https://github.com/kalabhaftu/MacMTP/releases/latest">Latest release</a>
+            </div>
+          </div>
+          <div class="card">
+            <h3>Manual choices</h3>
+            <ul id="manual-downloads">
+              <li><a href="https://github.com/kalabhaftu/MacMTP/releases/latest">Open the latest release page</a></li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>System requirement</h3>
+            <p>macOS 14.0 Sonoma or later on Apple Silicon or Intel. Use the universal build if you are unsure which Mac you have.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <h2>What it does today</h2>
+        <div class="cards">
+          <div class="card">
+            <h3>Dual-pane browsing</h3>
+            <p>Browse local files beside Android MTP storage, with sidebar locations, mounted volumes, internal storage, and SD card selection.</p>
+          </div>
+          <div class="card">
+            <h3>Transfers</h3>
+            <p>Upload, download, copy, cut, paste, drag and drop, cancel transfers, and see per-file plus overall progress.</p>
+          </div>
+          <div class="card">
+            <h3>Sorting and grouping</h3>
+            <p>Sort by name, size, type, or date. Group icon views by kind, extension, size range, or modified date.</p>
+          </div>
+          <div class="card">
+            <h3>Conflict handling</h3>
+            <p>Overwrite, skip, overwrite if different, skip same-size files, or cancel when destination files already exist.</p>
+          </div>
+          <div class="card">
+            <h3>Current-directory sizes</h3>
+            <p>Status totals count direct files in the open folder. Folder sizes are not recursively scanned on MTP.</p>
+          </div>
+          <div class="card">
+            <h3>Opt-in reporting</h3>
+            <p>Crash and error reporting is opt-in. Reports redact paths and do not attach Android device identifiers to MTP directory errors.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <h2>Screenshots</h2>
+        <div class="gallery">
+          <figure>
+            <img src="assets/screenshots/macmtp-transfer.png" alt="Transfer progress">
+            <figcaption>Transfer progress with per-file and overall status.</figcaption>
+          </figure>
+          <figure>
+            <img src="assets/screenshots/macmtp-conflict.png" alt="Conflict handling dialog">
+            <figcaption>Conflict choices before overwriting or skipping files.</figcaption>
+          </figure>
+          <figure>
+            <img src="assets/screenshots/macmtp-preferences.png" alt="Preferences">
+            <figcaption>Preferences for detection, hidden files, updates, layout, and reporting.</figcaption>
+          </figure>
+          <figure>
+            <img src="assets/screenshots/macmtp-about.png" alt="About macMTP">
+            <figcaption>Native SwiftUI app with a bundled Kalam/go-mtpx MTP bridge.</figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <h2>Known limits</h2>
+        <div class="cards">
+          <div class="card">
+            <ul>
+              <li>MTP-to-MTP copy or move is not currently supported by the bridge.</li>
+              <li>Conflict handling is size-based; it is not byte-range resume inside partial files.</li>
+              <li>Dragging MTP files directly to Finder is not implemented yet; use the local pane as the download target.</li>
+            </ul>
+          </div>
+          <div class="card">
+            <ul>
+              <li>The app is community-maintained open source software.</li>
+              <li>If a feature in the README is incomplete or broken, open an issue or PR.</li>
+              <li>Universal builds are available for Intel and Apple Silicon Macs.</li>
+            </ul>
+          </div>
+          <div class="card">
+            <ul>
+              <li>Built with Swift, SwiftUI, Go, libusb, and Sentry Cocoa.</li>
+              <li>The Go MTP engine is compiled as a static C archive and linked into the Swift executable.</li>
+              <li>Release artifacts are published on GitHub Releases.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      MIT licensed. Source, issues, and releases are on <a href="https://github.com/kalabhaftu/MacMTP">GitHub</a>.
+    </div>
+  </footer>
+  <script>
+    const releaseURL = "https://github.com/kalabhaftu/MacMTP/releases/latest";
+    const apiURL = "https://api.github.com/repos/kalabhaftu/MacMTP/releases/latest";
+
+    function architectureHint() {
+      const platform = navigator.userAgentData?.platform || navigator.platform || "";
+      const ua = navigator.userAgent || "";
+      if (/arm|aarch64/i.test(platform) || /arm|aarch64/i.test(ua)) return "arm64";
+      if (/Intel|x86_64|Win64|x64/i.test(platform) || /Intel|x86_64|Win64|x64/i.test(ua)) return "x86_64";
+      return "universal";
+    }
+
+    function assetFor(assets, arch) {
+      const dmgs = assets.filter((asset) => asset.name.endsWith(".dmg"));
+      return dmgs.find((asset) => asset.name.includes(`mac-${arch}`))
+        || dmgs.find((asset) => asset.name.includes("mac-universal"))
+        || dmgs[0];
+    }
+
+    function labelFor(name) {
+      if (name.includes("mac-arm64")) return "Apple Silicon DMG";
+      if (name.includes("mac-x86_64")) return "Intel DMG";
+      if (name.includes("mac-universal")) return "Universal DMG";
+      return name;
+    }
+
+    fetch(apiURL)
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error("release fetch failed")))
+      .then((release) => {
+        const assets = release.assets || [];
+        const arch = architectureHint();
+        const recommended = assetFor(assets, arch);
+        const primary = document.getElementById("primary-download");
+        const recommendedLink = document.getElementById("recommended-download");
+        const text = document.getElementById("recommended-download-text");
+        const note = document.getElementById("download-note");
+        const manual = document.getElementById("manual-downloads");
+
+        if (recommended) {
+          primary.href = recommended.browser_download_url;
+          primary.textContent = `Download ${labelFor(recommended.name)}`;
+          recommendedLink.href = recommended.browser_download_url;
+          recommendedLink.textContent = `Download ${labelFor(recommended.name)}`;
+          text.textContent = `Latest release ${release.tag_name}: ${recommended.name}`;
+          note.textContent = "Auto-selected from the latest GitHub release. Manual release page link is still available.";
+        }
+
+        const dmgAssets = assets.filter((asset) => asset.name.endsWith(".dmg"));
+        if (dmgAssets.length > 0) {
+          manual.innerHTML = "";
+          for (const asset of dmgAssets) {
+            const item = document.createElement("li");
+            const link = document.createElement("a");
+            link.href = asset.browser_download_url;
+            link.textContent = labelFor(asset.name);
+            item.appendChild(link);
+            manual.appendChild(item);
+          }
+          const releaseItem = document.createElement("li");
+          const releaseLink = document.createElement("a");
+          releaseLink.href = release.html_url || releaseURL;
+          releaseLink.textContent = "Open the full release page";
+          releaseItem.appendChild(releaseLink);
+          manual.appendChild(releaseItem);
+        }
+      })
+      .catch(() => {
+        document.getElementById("recommended-download-text").textContent =
+          "Could not fetch the latest release automatically. Use the release page link.";
+      });
+  </script>
+</body>
+</html>

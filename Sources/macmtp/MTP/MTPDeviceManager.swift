@@ -222,7 +222,16 @@ public final class MTPDeviceManager: ObservableObject {
 
         } catch {
             guard generation == refreshGeneration else { return }
-            ErrorLogger.log(error, message: "Failed to list MTP directory")
+            ErrorLogger.log(
+                error,
+                message: "Failed to list MTP directory",
+                userInfo: [
+                    "operation": "list_directory",
+                    "is_root": requestedPath == "/",
+                    "path_depth": requestedPath.split(separator: "/").count,
+                    "device_connected": isConnected,
+                ]
+            )
             self.errorMessage = "Failed to list directory: \(error.localizedDescription)"
             self.mtpFiles = []
         }

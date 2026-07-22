@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 APP_NAME="macMTP"
 APP_BUNDLE="$PROJECT_ROOT/$APP_NAME.app"
+APP_DSYM="$PROJECT_ROOT/$APP_NAME.app.dSYM"
 BUILD_MODE="debug"
 BUILD_UNIVERSAL=false
 TARGET_ARCH="$(uname -m)"
@@ -281,6 +282,14 @@ else
     exit 1
 fi
 
+if [[ -n "${SENTRY_DSN:-}" ]]; then
+    /usr/libexec/PlistBuddy -c "Add :SentryDSN string $SENTRY_DSN" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null \
+        || /usr/libexec/PlistBuddy -c "Set :SentryDSN $SENTRY_DSN" "$APP_BUNDLE/Contents/Info.plist"
+elif [[ "$BUILD_MODE" == "release" ]]; then
+    echo "ERROR: SENTRY_DSN is required for a release build." >&2
+    exit 1
+fi
+
 if [[ -f "$PROJECT_ROOT/Resources/AppIcon.icns" ]]; then
     cp "$PROJECT_ROOT/Resources/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/"
 fi
@@ -307,6 +316,16 @@ if otool -L "$APP_BUNDLE/Contents/MacOS/$APP_NAME" | grep 'libusb' | grep -qv '@
     echo "ERROR: libusb path was not rewritten. Binary still references:"
     otool -L "$APP_BUNDLE/Contents/MacOS/$APP_NAME" | grep 'libusb' | grep -v '@executable_path'
     exit 1
+fi
+
+if [[ "$BUILD_MODE" == "release" || "$BUILD_UNIVERSAL" == true ]]; then
+    echo "Generating dSYM..."
+    rm -rf "$APP_DSYM"
+    xcrun dsymutil "$APP_BUNDLE/Contents/MacOS/$APP_NAME" -o "$APP_DSYM"
+    if ! xcrun dwarfdump --uuid "$APP_DSYM" | grep -q 'UUID:'; then
+        echo "ERROR: Generated dSYM contains no debug UUID." >&2
+        exit 1
+    fi
 fi
 echo -n "APPL????" > "$APP_BUNDLE/Contents/PkgInfo"
 

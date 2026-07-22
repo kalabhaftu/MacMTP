@@ -309,7 +309,7 @@ public final class FileTransferService: ObservableObject {
             do {
                 try await ensureDirectoryExists(path: destParent, direction: direction, storageId: storageId)
             } catch {
-                ErrorLogger.log(error, message: "FileTransferService: Failed to create parent directory \(destParent)")
+                ErrorLogger.log(error, message: "FileTransferService: Failed to create parent directory")
                 for idx in indices {
                     var itm = batch.items[idx]
                     itm.markFailed(error.localizedDescription)
@@ -379,7 +379,7 @@ public final class FileTransferService: ObservableObject {
                     }
                     
                 } catch {
-                    ErrorLogger.log(error, message: "FileTransferService: File copy failed for chunk in \(destParent)")
+                    ErrorLogger.log(error, message: "FileTransferService: File copy failed for chunk")
                     for idx in chunkIndices {
                         var itm = batch.items[idx]
                         if itm.status != .completed && itm.bytesTransferred < itm.fileSize {
@@ -420,7 +420,7 @@ public final class FileTransferService: ObservableObject {
                                 do {
                                     try fileManager.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
                                 } catch {
-                                    ErrorLogger.log(error, message: "FileTransferService: Failed to trash cut source \(path)")
+                                    ErrorLogger.log(error, message: "FileTransferService: Failed to trash cut source")
                                 }
                             }
                         }
@@ -640,7 +640,7 @@ public final class FileTransferService: ObservableObject {
                         mtpFilesMetadata[node.path] = node
                     }
                 } catch {
-                    ErrorLogger.log(error, message: "FileTransferService: Failed to read conflict metadata for \(parent)")
+                    ErrorLogger.log(error, message: "FileTransferService: Failed to read conflict metadata")
                 }
             }
             

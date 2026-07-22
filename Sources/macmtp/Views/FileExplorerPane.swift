@@ -72,6 +72,7 @@ struct FileExplorerPane: View {
     var onFilesDropped: (([DroppedFile], String) -> Void)? = nil
     var onFileOperation: ((FileOperation) -> Void)? = nil
     var onPaste: (() -> Void)? = nil
+    var usesProvidedFiles: Bool = false
     
 
     @State private var loadingState: FileExplorerLoadingState = .idle
@@ -145,11 +146,14 @@ struct FileExplorerPane: View {
         }
         .background(Color(NSColor.controlBackgroundColor))
         .onAppear {
-            if !isDisabled {
+            if usesProvidedFiles {
+                seedProvidedFiles()
+            } else if !isDisabled {
                 navigateTo(path: currentPath)
             }
         }
         .onChange(of: currentPath) { _, newPath in
+            guard !usesProvidedFiles else { return }
             let currentHistoricalPath = pathHistory.indices.contains(pathHistoryIndex) ? pathHistory[pathHistoryIndex] : nil
             if !isDisabled && currentHistoricalPath != newPath {
                 navigateTo(path: newPath)
@@ -159,11 +163,13 @@ struct FileExplorerPane: View {
             applyFilterAndSort(using: newFiles)
         }
         .onChange(of: isDisabled) { _, disabled in
+            guard !usesProvidedFiles else { return }
             if !disabled {
                 loadDirectory()
             }
         }
         .onReceive(MTPDeviceManager.shared.$mtpFiles) { newFiles in
+            guard !usesProvidedFiles else { return }
             guard !isLocal else { return }
             applyFilterAndSort(using: newFiles)
             if newFiles.isEmpty {
@@ -182,13 +188,14 @@ struct FileExplorerPane: View {
         .onChange(of: showHiddenFilesMTP) { _, _ in
             if !isLocal {
                 applyFilterAndSort()
+                guard !usesProvidedFiles else { return }
                 Task {
                     await MTPDeviceManager.shared.refreshFiles()
                 }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .localDirectoryNeedsRefresh)) { _ in
-            if isLocal {
+            if isLocal && !usesProvidedFiles {
                 loadDirectory()
             }
         }
@@ -1037,6 +1044,16 @@ struct FileExplorerPane: View {
 
     private func navigateTo(path: String) {
         let cleanPath = path.isEmpty ? "/" : path
+        if usesProvidedFiles {
+            if pathHistoryIndex < pathHistory.count - 1 {
+                pathHistory.removeSubrange((pathHistoryIndex + 1)...)
+            }
+            pathHistory.append(cleanPath)
+            pathHistoryIndex = pathHistory.count - 1
+            currentPath = cleanPath
+            applyFilterAndSort()
+            return
+        }
 
         if isLocal {
             if pathHistoryIndex < pathHistory.count - 1 {
@@ -1123,6 +1140,10 @@ struct FileExplorerPane: View {
 
 
     private func loadDirectory() {
+        if usesProvidedFiles {
+            seedProvidedFiles()
+            return
+        }
         if isLocal {
             loadingState = .loading
             let path = currentPath
@@ -1205,6 +1226,14 @@ struct FileExplorerPane: View {
         } else {
             loadingState = .loaded
         }
+    }
+
+    private func seedProvidedFiles() {
+        if pathHistory.isEmpty {
+            pathHistory = [currentPath.isEmpty ? "/" : currentPath]
+            pathHistoryIndex = 0
+        }
+        applyFilterAndSort(using: files)
     }
 
     private func handleDoubleClick(file: FileNode) {
@@ -1454,6 +1483,14 @@ struct FileExplorerPane: View {
     private func isValidChildName(_ name: String) -> Bool {
         !name.isEmpty && name != "." && name != ".." &&
             !name.contains("/") && !name.contains("\\")
+    }
+}
+
+extension FileExplorerPane {
+    func usesProvidedFiles(_ enabled: Bool) -> FileExplorerPane {
+        var copy = self
+        copy.usesProvidedFiles = enabled
+        return copy
     }
 }
 

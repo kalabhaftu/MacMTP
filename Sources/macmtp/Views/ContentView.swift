@@ -68,6 +68,27 @@ struct ContentView: View {
     @AppStorage("appFontScale") private var appFontScale: Double = 1.0
     @State private var showPrivacyPrompt: Bool = false
 
+    private let screenshotMode: Bool
+
+    init(screenshotMode: Bool = false) {
+        self.screenshotMode = screenshotMode
+        if screenshotMode {
+            _currentLocalPath = State(initialValue: ScreenshotDemo.localPath)
+            _currentMTPPath = State(initialValue: ScreenshotDemo.mtpPath)
+            _selectedLocalItems = State(initialValue: Set(ScreenshotDemo.localFiles.prefix(2).map(\.path)))
+            _selectedMTPItems = State(initialValue: Set(ScreenshotDemo.mtpFiles.prefix(3).map(\.path)))
+            _isMTPConnected = State(initialValue: true)
+            _connectedDeviceName = State(initialValue: ScreenshotDemo.deviceInfo.displayName)
+            _selectedSidebarItem = State(initialValue: "home")
+            _localFiles = State(initialValue: ScreenshotDemo.localFiles)
+            _mtpFiles = State(initialValue: ScreenshotDemo.mtpFiles)
+            _mtpStorages = State(initialValue: ScreenshotDemo.storages)
+            _mtpSelectedStorageId = State(initialValue: ScreenshotDemo.storages.first?.storageId)
+            _mtpTotalBytes = State(initialValue: Int64(ScreenshotDemo.storages.first?.totalCapacity ?? 0))
+            _mtpFreeBytes = State(initialValue: Int64(ScreenshotDemo.storages.first?.freeSpace ?? 0))
+            _hasSeenPrivacyPrompt = AppStorage(wrappedValue: true, "hasSeenPrivacyPrompt")
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -91,8 +112,9 @@ struct ContentView: View {
                     currentLocalPath: $currentLocalPath,
                     isMTPConnected: isMTPConnected,
                     mtpDeviceName: connectedDeviceName,
-                    mtpStorages: MTPDeviceManager.shared.storages,
+                    mtpStorages: screenshotMode ? mtpStorages : MTPDeviceManager.shared.storages,
                     onMTPStorageSelected: { storageId in
+                        guard !screenshotMode else { return }
                         Task {
                             await MTPDeviceManager.shared.selectStorage(storageId)
                         }
@@ -144,6 +166,8 @@ struct ContentView: View {
                 isTransferring: statusIsTransferring,
                 transferProgress: statusTransferProgress,
                 transferFileName: statusTransferFileName,
+                localTotalBytesOverride: screenshotMode ? ScreenshotDemo.localTotalBytes : nil,
+                localFreeBytesOverride: screenshotMode ? ScreenshotDemo.localFreeBytes : nil,
                 mtpTotalBytes: mtpTotalBytes,
                 mtpFreeBytes: mtpFreeBytes
             )
@@ -181,14 +205,15 @@ struct ContentView: View {
             Button("I Agree") {
                 sendCrashReports = true
                 hasSeenPrivacyPrompt = true
-                ErrorLogger.startIfEnabled()
+                ErrorLogger.setReportingEnabled(true)
             }
             Button("No Thanks", role: .cancel) {
                 sendCrashReports = false
                 hasSeenPrivacyPrompt = true
+                ErrorLogger.setReportingEnabled(false)
             }
         } message: {
-            Text("Would you like to help improve macMTP by sending anonymous crash reports and error logs? We genuinely do not collect any personal data.")
+            Text("Would you like to help improve macMTP by sending anonymous crash and error reports? Reports can include error details and app/system versions, but macMTP does not attach file paths or Android device identifiers.")
         }
         .alert(
             "Operation Failed",
@@ -206,7 +231,8 @@ struct ContentView: View {
         .onAppear {
             installKeyboardMonitor()
             if !hasSeenPrivacyPrompt {
-    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    guard !screenshotMode else { return }
                     showPrivacyPrompt = true
                 }
             }
@@ -239,14 +265,17 @@ struct ContentView: View {
             }
         }
         .onReceive(MTPDeviceManager.shared.$isConnected) { connected in
+            guard !screenshotMode else { return }
             isMTPConnected = connected
             connectedDeviceName = MTPDeviceManager.shared.deviceInfo?.displayName ?? "No Device Connected"
         }
         .onReceive(MTPDeviceManager.shared.$mtpFiles) { newFiles in
+            guard !screenshotMode else { return }
             mtpFiles = newFiles
             currentMTPPath = MTPDeviceManager.shared.currentMTPPath
         }
         .onReceive(MTPDeviceManager.shared.$storages) { storages in
+            guard !screenshotMode else { return }
             mtpStorages = storages
             if let first = storages.first {
                 mtpTotalBytes = Int64(first.totalCapacity)
@@ -257,6 +286,7 @@ struct ContentView: View {
             }
         }
         .onReceive(MTPDeviceManager.shared.$selectedStorageId) { storageId in
+            guard !screenshotMode else { return }
             mtpSelectedStorageId = storageId
             if let storageId = storageId, let selected = mtpStorages.first(where: { $0.storageId == storageId }) {
                 mtpTotalBytes = Int64(selected.totalCapacity)
@@ -319,6 +349,7 @@ struct ContentView: View {
             },
             onPaste: handlePaste
         )
+        .usesProvidedFiles(screenshotMode)
         .frame(minWidth: 350, idealWidth: 420)
         .layoutPriority(1)
         .simultaneousGesture(
@@ -341,6 +372,7 @@ struct ContentView: View {
                     selectedStorageId: mtpSelectedStorageId,
                     onSelect: { storageId in
                         Task {
+                            guard !screenshotMode else { return }
                             await MTPDeviceManager.shared.selectStorage(storageId)
                         }
                     }
@@ -364,6 +396,7 @@ struct ContentView: View {
                 },
                 onPaste: handlePaste
             )
+            .usesProvidedFiles(screenshotMode)
         }
         .frame(minWidth: 350, idealWidth: 420)
         .layoutPriority(1)
@@ -702,7 +735,7 @@ struct ContentView: View {
                             try FileManager.default.copyItem(at: url, to: destURL)
                             didCopy = true
                         } catch {
-                            ErrorLogger.log(error, message: "Drop copy failed for \(file.name)")
+                            ErrorLogger.log(error, message: "Drop copy failed")
                         }
                     }
                     if didCopy {
@@ -789,7 +822,7 @@ struct ContentView: View {
                 do {
                     try fileManager.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
                 } catch {
-                    ErrorLogger.log(error, message: "Delete failed for \(path)")
+                    ErrorLogger.log(error, message: "Delete failed")
                 }
             }
             selectedLocalItems.removeAll()
@@ -856,7 +889,7 @@ struct ContentView: View {
                     try fileManager.copyItem(at: sourceURL, to: targetURL)
                 }
             } catch {
-                ErrorLogger.log(error, message: "Paste operation failed for \(item.name)")
+                ErrorLogger.log(error, message: "Paste operation failed")
                 operationErrorMessage = error.localizedDescription
             }
         }

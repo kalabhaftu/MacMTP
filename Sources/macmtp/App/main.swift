@@ -9,7 +9,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var helpWindowController: NSWindowController?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let contentView = ContentView()
+        // Start as early as possible when the user has already opted in.
+        ErrorLogger.startIfEnabled()
+
+        let contentView = ContentView(screenshotMode: ScreenshotDemo.isEnabled)
         
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1100, height: 720),
@@ -28,7 +31,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.title = "macMTP"
         window.titlebarAppearsTransparent = false
         window.titleVisibility = .visible
-        window.setFrameAutosaveName("macMTPMainWindow")
+        if ScreenshotDemo.isEnabled {
+            window.setFrame(NSRect(x: 120, y: 120, width: 1200, height: 760), display: false)
+        } else {
+            window.setFrameAutosaveName("macMTPMainWindow")
+        }
         window.minSize = NSSize(width: 900, height: 550)
         window.contentView = NSHostingView(rootView: contentView)
         window.makeKeyAndOrderFront(nil)
@@ -36,11 +43,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         setupMainMenu()
         
-        ErrorLogger.startIfEnabled()
-        
-        USBWatcher.shared.startWatching()
+        if !ScreenshotDemo.isEnabled {
+            USBWatcher.shared.startWatching()
+        }
         
         Task {
+            guard !ScreenshotDemo.isEnabled else { return }
             let autoCheck = UserDefaults.standard.object(forKey: "autoCheckUpdates") as? Bool ?? true
             if autoCheck {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
@@ -49,6 +57,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         
         NSApp.activate(ignoringOtherApps: true)
+
+        if ScreenshotDemo.isEnabled {
+            showRequestedScreenshotPage()
+        }
     }
     
     func applicationWillTerminate(_ notification: Notification) {
@@ -190,6 +202,71 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.center()
         let controller = NSWindowController(window: window)
         preferencesWindowController = controller
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    @MainActor private func showRequestedScreenshotPage() {
+        switch ScreenshotDemo.requestedPage {
+        case "preferences":
+            showPreferences()
+            window.orderOut(nil)
+        case "help":
+            showHelp()
+            window.orderOut(nil)
+        case "about":
+            showAbout()
+            window.orderOut(nil)
+        case "transfer":
+            showTransferDemo()
+            window.orderOut(nil)
+        case "conflict":
+            showConflictDemo()
+            window.orderOut(nil)
+        default:
+            window.makeKeyAndOrderFront(nil)
+        }
+    }
+
+    @MainActor private func showTransferDemo() {
+        let hostingView = NSHostingView(rootView: TransferProgressView(batch: ScreenshotDemo.transferBatch()))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 300),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "macMTP Transfer"
+        window.isReleasedWhenClosed = false
+        window.contentView = hostingView
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    @MainActor private func showConflictDemo() {
+        let resolution = Binding<ConflictResolution?>(
+            get: { nil },
+            set: { _ in }
+        )
+        let remember = Binding<Bool>(
+            get: { true },
+            set: { _ in }
+        )
+        let hostingView = NSHostingView(rootView: ConflictDialogView(
+            conflictingFiles: ScreenshotDemo.conflicts,
+            totalFileCount: 8,
+            resolution: resolution,
+            rememberForBatch: remember
+        ))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 660, height: 620),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "macMTP File Conflict"
+        window.isReleasedWhenClosed = false
+        window.contentView = hostingView
+        window.center()
         window.makeKeyAndOrderFront(nil)
     }
 

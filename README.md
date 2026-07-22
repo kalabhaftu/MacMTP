@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  Built with <strong>Swift</strong> and <strong>SwiftUI</strong>. The MTP layer uses the Go-based Kalam/OpenMTP engine through a small C bridge.
+  Built with <strong>Swift</strong> and <strong>SwiftUI</strong>. The MTP layer uses a bundled Go-based Kalam/go-mtpx engine through a small C bridge.
 </p>
 
 <p align="center">
@@ -35,27 +35,27 @@
 ## Screenshots
 
 <p align="center">
-  <img src="assets/screenshots/no-device-connected.png" width="700" alt="No device connected">
-  <br><em>Main window — no device connected</em>
+  <img src="assets/screenshots/macmtp-main.png" width="900" alt="macMTP main window with local and Android panes">
+  <br><em>Main window — local and Android panes with mock screenshot data</em>
 </p>
 
 <p align="center">
-  <img src="assets/screenshots/external-device-connected.png" width="700" alt="External device connected">
-  <br><em>Main window — MTP device connected and browsing files</em>
+  <img src="assets/screenshots/macmtp-transfer.png" width="700" alt="macMTP transfer progress">
+  <br><em>Transfer progress with per-file and overall progress</em>
 </p>
 
 <p align="center">
-  <img src="assets/screenshots/perference.png" width="500" alt="Preferences">
+  <img src="assets/screenshots/macmtp-conflict.png" width="620" alt="macMTP conflict dialog">
+  <br><em>Conflict handling before replacing or skipping files</em>
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/macmtp-preferences.png" width="420" alt="macMTP preferences">
   <br><em>Preferences panel</em>
 </p>
 
 <p align="center">
-  <img src="assets/screenshots/new-folder.png" width="400" alt="New folder dialog">
-  <br><em>New folder dialog</em>
-</p>
-
-<p align="center">
-  <img src="assets/screenshots/about.png" width="380" alt="About macMTP">
+  <img src="assets/screenshots/macmtp-about.png" width="360" alt="About macMTP">
   <br><em>About macMTP</em>
 </p>
 
@@ -123,6 +123,12 @@ This is size-based conflict handling. It is useful for skipping already-copied f
 | `Command-Up` | Navigate to parent folder |
 | `Shift-click` | Range selection |
 | `Command-click` | Toggle selection |
+
+### Error Reporting
+
+- Crash and error reporting is opt-in and can be disabled at any time in Preferences.
+- Reports exclude default personal information; macMTP also redacts local paths and does not attach device identifiers to MTP directory errors.
+- Preferences includes a user-triggered test report for validating the configured Sentry project.
 
 ### Drag and Drop
 
@@ -215,19 +221,22 @@ bash scripts/build.sh release --universal
 Create DMG and ZIP packages for all supported targets:
 
 ```bash
-bash scripts/release.sh 1.0.0 --all
+bash scripts/release.sh 1.6.2 --all
 ```
 
-This generates architecture-specific DMG and ZIP files plus SHA-256 checksums and `latest-mac.yml`:
+Release builds require `SENTRY_DSN`, `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, and `SENTRY_PROJECT`. The auth token is used only by `sentry-cli` during packaging and is never embedded in the app. This generates architecture-specific DMG, app ZIP, and dSYM ZIP files plus SHA-256 checksums and `latest-mac.yml`:
 
 ```text
 release/
-├── macMTP-1.0.0-mac-arm64.dmg
-├── macMTP-1.0.0-mac-arm64.zip
-├── macMTP-1.0.0-mac-x86_64.dmg
-├── macMTP-1.0.0-mac-x86_64.zip
-├── macMTP-1.0.0-mac-universal.dmg
-├── macMTP-1.0.0-mac-universal.zip
+├── macMTP-1.6.2-mac-arm64.dmg
+├── macMTP-1.6.2-mac-arm64.zip
+├── macMTP-1.6.2-mac-arm64.dSYM.zip
+├── macMTP-1.6.2-mac-x86_64.dmg
+├── macMTP-1.6.2-mac-x86_64.zip
+├── macMTP-1.6.2-mac-x86_64.dSYM.zip
+├── macMTP-1.6.2-mac-universal.dmg
+├── macMTP-1.6.2-mac-universal.zip
+├── macMTP-1.6.2-mac-universal.dSYM.zip
 └── latest-mac.yml
 ```
 
@@ -295,7 +304,7 @@ Governance and decision-making are documented in [GOVERNANCE.md](GOVERNANCE.md).
 
 ## Acknowledgments
 
-- [OpenMTP](https://github.com/ganeshrvel/openmtp)
+- [OpenMTP](https://github.com/ganeshrvel/openmtp), which upstreams the Kalam MTP source this app bundles
 - [go-mtpx](https://github.com/ganeshrvel/go-mtpx)
 - [libusb](https://libusb.info/)
 - [Sentry Cocoa](https://github.com/getsentry/sentry-cocoa)

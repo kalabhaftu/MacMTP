@@ -11,6 +11,8 @@ struct PreferencesView: View {
     @AppStorage("sendCrashReports") private var sendCrashReports: Bool = false
     @AppStorage("swapPanels") private var swapPanels: Bool = false
     @AppStorage("appFontScale") private var appFontScale: Double = 1.0
+    @State private var reportingFeedback: String?
+    @State private var isSendingTestReport = false
 
     var body: some View {
         ScrollView {
@@ -53,8 +55,37 @@ struct PreferencesView: View {
                 .padding(.bottom, 10)
 
                 Section(header: Text("Privacy").font(.headline)) {
-                    Toggle("Send anonymous crash reports and usage logs", isOn: $sendCrashReports)
-                    Text("We genuinely don't collect your data. This only sends error logs if enabled.")
+                    Toggle("Send anonymous crash and error reports", isOn: $sendCrashReports)
+                        .onChange(of: sendCrashReports) { _, enabled in
+                            ErrorLogger.setReportingEnabled(enabled)
+                            reportingFeedback = nil
+                        }
+
+                    HStack {
+                        Button("Send Test Report") {
+                            isSendingTestReport = true
+                            reportingFeedback = nil
+                            Task {
+                                let result = await ErrorLogger.captureTestReport()
+                                reportingFeedback = result.message
+                                isSendingTestReport = false
+                            }
+                        }
+                        .disabled(!sendCrashReports || ErrorLogger.status != .ready || isSendingTestReport)
+
+                        if isSendingTestReport {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+
+                        if let reportingFeedback {
+                            Text(reportingFeedback)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+
+                    Text(reportingStatusText)
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -62,5 +93,23 @@ struct PreferencesView: View {
             .padding(20)
         }
         .frame(width: 480)
+        .onAppear {
+            if sendCrashReports {
+                ErrorLogger.startIfEnabled()
+            }
+        }
+    }
+
+    private var reportingStatusText: String {
+        switch ErrorLogger.status {
+        case .disabled:
+            "Reporting is off. macMTP sends nothing."
+        case .invalidConfiguration:
+            "Reporting is enabled, but its configuration is invalid."
+        case .unavailable:
+            "Reporting is enabled, but the reporting service did not start."
+        case .ready:
+            "Reporting is ready. File paths and device identifiers are not attached."
+        }
     }
 }

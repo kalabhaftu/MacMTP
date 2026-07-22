@@ -17,6 +17,8 @@ struct StatusView: View {
     var isTransferring: Bool = false
     var transferProgress: Double = 0
     var transferFileName: String = ""
+    var localTotalBytesOverride: Int64?
+    var localFreeBytesOverride: Int64?
     var mtpTotalBytes: Int64 = 0
     var mtpFreeBytes: Int64 = 0
     
@@ -90,9 +92,9 @@ struct StatusView: View {
             Spacer()
 
             HStack(spacing: 4) {
-                capacityBar(free: localFreeBytes, total: localTotalBytes)
+                capacityBar(free: displayedLocalFreeBytes, total: displayedLocalTotalBytes)
 
-                Text("\(formatBytes(localFreeBytes)) free")
+                Text("\(formatBytes(displayedLocalFreeBytes)) free")
                     .font(.system(size: 10 * appFontScale, weight: .medium))
                     .foregroundColor(.secondary)
             }
@@ -193,6 +195,7 @@ struct StatusView: View {
     }
     
     private func refreshLocalStorageInfo() {
+        guard localTotalBytesOverride == nil, localFreeBytesOverride == nil else { return }
         let path = localPath.isEmpty ? "/" : localPath
         let url = URL(fileURLWithPath: path)
         
@@ -204,6 +207,14 @@ struct StatusView: View {
             }
         } catch {
         }
+    }
+
+    private var displayedLocalTotalBytes: Int64 {
+        localTotalBytesOverride ?? localTotalBytes
+    }
+
+    private var displayedLocalFreeBytes: Int64 {
+        localFreeBytesOverride ?? localFreeBytes
     }
     
     private func formatBytes(_ bytes: Int64) -> String {
