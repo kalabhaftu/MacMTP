@@ -4,6 +4,13 @@
 
 - Nothing yet.
 
+## 1.6.3 - 2026-07-26
+
+- Fixed main-thread App Hanging in UpdaterService by converting synchronous runModal alert calls to non-blocking window sheet modals.
+- Fixed error handling for GitHub update checks by adding diagnostic logging and clear messaging for HTTP 403 rate limits.
+- Fixed file transfer error messages for write permission restrictions (NSCocoaErrorDomain 513).
+- Fixed MTP device state recovery on USB disconnection or KalamError.deviceNotConnected.
+
 ## 1.6.2 - 2026-07-22
 
 - Added filename-only search, separate extension filtering, and sort/group controls for name, size, type, and modified date.

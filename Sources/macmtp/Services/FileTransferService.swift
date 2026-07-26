@@ -310,9 +310,10 @@ public final class FileTransferService: ObservableObject {
                 try await ensureDirectoryExists(path: destParent, direction: direction, storageId: storageId)
             } catch {
                 ErrorLogger.log(error, message: "FileTransferService: Failed to create parent directory")
+                let formattedErr = formatTransferError(error)
                 for idx in indices {
                     var itm = batch.items[idx]
-                    itm.markFailed(error.localizedDescription)
+                    itm.markFailed(formattedErr)
                     batch.items[idx] = itm
                 }
                 continue // Skip this group
@@ -728,5 +729,13 @@ public final class FileTransferService: ObservableObject {
         formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         return formatter.date(from: dateStr) ?? Date()
+    }
+
+    private func formatTransferError(_ error: Error) -> String {
+        let nsError = error as NSError
+        if nsError.domain == NSCocoaErrorDomain && nsError.code == 513 {
+            return "Permission denied: Destination directory is read-only or not writable."
+        }
+        return error.localizedDescription
     }
 }

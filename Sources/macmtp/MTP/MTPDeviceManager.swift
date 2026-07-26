@@ -232,7 +232,20 @@ public final class MTPDeviceManager: ObservableObject {
                     "device_connected": isConnected,
                 ]
             )
-            self.errorMessage = "Failed to list directory: \(error.localizedDescription)"
+            var isDisconnectError = false
+            if case .deviceNotConnected? = (error as? KalamError) {
+                isDisconnectError = true
+            } else if error.localizedDescription.contains("Code: 1") {
+                isDisconnectError = true
+            }
+
+            if isDisconnectError {
+                try? await bridge.dispose()
+                self.isConnected = false
+                self.errorMessage = "MTP device disconnected or connection lost."
+            } else {
+                self.errorMessage = "Failed to list directory: \(error.localizedDescription)"
+            }
             self.mtpFiles = []
         }
 

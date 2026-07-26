@@ -35,8 +35,12 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
                 let (data, response) = try await URLSession.shared.data(for: request)
                 guard let httpResp = response as? HTTPURLResponse, httpResp.statusCode == 200 else {
                     let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-                    ErrorLogger.logMessage("Failed to fetch update info. HTTP Status: \(status)")
-                    if !silent { showNoUpdateAlert(message: "Failed to fetch update information from GitHub.") }
+                    let rateLimitRemaining = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "X-RateLimit-Remaining") ?? "N/A"
+                    ErrorLogger.logMessage("Failed to fetch update info. HTTP Status: \(status) (RateLimit-Remaining: \(rateLimitRemaining))")
+                    let userMsg = status == 403
+                        ? "GitHub API rate limit reached or access forbidden (HTTP 403). Please try again later."
+                        : "Failed to fetch update information from GitHub (HTTP \(status))."
+                    if !silent { showNoUpdateAlert(message: userMsg) }
                     return
                 }
                 
@@ -175,7 +179,7 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
     private func showUpdateAlert(version: String, releaseNotes: String, url: URL) {
         let alert = NSAlert()
         alert.messageText = "A new version of macMTP is available!"
-        alert.informativeText = "Version \(version) is now available. You are running version \(AppVersion.current).\n\nRelease Notes:\n\(releaseNotes)"
+        alert.informativeText = "Version \(version) is now available. You are running version \(AppVersion.current)."
         alert.alertStyle = .informational
         alert.addButton(withTitle: "Download")
         alert.addButton(withTitle: "Cancel")
@@ -191,11 +195,17 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
         scroll.hasVerticalScroller = true
         alert.accessoryView = scroll
         
-        alert.informativeText = "Version \(version) is now available. You are running version \(AppVersion.current)."
-        
-        let response = alert.runModal()
-        if response == .alertFirstButtonReturn {
-            NSWorkspace.shared.open(url)
+        if let parentWindow = NSApp.keyWindow ?? NSApp.mainWindow {
+            alert.beginSheetModal(for: parentWindow) { response in
+                if response == .alertFirstButtonReturn {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+        } else {
+            let response = alert.runModal()
+            if response == .alertFirstButtonReturn {
+                NSWorkspace.shared.open(url)
+            }
         }
     }
     
@@ -205,7 +215,12 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
         alert.informativeText = message
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
-        alert.runModal()
+        
+        if let parentWindow = NSApp.keyWindow ?? NSApp.mainWindow {
+            alert.beginSheetModal(for: parentWindow)
+        } else {
+            alert.runModal()
+        }
     }
 
     private func normalizedVersion(_ version: String) -> String {
