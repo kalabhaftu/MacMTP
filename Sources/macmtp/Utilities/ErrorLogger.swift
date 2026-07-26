@@ -210,8 +210,7 @@ public struct ErrorLogger {
     }
 
     private static var reportsEnabled: Bool {
-        // Consent is opt-in. Do not send errors before the first-run prompt is answered.
-        UserDefaults.standard.object(forKey: "sendCrashReports") as? Bool ?? false
+        UserDefaults.standard.object(forKey: "sendCrashReports") as? Bool ?? true
     }
 }
 

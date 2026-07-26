@@ -61,7 +61,7 @@ struct ContentView: View {
     @State private var eventMonitor: Any? = nil
 
     @AppStorage("hasSeenPrivacyPrompt") private var hasSeenPrivacyPrompt: Bool = false
-    @AppStorage("sendCrashReports") private var sendCrashReports: Bool = false
+    @AppStorage("sendCrashReports") private var sendCrashReports: Bool = true
     @AppStorage("swapPanels") private var swapPanels: Bool = false
     @AppStorage("sidebarOnRight") private var sidebarOnRight: Bool = false
     @AppStorage("showHiddenFilesLocal") private var showHiddenFilesLocal: Bool = false
