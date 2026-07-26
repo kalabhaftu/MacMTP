@@ -13,7 +13,7 @@ struct HelpView: View {
                     .font(.body)
 
                     helpRow(icon: "sidebar.left", title: "Browse Files",
-                            detail: "Use the sidebar to navigate local volumes and your MTP device. Files are shown in a sortable table.")
+                            detail: "Use the sidebar to navigate local volumes and your MTP device (positionable on Left or Right in Preferences). Files are shown in a sortable table.")
                     helpRow(icon: "arrow.left.arrow.right", title: "Transfer Files",
                             detail: "Select files, then use Copy (⌘C) and Paste (⌘V) to transfer between your Mac and Android device.")
                     helpRow(icon: "rectangle.on.rectangle", title: "Drag & Drop",

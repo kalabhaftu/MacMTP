@@ -10,9 +10,8 @@ struct PreferencesView: View {
     @AppStorage("autoDetectDevice") private var autoDetectDevice: Bool = true
     @AppStorage("sendCrashReports") private var sendCrashReports: Bool = false
     @AppStorage("swapPanels") private var swapPanels: Bool = false
+    @AppStorage("sidebarOnRight") private var sidebarOnRight: Bool = false
     @AppStorage("appFontScale") private var appFontScale: Double = 1.0
-    @State private var reportingFeedback: String?
-    @State private var isSendingTestReport = false
 
     var body: some View {
         ScrollView {
@@ -26,6 +25,7 @@ struct PreferencesView: View {
                     Toggle("Show hidden files on Local Mac", isOn: $showHiddenFilesLocal)
                     Toggle("Show hidden files on Android Device", isOn: $showHiddenFilesMTP)
                     Toggle("Swap Local and MTP panels (MTP on Left)", isOn: $swapPanels)
+                    Toggle("Position Navigation Sidebar on Right", isOn: $sidebarOnRight)
                     
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
@@ -54,40 +54,21 @@ struct PreferencesView: View {
                 }
                 .padding(.bottom, 10)
 
-                Section(header: Text("Privacy").font(.headline)) {
+                Section(header: Text("Privacy & Support").font(.headline)) {
                     Toggle("Send anonymous crash and error reports", isOn: $sendCrashReports)
                         .onChange(of: sendCrashReports) { _, enabled in
                             ErrorLogger.setReportingEnabled(enabled)
-                            reportingFeedback = nil
                         }
-
-                    HStack {
-                        Button("Send Test Report") {
-                            isSendingTestReport = true
-                            reportingFeedback = nil
-                            Task {
-                                let result = await ErrorLogger.captureTestReport()
-                                reportingFeedback = result.message
-                                isSendingTestReport = false
-                            }
-                        }
-                        .disabled(!sendCrashReports || ErrorLogger.status != .ready || isSendingTestReport)
-
-                        if isSendingTestReport {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
-
-                        if let reportingFeedback {
-                            Text(reportingFeedback)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
 
                     Text(reportingStatusText)
                         .font(.caption)
                         .foregroundColor(.secondary)
+
+                    Button("Report an Issue / Bug…") {
+                        if let url = URL(string: "https://github.com/kalabhaftu/MacMTP/issues") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
                 }
             }
             .padding(20)

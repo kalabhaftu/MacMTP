@@ -128,7 +128,6 @@ This is size-based conflict handling. It is useful for skipping already-copied f
 
 - Crash and error reporting is opt-in and can be disabled at any time in Preferences.
 - Reports exclude default personal information; macMTP also redacts local paths and does not attach device identifiers to MTP directory errors.
-- Preferences includes a user-triggered test report for validating the configured Sentry project.
 
 ### Drag and Drop
 

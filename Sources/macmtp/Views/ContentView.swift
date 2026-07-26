@@ -63,6 +63,7 @@ struct ContentView: View {
     @AppStorage("hasSeenPrivacyPrompt") private var hasSeenPrivacyPrompt: Bool = false
     @AppStorage("sendCrashReports") private var sendCrashReports: Bool = false
     @AppStorage("swapPanels") private var swapPanels: Bool = false
+    @AppStorage("sidebarOnRight") private var sidebarOnRight: Bool = false
     @AppStorage("showHiddenFilesLocal") private var showHiddenFilesLocal: Bool = false
     @AppStorage("showHiddenFilesMTP") private var showHiddenFilesMTP: Bool = false
     @AppStorage("appFontScale") private var appFontScale: Double = 1.0
@@ -107,30 +108,12 @@ struct ContentView: View {
             )
 
             HSplitView {
-                SidebarView(
-                    selectedItem: $selectedSidebarItem,
-                    currentLocalPath: $currentLocalPath,
-                    isMTPConnected: isMTPConnected,
-                    mtpDeviceName: connectedDeviceName,
-                    mtpStorages: screenshotMode ? mtpStorages : MTPDeviceManager.shared.storages,
-                    onMTPStorageSelected: { storageId in
-                        guard !screenshotMode else { return }
-                        Task {
-                            await MTPDeviceManager.shared.selectStorage(storageId)
-                        }
-                    }
-                )
-                .frame(minWidth: 180, idealWidth: 220, maxWidth: 280)
-                .layoutPriority(0)
-
-                HSplitView {
-                    if swapPanels {
-                        mtpPane
-                        localPane
-                    } else {
-                        localPane
-                        mtpPane
-                    }
+                if sidebarOnRight {
+                    mainFilePanes
+                    sidebarView
+                } else {
+                    sidebarView
+                    mainFilePanes
                 }
             }
 
@@ -328,6 +311,36 @@ struct ContentView: View {
     ) -> FileSizeSummary {
         let visible = showHidden ? files : files.filter { !$0.name.hasPrefix(".") }
         return FileSizeSummary.directItems(in: visible, selectedPaths: selectedPaths)
+    }
+
+    private var sidebarView: some View {
+        SidebarView(
+            selectedItem: $selectedSidebarItem,
+            currentLocalPath: $currentLocalPath,
+            isMTPConnected: isMTPConnected,
+            mtpDeviceName: connectedDeviceName,
+            mtpStorages: screenshotMode ? mtpStorages : MTPDeviceManager.shared.storages,
+            onMTPStorageSelected: { storageId in
+                guard !screenshotMode else { return }
+                Task {
+                    await MTPDeviceManager.shared.selectStorage(storageId)
+                }
+            }
+        )
+        .frame(minWidth: 180, idealWidth: 220, maxWidth: 280)
+        .layoutPriority(0)
+    }
+
+    private var mainFilePanes: some View {
+        HSplitView {
+            if swapPanels {
+                mtpPane
+                localPane
+            } else {
+                localPane
+                mtpPane
+            }
+        }
     }
 
     @ViewBuilder

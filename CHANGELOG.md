@@ -4,6 +4,12 @@
 
 - Nothing yet.
 
+## 1.6.4 - 2026-07-26
+
+- Added customizable Navigation Sidebar positioning, allowing the sidebar to be docked on either the Left or Right side of the window.
+- Removed internal developer "Send Test Report" button from Preferences UI.
+- Added direct "Report an Issue / Bug…" action in Preferences for user feedback and issue submission.
+
 ## 1.6.3 - 2026-07-26
 
 - Fixed main-thread App Hanging in UpdaterService by converting synchronous runModal alert calls to non-blocking window sheet modals.
