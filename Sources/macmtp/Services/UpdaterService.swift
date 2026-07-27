@@ -18,6 +18,7 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
     public static let shared = UpdaterService()
     
     private let repoURL = "https://api.github.com/repos/kalabhaftu/MacMTP/releases/latest"
+    private let webReleaseURL = "https://github.com/kalabhaftu/MacMTP/releases/latest"
     private var activeDownload: UpdateDownloadCoordinator?
     @Published private(set) var downloadState: UpdateDownloadState = .idle
     
@@ -25,6 +26,12 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
     
     public func checkForUpdates(silent: Bool = false) {
         Task {
+            if silent, let lastCheck = UserDefaults.standard.object(forKey: "lastUpdateCheckDate") as? Date {
+                if Date().timeIntervalSince(lastCheck) < 6 * 3600 {
+                    return
+                }
+            }
+
             do {
                 guard let url = URL(string: repoURL) else { return }
                 var request = URLRequest(url: url)
@@ -32,19 +39,39 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
                 request.setValue("macMTP/\(AppVersion.current)", forHTTPHeaderField: "User-Agent")
                 request.timeoutInterval = 10
                 
+                if let etag = UserDefaults.standard.string(forKey: "updater_last_etag") {
+                    request.setValue(etag, forHTTPHeaderField: "If-None-Match")
+                }
+                
                 let (data, response) = try await URLSession.shared.data(for: request)
-                guard let httpResp = response as? HTTPURLResponse, httpResp.statusCode == 200 else {
-                    let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-                    let rateLimitRemaining = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "X-RateLimit-Remaining") ?? "N/A"
-                    if status != 403 {
-                        ErrorLogger.logMessage("Failed to fetch update info. HTTP Status: \(status) (RateLimit-Remaining: \(rateLimitRemaining))")
+                guard let httpResp = response as? HTTPURLResponse else { return }
+                
+                if httpResp.statusCode == 304 {
+                    UserDefaults.standard.set(Date(), forKey: "lastUpdateCheckDate")
+                    if !silent {
+                        showNoUpdateAlert(message: "You are running the latest version of macMTP (\(AppVersion.current)).")
                     }
-                    let userMsg = status == 403
-                        ? "GitHub API rate limit reached or access forbidden (HTTP 403). Please try again later."
-                        : "Failed to fetch update information from GitHub (HTTP \(status))."
-                    if !silent { showNoUpdateAlert(message: userMsg) }
                     return
                 }
+
+                if httpResp.statusCode == 403 {
+                    await checkViaWebRedirect(silent: silent)
+                    return
+                }
+                
+                guard httpResp.statusCode == 200 else {
+                    let rateLimitRemaining = httpResp.value(forHTTPHeaderField: "X-RateLimit-Remaining") ?? "N/A"
+                    ErrorLogger.logMessage("Failed to fetch update info. HTTP Status: \(httpResp.statusCode) (RateLimit-Remaining: \(rateLimitRemaining))")
+                    if !silent {
+                        showNoUpdateAlert(message: "Failed to fetch update information from GitHub (HTTP \(httpResp.statusCode)).")
+                    }
+                    return
+                }
+                
+                if let etag = httpResp.value(forHTTPHeaderField: "ETag") {
+                    UserDefaults.standard.set(etag, forKey: "updater_last_etag")
+                }
+                UserDefaults.standard.set(Date(), forKey: "lastUpdateCheckDate")
                 
                 if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                    let tagName = json["tag_name"] as? String,
@@ -79,9 +106,49 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
                     if !silent { showNoUpdateAlert(message: "Failed to parse update information.") }
                 }
             } catch {
-                ErrorLogger.log(error, message: "Error checking for updates")
-                if !silent { showNoUpdateAlert(message: "Error checking for updates: \(error.localizedDescription)") }
+                await checkViaWebRedirect(silent: silent)
             }
+        }
+    }
+
+    private func checkViaWebRedirect(silent: Bool) async {
+        guard let url = URL(string: webReleaseURL) else { return }
+        var request = URLRequest(url: url)
+        request.setValue("macMTP/\(AppVersion.current)", forHTTPHeaderField: "User-Agent")
+        request.timeoutInterval = 10
+
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let httpResp = response as? HTTPURLResponse,
+                  let finalURL = httpResp.url else {
+                if !silent { showNoUpdateAlert(message: "GitHub API rate limit reached. Please try again later.") }
+                return
+            }
+
+            let tag = finalURL.lastPathComponent
+            guard !tag.isEmpty && tag != "latest" else {
+                if !silent { showNoUpdateAlert(message: "GitHub API rate limit reached. Please try again later.") }
+                return
+            }
+
+            let remoteVersion = normalizedVersion(tag)
+            let localVersion = normalizedVersion(AppVersion.current)
+
+            if remoteVersion.compare(localVersion, options: .numeric) == .orderedDescending {
+                let cleanTag = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
+                let dmgUrlStr = "https://github.com/kalabhaftu/MacMTP/releases/download/\(tag)/macMTP-\(cleanTag)-universal.dmg"
+                let autoDownload = UserDefaults.standard.object(forKey: "autoDownloadUpdates") as? Bool ?? false
+
+                if autoDownload, let dmgUrl = URL(string: dmgUrlStr) {
+                    downloadAndOpenDMG(url: dmgUrl, version: tag)
+                } else {
+                    showUpdateAlert(version: tag, releaseNotes: "A new version (\(tag)) is available on GitHub.", url: finalURL)
+                }
+            } else {
+                if !silent { showNoUpdateAlert(message: "You are running the latest version of macMTP (\(AppVersion.current)).") }
+            }
+        } catch {
+            if !silent { showNoUpdateAlert(message: "Error checking for updates: \(error.localizedDescription)") }
         }
     }
     
