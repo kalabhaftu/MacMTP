@@ -289,7 +289,7 @@ public final class FileTransferService: ObservableObject {
     ) async {
         guard let batch = activeBatch else { return }
         
-        var groups: [String: [Int]] = [:] // destParent -> array of indices
+        var groups: [String: [Int]] = [:]
         var groupOrder: [String] = []
         for index in batch.items.indices {
             if batch.items[index].status == .skipped { continue }
@@ -300,7 +300,7 @@ public final class FileTransferService: ObservableObject {
             groups[destParent, default: []].append(index)
         }
         
-        let chunkSize = 50 // Balance between bulk performance and cancellation responsiveness
+        let chunkSize = 50
         
         for destParent in groupOrder {
             guard let indices = groups[destParent] else { continue }
@@ -316,7 +316,7 @@ public final class FileTransferService: ObservableObject {
                     itm.markFailed(formattedErr)
                     batch.items[idx] = itm
                 }
-                continue // Skip this group
+                continue
             }
             
             for chunkStart in stride(from: 0, to: indices.count, by: chunkSize) {
@@ -473,7 +473,7 @@ public final class FileTransferService: ObservableObject {
         batch.currentItemIndex = index
         var item = batch.items[index]
         item.bytesTransferred = min(sent, item.fileSize)
-        item.speed = speedMB * 1024 * 1024 // Convert MB/s to Bytes/s
+        item.speed = speedMB * 1024 * 1024
         
         if item.speed > 0 {
             let remainingBytes = Double(item.fileSize - item.bytesTransferred)
@@ -494,7 +494,7 @@ public final class FileTransferService: ObservableObject {
     
     private struct ScannedItem {
         let absolutePath: String
-        let relativePath: String // Relative to the drag selection parent
+        let relativePath: String
         let isDirectory: Bool
         let size: Int64
         let modificationDate: Date

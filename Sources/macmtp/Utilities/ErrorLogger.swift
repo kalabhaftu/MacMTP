@@ -89,8 +89,6 @@ public struct ErrorLogger {
         SentrySDK.capture(event: event)
     }
 
-    /// Sends a minimal user-requested diagnostic directly to the configured project.
-    /// Unlike SDK queue acceptance, a successful result proves that Sentry accepted it.
     public static func captureTestReport() async -> TestReportResult {
         guard reportsEnabled,
               let configuration = storeConfiguration(for: dsn) else {

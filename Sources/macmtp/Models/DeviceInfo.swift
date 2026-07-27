@@ -77,16 +77,16 @@ extension MTPStorageInfo {
     public static let mockInternal = MTPStorageInfo(
         storageId: 0x0001_0001,
         description: "Internal shared storage",
-        totalCapacity: 128_849_018_880,    // ~128 GB
-        freeSpace: 34_359_738_368,         // ~32 GB
+        totalCapacity: 128_849_018_880,
+        freeSpace: 34_359_738_368,
         storageType: .internal
     )
 
     public static let mockSDCard = MTPStorageInfo(
         storageId: 0x0002_0001,
         description: "SD Card",
-        totalCapacity: 64_424_509_440,     // ~64 GB
-        freeSpace: 55_834_574_848,         // ~52 GB
+        totalCapacity: 64_424_509_440,
+        freeSpace: 55_834_574_848,
         storageType: .sdCard
     )
 }

@@ -46,8 +46,6 @@ struct FileBrowserOrganization: Equatable {
         var result = files.filter { showHidden || !$0.name.hasPrefix(".") }
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Searching and extension filtering intentionally inspect file metadata
-        // only. Directories remain available for navigation.
         if !query.isEmpty {
             result = result.filter {
                 $0.isDirectory || $0.name.localizedCaseInsensitiveContains(query)

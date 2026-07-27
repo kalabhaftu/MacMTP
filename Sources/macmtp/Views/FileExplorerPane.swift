@@ -1455,8 +1455,6 @@ struct FileExplorerPane: View {
         var isDir: ObjCBool = false
         let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
         let isDirectory = exists && isDir.boolValue
-        // Finder controls the URL; use its final component instead of the
-        // provider's free-form suggested name for destination path safety.
         let name = url.lastPathComponent
         files.append(DroppedFile(path: url.path, isLocal: true, name: name, isDirectory: isDirectory))
     }

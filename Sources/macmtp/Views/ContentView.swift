@@ -282,7 +282,6 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .menuRefreshRequested)) { _ in
             handleRefresh()
         }
-        // Observe FileTransferService for showing transfer progress and status bar
         .onReceive(FileTransferService.shared.$activeBatch) { batch in
             showTransferProgress = batch != nil
             statusIsTransferring = batch?.isActive ?? false

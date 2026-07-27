@@ -9,7 +9,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var helpWindowController: NSWindowController?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Start as early as possible when the user has already opted in.
         ErrorLogger.startIfEnabled()
 
         let contentView = ContentView(screenshotMode: ScreenshotDemo.isEnabled)
