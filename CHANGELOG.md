@@ -4,6 +4,11 @@
 
 - Nothing yet.
 
+## 1.6.6 - 2026-07-27
+
+- Added ETag HTTP caching (`If-None-Match`), 6-hour background check throttling, and web HEAD redirect fallback to `UpdaterService` for GitHub API rate-limit resilience.
+- Ensured updater alert prompts display clean, user-friendly version information and direct download links without technical jargon.
+
 ## 1.6.5 - 2026-07-27
 
 - Set anonymous crash and error reporting to enabled by default, maintaining user privacy controls in Preferences.
