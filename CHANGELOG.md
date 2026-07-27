@@ -4,6 +4,13 @@
 
 - Nothing yet.
 
+## 1.6.5 - 2026-07-27
+
+- Set anonymous crash and error reporting to enabled by default, maintaining user privacy controls in Preferences.
+- Filtered expected hardware and device states (locked phone screen, charging-only mode, USB disconnects) from Sentry error logging to eliminate false-positive production alerts.
+- Added clear, actionable user guidance when an Android phone screen is locked or USB mode is set to Charging Only ("No storage found on device. Please unlock your Android phone screen and ensure its USB connection mode is set to 'File Transfer' (MTP), then click Retry.").
+- Conducted codebase cleanup by stripping redundant inline comments across all source files.
+
 ## 1.6.4 - 2026-07-26
 
 - Added customizable Navigation Sidebar positioning, allowing the sidebar to be docked on either the Left or Right side of the window.
