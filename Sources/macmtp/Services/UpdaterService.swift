@@ -36,7 +36,9 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
                 guard let httpResp = response as? HTTPURLResponse, httpResp.statusCode == 200 else {
                     let status = (response as? HTTPURLResponse)?.statusCode ?? -1
                     let rateLimitRemaining = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "X-RateLimit-Remaining") ?? "N/A"
-                    ErrorLogger.logMessage("Failed to fetch update info. HTTP Status: \(status) (RateLimit-Remaining: \(rateLimitRemaining))")
+                    if status != 403 {
+                        ErrorLogger.logMessage("Failed to fetch update info. HTTP Status: \(status) (RateLimit-Remaining: \(rateLimitRemaining))")
+                    }
                     let userMsg = status == 403
                         ? "GitHub API rate limit reached or access forbidden (HTTP 403). Please try again later."
                         : "Failed to fetch update information from GitHub (HTTP \(status))."
