@@ -84,21 +84,24 @@ public final class MTPDeviceManager: ObservableObject {
                 await refreshFiles()
             }
         } catch {
-            ErrorLogger.log(error, message: "MTP connection failed")
-
             // Initialization can succeed before storage enumeration fails. Release
             // the native handle so a retry does not inherit a stale session.
             try? await bridge.dispose()
 
-            let androidVendorIDs = USBWatcher.shared.getConnectedAndroidVendorIDs()
-            let isConflict = PTPConflictDetector.classifyError(error.localizedDescription, ptpVendorIDs: androidVendorIDs)
+            let errLower = error.localizedDescription.lowercased()
+            let isNoStorageError = errLower.contains("no storage found")
+            let isDeviceNotFound = errLower.contains("no mtp device connected") || errLower.contains("no device found") || errLower.contains("busy")
 
-            if isConflict {
-                self.errorMessage = "Connection Failed: macOS has blocked access to the device.\n\nmacOS automatically claims PTP/MTP devices if apps like Image Capture or Preview are open. Please close them.\n\nYou may need to physically disconnect and reconnect your phone, or ensure its USB connection mode is set to \"File Transfer\" or \"MTP\", then click Retry."
+            let isExpectedUserCondition = isNoStorageError || isDeviceNotFound
+            if !isExpectedUserCondition {
+                ErrorLogger.log(error, message: "MTP connection failed")
+            }
+
+            if isNoStorageError {
+                self.errorMessage = "No storage found on device.\n\nPlease unlock your Android phone screen and ensure its USB connection mode is set to \"File Transfer\" (MTP), then click Retry."
             } else {
                 self.errorMessage = "Failed to connect: \(error.localizedDescription)"
             }
-
             self.isConnected = false
             self.deviceInfo = nil
             self.storages = []
