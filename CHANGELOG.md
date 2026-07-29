@@ -4,6 +4,10 @@
 
 - Nothing yet.
 
+## 1.6.7 - 2026-07-29
+
+- Filtered expected MTP device disconnects (`deviceNotConnected` and `no MTP devices found`) from Sentry error logging to eliminate false-positive production crash alerts.
+
 ## 1.6.6 - 2026-07-27
 
 - Added ETag HTTP caching (`If-None-Match`), 6-hour background check throttling, and web HEAD redirect fallback to `UpdaterService` for GitHub API rate-limit resilience.

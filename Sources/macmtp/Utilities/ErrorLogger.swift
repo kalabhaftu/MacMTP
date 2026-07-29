@@ -57,6 +57,17 @@ public struct ErrorLogger {
     public static func log(_ error: Error, message: String? = nil, userInfo: [String: Any]? = nil) {
         guard ensureStarted() else { return }
 
+        if let kalamError = error as? KalamError {
+            switch kalamError {
+            case .deviceNotConnected:
+                return
+            case .operationFailed(let msg) where msg.localizedCaseInsensitiveContains("no MTP devices found"):
+                return
+            default:
+                break
+            }
+        }
+
         let originalError = error as NSError
         let reportDescription = [message, error.localizedDescription]
             .compactMap { $0 }
