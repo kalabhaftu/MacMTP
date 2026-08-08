@@ -8,7 +8,7 @@ KALAM_SOURCE="$ROOT_DIR/Vendor/Kalam/native/kalam.go"
 require_pattern() {
     local pattern="$1"
     local file="$2"
-    if ! rg -q "$pattern" "$file"; then
+    if ! grep -Eq -- "$pattern" "$file"; then
         echo "ERROR: native response contract is missing: $pattern" >&2
         exit 1
     fi
