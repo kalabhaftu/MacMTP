@@ -138,11 +138,10 @@ validate_dylib_arch() {
     fi
 }
 
-KALAM_DIR="$PROJECT_ROOT/../openmtp/ffi/kalam/native"
+KALAM_DIR="$PROJECT_ROOT/Vendor/Kalam/native"
 KALAM_OUTPUT="$PROJECT_ROOT/Sources/CKalam"
 if [[ ! -d "$KALAM_DIR" ]]; then
     echo "ERROR: Kalam source directory not found at $KALAM_DIR"
-    echo "CI must checkout ganeshrvel/openmtp next to this repository."
     exit 1
 fi
 
@@ -160,13 +159,6 @@ build_kalam_arch() {
     echo "  Building libkalam.a for $arch using $pc_dir"
     staging_dir="$(mktemp -d "${TMPDIR:-/tmp}/macmtp-kalam.XXXXXX")"
     cp -R "$KALAM_DIR"/. "$staging_dir"/
-    if [[ -f "$PROJECT_ROOT/scripts/kalam.go.patched" ]]; then
-        cp "$PROJECT_ROOT/scripts/kalam.go.patched" "$staging_dir/kalam.go"
-    fi
-    if [[ -f "$PROJECT_ROOT/scripts/send_to_js_main.go.patched" ]]; then
-        mkdir -p "$staging_dir/send_to_js"
-        cp "$PROJECT_ROOT/scripts/send_to_js_main.go.patched" "$staging_dir/send_to_js/main.go"
-    fi
 
     if (
         cd "$staging_dir"
@@ -177,7 +169,7 @@ build_kalam_arch() {
         CC=clang \
         CGO_CFLAGS="$cflags" \
         CGO_LDFLAGS="$ldflags" \
-        go build -tags nosigsegv -buildmode=c-archive -o "$output" ./*.go
+        go build -mod=vendor -tags nosigsegv -buildmode=c-archive -o "$output" ./*.go
     ); then
         build_status=0
     else

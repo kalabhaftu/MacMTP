@@ -1,6 +1,6 @@
 import Foundation
 
-struct MTPDirectoryRefreshKey: Equatable, Sendable {
+struct MTPDirectoryRefreshKey: Hashable, Sendable {
     let storageId: UInt32
     let path: String
     let showHidden: Bool
@@ -74,6 +74,16 @@ enum MTPDirectoryReconciliation {
     }
 }
 
+enum MTPDirectoryPreflight {
+    static func destinationExists(
+        in snapshot: MTPDirectorySnapshot,
+        path: String,
+        excluding excludedPath: String? = nil
+    ) -> Bool {
+        snapshot.files.contains { $0.path == path && $0.path != excludedPath }
+    }
+}
+
 @MainActor
 final class MTPDirectoryCoordinator {
     private(set) var activeRefreshRequest: MTPDirectoryRefreshKey?
@@ -81,6 +91,7 @@ final class MTPDirectoryCoordinator {
     private var refreshWaiters: [CheckedContinuation<Void, Never>] = []
     private var mutationInFlight = false
     private var mutationWaiters: [CheckedContinuation<Void, Never>] = []
+    private var snapshots: [MTPDirectoryRefreshKey: MTPDirectorySnapshot] = [:]
     private(set) var snapshot: MTPDirectorySnapshot?
     private var activeRefreshResult: Bool?
     private var lastRefreshResult: (key: MTPDirectoryRefreshKey, succeeded: Bool)?
@@ -130,7 +141,9 @@ final class MTPDirectoryCoordinator {
     }
 
     func recordSuccessfulListing(_ files: [FileNode], for key: MTPDirectoryRefreshKey) {
-        snapshot = MTPDirectorySnapshot(key: key, files: files)
+        let snapshot = MTPDirectorySnapshot(key: key, files: files)
+        snapshots[key] = snapshot
+        self.snapshot = snapshot
         activeRefreshResult = true
     }
 
@@ -143,8 +156,20 @@ final class MTPDirectoryCoordinator {
         lastRefreshResult?.key == key && lastRefreshResult?.succeeded == true
     }
 
-    func invalidateSnapshot() {
-        snapshot = nil
-        lastRefreshResult = nil
+    func snapshot(for key: MTPDirectoryRefreshKey) -> MTPDirectorySnapshot? {
+        snapshots[key]
+    }
+
+    func invalidateSnapshot(for key: MTPDirectoryRefreshKey? = nil) {
+        if let key {
+            snapshots.removeValue(forKey: key)
+            if snapshot?.key == key { snapshot = nil }
+        } else {
+            snapshots.removeAll()
+            snapshot = nil
+        }
+        if key == nil || lastRefreshResult?.key == key {
+            lastRefreshResult = nil
+        }
     }
 }

@@ -85,7 +85,13 @@ public struct ErrorLogger {
                     }
                 }
             }
-            sanitizedExtras(userInfo).forEach { key, value in
+            let extras = sanitizedExtras(userInfo)
+            for key in ["operation_phase", "conflict_classification", "reconciliation_result"] {
+                if let value = extras[key] as? String {
+                    scope.setTag(value: value, key: key)
+                }
+            }
+            extras.forEach { key, value in
                 scope.setExtra(value: value, key: key)
             }
         }
@@ -152,6 +158,8 @@ public struct ErrorLogger {
             #"/Users/[^/\s]+(?:/[^\s,:;)]*)?"#,
             #"/Volumes/[^/\s]+(?:/[^\s,:;)]*)?"#,
             #"/private/var/folders/\S+"#,
+            #"(?i)(?:fullpath|path|directory|folder)\s*[:=]\s*/[^\s,;)]*"#,
+            #"(?i)/(?:storage|sdcard|mnt|dcim|android|download|pictures|movies|music)(?:/[^\s,;)]*)?"#,
         ]
 
         return replacements.reduce(value) { result, pattern in

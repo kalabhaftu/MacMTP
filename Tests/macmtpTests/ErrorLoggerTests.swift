@@ -20,6 +20,13 @@ func errorReportingSanitizesLocalPaths() {
 }
 
 @Test
+func errorReportingSanitizesMTPPaths() {
+    let sanitized = ErrorLogger.sanitize("MTP path=/storage/emulated/0/DCIM/photo.jpg")
+    #expect(!sanitized.contains("/storage/emulated/0"))
+    #expect(sanitized.contains("<redacted-path>"))
+}
+
+@Test
 func testReportResultsExplainTransportAcceptance() {
     #expect(TestReportResult.accepted.message == "Test report accepted by Sentry.")
     #expect(TestReportResult.rejected(statusCode: 403).message.contains("HTTP 403"))

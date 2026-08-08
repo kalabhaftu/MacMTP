@@ -2,6 +2,13 @@ import Foundation
 import IOKit
 import IOKit.usb
 
+struct USBDeviceIdentity: Hashable, Sendable {
+    let vendorID: UInt16
+    let productID: UInt16
+    let locationID: UInt32?
+    let serialNumber: String?
+}
+
 struct USBConnectionLifecycle: Equatable {
     private(set) var generation: UInt64 = 0
 
@@ -34,6 +41,8 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
     private var isWatching = false
     private var connectionLifecycle = USBConnectionLifecycle()
     private var pendingAutoConnectTask: Task<Void, Never>?
+    private var activeDeviceIdentity: USBDeviceIdentity?
+    private var knownDeviceIdentities: Set<USBDeviceIdentity> = []
     
     
     private init() {}
@@ -118,6 +127,8 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         pendingAutoConnectTask?.cancel()
         pendingAutoConnectTask = nil
         _ = connectionLifecycle.detached()
+        activeDeviceIdentity = nil
+        knownDeviceIdentities.removeAll()
         
         if let source = runLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes)
@@ -144,29 +155,40 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
     
     
     private func handleDevicesAdded(iterator: io_iterator_t, isInitialScan: Bool = false) async {
-        var deviceCount = 0
+        var identities: [USBDeviceIdentity] = []
         while case let device = IOIteratorNext(iterator), device != 0 {
-            deviceCount += 1
+            if let identity = deviceIdentity(for: device) {
+                identities.append(identity)
+                knownDeviceIdentities.insert(identity)
+                activeDeviceIdentity = activeDeviceIdentity ?? identity
+            }
             IOObjectRelease(device)
         }
         
-        guard deviceCount > 0 else { return }
+        guard !identities.isEmpty else { return }
         guard UserDefaults.standard.object(forKey: "autoDetectDevice") as? Bool ?? true else { return }
         scheduleAutoConnect(isInitialScan: isInitialScan)
     }
     
     private func handleDevicesRemoved(iterator: io_iterator_t) async {
-        var deviceCount = 0
+        var removedIdentities: [USBDeviceIdentity] = []
         while case let device = IOIteratorNext(iterator), device != 0 {
-            deviceCount += 1
+            if let identity = deviceIdentity(for: device) {
+                removedIdentities.append(identity)
+                knownDeviceIdentities.remove(identity)
+            }
             IOObjectRelease(device)
         }
         
-        guard deviceCount > 0, getConnectedAndroidVendorIDs().isEmpty else { return }
+        guard !removedIdentities.isEmpty else { return }
+        let removedActiveDevice = activeDeviceIdentity.map(removedIdentities.contains) ?? false
+        let noTrackedDevicesRemain = connectedDeviceIdentities().isEmpty
+        guard removedActiveDevice || noTrackedDevicesRemain else { return }
 
         pendingAutoConnectTask?.cancel()
         pendingAutoConnectTask = nil
         _ = connectionLifecycle.detached()
+        activeDeviceIdentity = nil
         ErrorLogger.logMessage(
             "USB device detached",
             level: .info,
@@ -183,6 +205,7 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
     private func scheduleAutoConnect(isInitialScan: Bool) {
         pendingAutoConnectTask?.cancel()
         let token = connectionLifecycle.attachScheduled()
+        let identity = activeDeviceIdentity
         ErrorLogger.logMessage(
             "USB device attached",
             level: .info,
@@ -198,13 +221,28 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
             guard !Task.isCancelled,
                   let self,
                   self.connectionLifecycle.accepts(token),
-                  !self.getConnectedAndroidVendorIDs().isEmpty else { return }
+                  let identity,
+                  self.connectedDeviceIdentities().contains(identity) else { return }
 
             self.pendingAutoConnectTask = nil
             await MTPDeviceManager.shared.connectDevice()
         }
     }
     
+    private func deviceIdentity(for device: io_object_t) -> USBDeviceIdentity? {
+        let vendorID = (IORegistryEntryCreateCFProperty(device, "idVendor" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? NSNumber)?.uint16Value
+        let productID = (IORegistryEntryCreateCFProperty(device, "idProduct" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? NSNumber)?.uint16Value
+        let locationID = (IORegistryEntryCreateCFProperty(device, "locationID" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? NSNumber)?.uint32Value
+        let serial = IORegistryEntryCreateCFProperty(device, "USB Serial Number" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? String
+        guard let vendorID, let productID else { return nil }
+        return USBDeviceIdentity(
+            vendorID: vendorID,
+            productID: productID,
+            locationID: locationID,
+            serialNumber: serial
+        )
+    }
+
     private func getDeviceName(device: io_object_t) -> String? {
         var nameChar = [CChar](repeating: 0, count: 128)
         let result = IORegistryEntryGetName(device, &nameChar)
@@ -216,6 +254,10 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
     }
 
     public func getConnectedAndroidVendorIDs() -> [UInt16] {
+        Array(Set(connectedDeviceIdentities().map(\.vendorID))).sorted()
+    }
+
+    private func connectedDeviceIdentities() -> Set<USBDeviceIdentity> {
         guard let matchingDict = IOServiceMatching(kIOUSBDeviceClassName) as? [String: Any] else {
             return []
         }
@@ -228,14 +270,13 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         }
         defer { IOObjectRelease(iterator) }
 
-        var vids: [UInt16] = []
+        var identities: Set<USBDeviceIdentity> = []
         while case let device = IOIteratorNext(iterator), device != 0 {
             defer { IOObjectRelease(device) }
-
-            if let vendorIDNum = IORegistryEntryCreateCFProperty(device, "idVendor" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? NSNumber {
-                vids.append(vendorIDNum.uint16Value)
+            if let identity = deviceIdentity(for: device) {
+                identities.insert(identity)
             }
         }
-        return vids
+        return identities
     }
 }

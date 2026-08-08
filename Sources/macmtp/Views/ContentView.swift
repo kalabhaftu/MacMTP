@@ -53,14 +53,12 @@ struct ContentView: View {
 
     @State private var showDeleteConfirmation: Bool = false
     @State private var pendingDeletePaths: [String] = []
-    @State private var showNewFolderDialog: Bool = false
     @State private var newFolderName: String = "New Folder"
-    @State private var newFolderTargetPath: String = "/"
-    @State private var newFolderTargetIsLocal: Bool = true
-    @State private var showRenameDialog: Bool = false
-    @State private var renameTargetFile: FileNode?
-    @State private var renameTargetIsLocal: Bool = true
     @State private var renameText: String = ""
+    @State private var newFolderRequest: NewFolderDialogRequest?
+    @State private var renameRequest: RenameDialogRequest?
+    @State private var isSubmittingFileOperation = false
+    @State private var dialogErrorMessage: String?
     @State private var operationErrorMessage: String?
 
 
@@ -184,25 +182,31 @@ struct ContentView: View {
         } message: {
             Text("Are you sure you want to delete \(pendingDeletePaths.count) item\(pendingDeletePaths.count == 1 ? "" : "s")? This cannot be undone.")
         }
-        .alert("New Folder", isPresented: $showNewFolderDialog) {
-            TextField("Folder name", text: $newFolderName)
-            Button("Create") {
-                performNewFolder()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Enter a name for the new folder:")
+        .sheet(item: $newFolderRequest) { request in
+            FileOperationDialog(
+                title: "New Folder",
+                actionTitle: "Create",
+                prompt: "Create a folder in \(request.parentPath)",
+                initialText: "New Folder",
+                text: $newFolderName,
+                isSubmitting: $isSubmittingFileOperation,
+                errorMessage: $dialogErrorMessage,
+                onSubmit: performNewFolder,
+                onCancel: cancelFileOperationDialog
+            )
         }
-        .alert("Rename", isPresented: $showRenameDialog) {
-            TextField("New name", text: $renameText)
-            Button("Rename") {
-                performRename()
-            }
-            Button("Cancel", role: .cancel) {
-                renameTargetFile = nil
-            }
-        } message: {
-            Text("Enter a new name for this item.")
+        .sheet(item: $renameRequest) { request in
+            FileOperationDialog(
+                title: "Rename",
+                actionTitle: "Rename",
+                prompt: "Enter a new name for this item.",
+                initialText: request.initialName,
+                text: $renameText,
+                isSubmitting: $isSubmittingFileOperation,
+                errorMessage: $dialogErrorMessage,
+                onSubmit: performRename,
+                onCancel: cancelFileOperationDialog
+            )
         }
         .alert("Privacy First", isPresented: $showPrivacyPrompt) {
             Button("I Agree") {
@@ -660,65 +664,83 @@ struct ContentView: View {
 
     private func beginNewFolder(path: String, isLocal: Bool) {
         NotificationCenter.default.post(name: .fileTypeaheadReset, object: nil)
-        newFolderTargetPath = path.isEmpty ? "/" : path
-        newFolderTargetIsLocal = isLocal
+        let parentPath = path.isEmpty ? "/" : path
         newFolderName = "New Folder"
-        operationErrorMessage = nil
-        showNewFolderDialog = true
+        dialogErrorMessage = nil
+        newFolderRequest = NewFolderDialogRequest(
+            parentPath: parentPath,
+            isLocal: isLocal
+        )
     }
 
     private func beginRename(file: FileNode, isLocal: Bool) {
         NotificationCenter.default.post(name: .fileTypeaheadReset, object: nil)
-        renameTargetFile = file
-        renameTargetIsLocal = isLocal
         renameText = file.name
-        operationErrorMessage = nil
-        showRenameDialog = true
+        dialogErrorMessage = nil
+        renameRequest = RenameDialogRequest(
+            file: file,
+            isLocal: isLocal,
+            initialName: file.name
+        )
     }
 
     private func performRename() {
-        guard let file = renameTargetFile else { return }
+        guard !isSubmittingFileOperation, let request = renameRequest else { return }
+        let file = request.file
         let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard isValidChildName(trimmed) else {
-            operationErrorMessage = "A file or folder name must not be empty or contain path separators."
+            dialogErrorMessage = "A file or folder name must not be empty or contain path separators."
             return
         }
         guard trimmed != file.name else {
-            showRenameDialog = false
-            renameTargetFile = nil
+            renameRequest = nil
             return
         }
 
-        showRenameDialog = false
-        renameTargetFile = nil
-        if renameTargetIsLocal {
+        isSubmittingFileOperation = true
+        dialogErrorMessage = nil
+        if request.isLocal {
             let sourceURL = URL(fileURLWithPath: file.path)
             let destinationURL = sourceURL.deletingLastPathComponent().appendingPathComponent(trimmed)
             do {
                 try FileManager.default.moveItem(at: sourceURL, to: destinationURL)
                 NotificationCenter.default.post(name: .localDirectoryNeedsRefresh, object: nil)
+                renameRequest = nil
             } catch {
                 ErrorLogger.log(error, message: "Rename failed")
-                operationErrorMessage = error.localizedDescription
+                dialogErrorMessage = error.localizedDescription
             }
+            isSubmittingFileOperation = false
         } else {
             Task {
                 do {
                     try await MTPDeviceManager.shared.renameFile(path: file.path, newName: trimmed)
+                    isSubmittingFileOperation = false
+                    renameRequest = nil
                 } catch {
                     ErrorLogger.log(
                         error,
                         message: "Rename failed",
                         userInfo: [
                             "operation": "rename_file",
+                            "operation_phase": "mutation",
                             "native_error_type": nativeErrorType(for: error),
                             "conflict_classification": isDuplicateNameError(error) ? "duplicate_name" : "native_or_transport_failure"
                         ]
                     )
-                    operationErrorMessage = error.localizedDescription
+                    dialogErrorMessage = error.localizedDescription
+                    isSubmittingFileOperation = false
                 }
             }
         }
+    }
+
+    private func cancelFileOperationDialog() {
+        isSubmittingFileOperation = false
+        dialogErrorMessage = nil
+        newFolderRequest = nil
+        renameRequest = nil
+        NotificationCenter.default.post(name: .fileTypeaheadReset, object: nil)
     }
 
     func handleEnter() {
@@ -786,39 +808,6 @@ struct ContentView: View {
         case .delete(let paths):
             pendingDeletePaths = paths
             showDeleteConfirmation = true
-
-        case .rename(let oldPath, let newName):
-            if isLocal {
-                guard isValidChildName(newName) else {
-                    operationErrorMessage = "A file or folder name must not be empty or contain path separators."
-                    return
-                }
-                let sourceURL = URL(fileURLWithPath: oldPath)
-                let destURL = sourceURL.deletingLastPathComponent().appendingPathComponent(newName)
-                do {
-                    try FileManager.default.moveItem(at: sourceURL, to: destURL)
-                    handleRefresh()
-                } catch {
-                    ErrorLogger.log(error, message: "Rename failed")
-                }
-            } else {
-                Task {
-                    do {
-                        try await MTPDeviceManager.shared.renameFile(path: oldPath, newName: newName)
-                    } catch {
-                        ErrorLogger.log(
-                            error,
-                            message: "Rename failed",
-                            userInfo: [
-                                "operation": "rename_file",
-                                "native_error_type": nativeErrorType(for: error),
-                                "conflict_classification": isDuplicateNameError(error) ? "duplicate_name" : "native_or_transport_failure"
-                            ]
-                        )
-                        operationErrorMessage = error.localizedDescription
-                    }
-                }
-            }
 
         case .requestRename(let file):
             beginRename(file: file, isLocal: isLocal)
@@ -967,6 +956,7 @@ struct ContentView: View {
                         message: "MTP delete failed",
                         userInfo: [
                             "operation": "delete_files",
+                            "operation_phase": "mutation",
                             "native_error_type": nativeErrorType(for: error),
                             "conflict_classification": "none"
                         ]
@@ -1025,38 +1015,49 @@ struct ContentView: View {
     }
 
     private func performNewFolder() {
+        guard !isSubmittingFileOperation else { return }
         let trimmedName = newFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard isValidChildName(trimmedName) else {
-            operationErrorMessage = "A file or folder name must not be empty or contain path separators."
+            dialogErrorMessage = "A file or folder name must not be empty or contain path separators."
             return
         }
 
-        let parentPath = newFolderTargetPath
+        guard let request = newFolderRequest else { return }
+        let parentPath = request.parentPath
+        isSubmittingFileOperation = true
+        dialogErrorMessage = nil
 
-        if newFolderTargetIsLocal {
+        if request.isLocal {
             let folderURL = URL(fileURLWithPath: parentPath).appendingPathComponent(trimmedName)
             do {
                 try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: false)
                 NotificationCenter.default.post(name: .localDirectoryNeedsRefresh, object: nil)
+                isSubmittingFileOperation = false
+                newFolderRequest = nil
             } catch {
                 ErrorLogger.log(error, message: "Create folder failed")
-                operationErrorMessage = error.localizedDescription
+                dialogErrorMessage = error.localizedDescription
+                isSubmittingFileOperation = false
             }
         } else {
             Task {
                 do {
                     try await MTPDeviceManager.shared.createFolder(name: trimmedName, in: parentPath)
+                    isSubmittingFileOperation = false
+                    newFolderRequest = nil
                 } catch {
                     ErrorLogger.log(
                         error,
                         message: "Create MTP folder failed",
                         userInfo: [
                             "operation": "make_directory",
+                            "operation_phase": "mutation",
                             "native_error_type": nativeErrorType(for: error),
                             "conflict_classification": isDuplicateNameError(error) ? "duplicate_name" : "native_or_transport_failure"
                         ]
                     )
-                    operationErrorMessage = error.localizedDescription
+                    dialogErrorMessage = error.localizedDescription
+                    isSubmittingFileOperation = false
                 }
             }
         }

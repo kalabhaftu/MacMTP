@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- Vendored the Kalam native adapter and pinned Go dependencies so source and CI builds are self-contained; added a manual native-source comparison command.
 
 - Fixed empty MTP directory responses, serialized native mutation identifiers, coalesced refreshes, and reconciled create, rename, and delete state through the device manager.
 - Added Finder-style typeahead and immediate fixed-cell selection, centralized rename and new-folder dialogs, and made USB detach handling cancel stale connection work promptly.

@@ -107,19 +107,9 @@ struct FileExplorerPane: View {
 
     @State private var loadGeneration: UInt64 = 0
 
-    @State private var contextMenuTargetID: String? = nil
-
-    @State private var lastClickedItemID: String? = nil
-
-    @State private var dragRect: CGRect? = nil
-    @State private var ignoreMarqueeDrag: Bool = false
-    @State private var itemFrames: [String: CGRect] = [:]
-    @State private var dragStartSelection: Set<String> = []
-
 
     enum FileOperation {
         case delete(paths: [String])
-        case rename(oldPath: String, newName: String)
         case requestRename(file: FileNode)
         case open(path: String)
     }
@@ -571,18 +561,16 @@ struct FileExplorerPane: View {
     }
 
     private var listView: some View {
-        List(selection: $selectedItems) {
-            ForEach(ungroupedFiles) { file in
-                fileRow(for: file)
-                    .tag(file.path)
-                    .contextMenu { contextMenuItems(for: file) }
-                    .listRowSeparator(.visible)
-                    .onTapGesture(count: 2) {
-                        handleDoubleClick(file: file)
-                    }
-            }
-        }
-        .listStyle(.inset)
+        AppKitFileBrowser(
+            files: ungroupedFiles,
+            selectedPaths: $selectedItems,
+            mode: .list,
+            fontScale: appFontScale,
+            isLocal: isLocal,
+            onOpen: handleDoubleClick,
+            onSelectionChanged: resetTypeahead,
+            onContextMenu: { file in appKitContextMenu(for: file) }
+        )
         .contextMenu { emptySpaceContextMenuItems }
         .overlay(
             RoundedRectangle(cornerRadius: 0)
@@ -594,102 +582,16 @@ struct FileExplorerPane: View {
     }
 
     private var iconGridView: some View {
-        return GeometryReader { scrollGeo in
-            let isLarge = viewMode == .largeIcons
-            let cellWidth = CGFloat(FileGridLayout.cellWidth(large: isLarge))
-            let columnSpacing = CGFloat(FileGridLayout.spacing)
-            let columnCount = FileGridLayout.columnCount(
-                containerWidth: scrollGeo.size.width,
-                large: isLarge
-            )
-            let columns = Array(
-                repeating: GridItem(.fixed(cellWidth), spacing: columnSpacing, alignment: .top),
-                count: columnCount
-            )
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    LazyVGrid(columns: columns, spacing: 8) {
-                        ForEach(displayedGroups) { group in
-                            if grouping != .none {
-                                groupHeader(group)
-                                    .gridCellColumns(columns.count)
-                            }
-                            ForEach(group.files) { file in
-                                gridItemWithPreference(for: file, cellWidth: cellWidth)
-                            }
-                        }
-                    }
-                    Spacer()
-                }
-                .padding(12)
-                .frame(minWidth: scrollGeo.size.width, minHeight: scrollGeo.size.height, alignment: .topLeading)
-                .background(Color.white.opacity(0.001))
-            }
-            .coordinateSpace(name: "explorerSpace")
-            .onPreferenceChange(ItemFramePreferenceKey.self) { frames in
-                itemFrames = frames
-            }
-            .gesture(
-                DragGesture(minimumDistance: 5)
-                    .onChanged { value in
-                        if dragRect == nil {
-                            let start = value.startLocation
-                            let hitItem = itemFrames.values.contains { $0.insetBy(dx: -4, dy: -4).contains(start) }
-                            if hitItem {
-                                ignoreMarqueeDrag = true
-                                return
-                            }
-                            ignoreMarqueeDrag = false
-                            
-                            let modifiers = NSEvent.modifierFlags
-                            if modifiers.contains(.shift) || modifiers.contains(.command) {
-                                dragStartSelection = selectedItems
-                            } else {
-                                dragStartSelection = []
-                                selectedItems.removeAll()
-                            }
-                        }
-                        
-                        if ignoreMarqueeDrag { return }
-                        
-                        let start = value.startLocation
-                        let current = value.location
-                        
-                        let rect = CGRect(
-                            x: min(start.x, current.x),
-                            y: min(start.y, current.y),
-                            width: abs(current.x - start.x),
-                            height: abs(current.y - start.y)
-                        )
-                        self.dragRect = rect
-                        
-                        var newSelection = dragStartSelection
-                        for (path, frame) in itemFrames {
-                            if rect.intersects(frame) {
-                                newSelection.insert(path)
-                            }
-                        }
-                        selectedItems = newSelection
-                    }
-                    .onEnded { _ in
-                        dragRect = nil
-                        ignoreMarqueeDrag = false
-                    }
-            )
-            .overlay(
-                Group {
-                    if let rect = dragRect, !ignoreMarqueeDrag {
-                        Rectangle()
-                            .fill(Color.accentColor.opacity(0.2))
-                            .stroke(Color.accentColor, lineWidth: 1)
-                            .frame(width: rect.width, height: rect.height)
-                            .position(x: rect.midX, y: rect.midY)
-                    }
-                }
-            )
-        }
-        .background(Color(NSColor.controlBackgroundColor))
+        AppKitFileBrowser(
+            files: displayedFiles,
+            selectedPaths: $selectedItems,
+            mode: viewMode,
+            fontScale: appFontScale,
+            isLocal: isLocal,
+            onOpen: handleDoubleClick,
+            onSelectionChanged: resetTypeahead,
+            onContextMenu: { file in appKitContextMenu(for: file) }
+        )
         .contextMenu { emptySpaceContextMenuItems }
         .overlay(
             RoundedRectangle(cornerRadius: 0)
@@ -700,208 +602,59 @@ struct FileExplorerPane: View {
         }
     }
 
-    private func groupHeader(_ group: FileGroup) -> some View {
-        HStack {
-            Text(group.title)
-                .font(.system(size: 11 * appFontScale, weight: .semibold))
-                .foregroundStyle(.secondary)
-            Text("\(group.files.count)")
-                .font(.system(size: 10 * appFontScale))
-                .foregroundStyle(.tertiary)
-            Spacer()
-        }
-        .padding(.vertical, 3)
-    }
+    private func appKitContextMenu(for file: FileNode) -> NSMenu {
+        let targeted = targetedItems(for: file)
+        var actions: [() -> Void] = []
+        let menu = NSMenu()
 
-    private func gridItemWithPreference(for file: FileNode, cellWidth: CGFloat) -> some View {
-        let isSelected = selectedItems.contains(file.path)
-        let iconSize: CGFloat = viewMode == .largeIcons ? 48 : 28
-        let isLarge = viewMode == .largeIcons
-        let labelHeight = CGFloat(FileGridLayout.labelHeight(large: isLarge))
-        let cellHeight = CGFloat(FileGridLayout.cellHeight(large: isLarge))
-
-        let cellContent = VStack(spacing: 4) {
-            Image(systemName: file.iconName)
-                .font(.system(size: iconSize))
-                .foregroundColor(file.iconColor)
-                .symbolRenderingMode(.hierarchical)
-                .frame(height: iconSize)
-
-            Text(file.name)
-                .font(viewMode == .largeIcons ? .caption : .caption2)
-                .lineLimit(2)
-                .multilineTextAlignment(.center)
-                .truncationMode(.tail)
-                .frame(width: cellWidth - 8, height: labelHeight, alignment: .top)
-
-            if viewMode == .largeIcons {
-                Text(fileSizeDisplay(for: file))
-                    .font(.system(size: 8 * appFontScale))
-                    .foregroundColor(.secondary)
-                    .monospacedDigit()
-                    .frame(height: 10)
-            }
-        }
-        .frame(width: cellWidth, height: cellHeight, alignment: .top)
-
-        return FileGridCellInteraction(
-            onPress: { handleSingleClick(file: file) },
-            onDoubleClick: { handleDoubleClick(file: file) }
-        ) {
-            cellContent
-        }
-        .frame(width: cellWidth, height: cellHeight, alignment: .top)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(isSelected ? Color.accentColor.opacity(0.5) : Color.clear, lineWidth: 1.5)
-        )
-        .background(
-            GeometryReader { geo in
-                Color.clear.preference(
-                    key: ItemFramePreferenceKey.self,
-                    value: [file.path: geo.frame(in: .named("explorerSpace"))]
-                )
-            }
-        )
-        .transaction { transaction in
-            transaction.animation = nil
-        }
-        .onDrag { dragProvider(for: file) }
-        .onDrop(of: file.isDirectory ? [.fileURL, .utf8PlainText] : [], isTargeted: nil) { providers in
-            handleDrop(providers: providers, targetDirectory: file.path)
-        }
-        .contextMenu { contextMenuItems(for: file) }
-    }
-
-
-    private func fileRow(for file: FileNode) -> some View {
-        HStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Image(systemName: file.iconName)
-                    .font(.system(size: 14 * appFontScale))
-                    .foregroundColor(file.iconColor)
-                    .frame(width: 20)
-
-                Text(file.name)
-                    .font(.system(size: 12 * appFontScale))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-
-                Spacer()
-            }
-            .frame(minWidth: 180, maxWidth: .infinity)
-
-            Text(fileSizeDisplay(for: file))
-                .font(.system(size: 11 * appFontScale))
-                .foregroundColor(.secondary)
-                .monospacedDigit()
-                .frame(minWidth: 70, maxWidth: 90, alignment: .trailing)
-                .padding(.horizontal, 8)
-
-            Text(file.isDirectory ? "Folder" : file.extensionName)
-                .font(.system(size: 11 * appFontScale))
-                .foregroundColor(.secondary)
-                .frame(minWidth: 60, maxWidth: 80, alignment: .leading)
-                .padding(.horizontal, 8)
-
-            Text(formatDate(file.modificationDate))
-                .font(.system(size: 11 * appFontScale))
-                .foregroundColor(.secondary)
-                .frame(minWidth: 120, maxWidth: 140, alignment: .leading)
-                .padding(.horizontal, 8)
-        }
-        .padding(.vertical, 2)
-        .contentShape(Rectangle())
-        .onDrag { dragProvider(for: file) }
-        .onDrop(of: file.isDirectory ? [.fileURL, .utf8PlainText] : [], isTargeted: nil) { providers in
-            handleDrop(providers: providers, targetDirectory: file.path)
-        }
-    }
-
-
-    @ViewBuilder
-    private func contextMenuItems(for file: FileNode) -> some View {
-        Button(action: { handleDoubleClick(file: file) }) {
-            Label("Open", systemImage: "arrow.up.forward.square")
+        func addAction(_ title: String, _ action: @escaping () -> Void) {
+            let index = actions.count
+            actions.append(action)
+            let item = NSMenuItem(
+                title: title,
+                action: #selector(AppKitMenuActionProxy.invoke(_:)),
+                keyEquivalent: ""
+            )
+            item.tag = index
+            menu.addItem(item)
         }
 
-        Divider()
-
-        Button(action: {
-            ClipboardManager.shared.copyItems(items: targetedItems(for: file), from: currentPath, isLocal: isLocal)
-        }) {
-            Label("Copy", systemImage: "doc.on.doc")
+        addAction("Open") { handleDoubleClick(file: file) }
+        menu.addItem(.separator())
+        addAction("Copy") {
+            ClipboardManager.shared.copyItems(items: targeted, from: currentPath, isLocal: isLocal)
         }
-
-        Button(action: {
-            copyPaths(targetedItems(for: file).map(\.path))
-        }) {
-            Label(targetedItems(for: file).count == 1 ? "Copy Path" : "Copy Paths", systemImage: "doc.on.clipboard")
+        addAction("Cut") {
+            ClipboardManager.shared.cutItems(items: targeted, from: currentPath, isLocal: isLocal)
         }
-
-        Button(action: {
-            ClipboardManager.shared.cutItems(items: targetedItems(for: file), from: currentPath, isLocal: isLocal)
-        }) {
-            Label("Cut", systemImage: "scissors")
+        addAction("Paste") { onPaste?() }
+        menu.addItem(.separator())
+        addAction("Delete") {
+            onFileOperation?(.delete(paths: targeted.map(\.path)))
         }
-
-        Button(action: {
-            onPaste?()
-        }) {
-            Label("Paste", systemImage: "doc.on.clipboard")
-        }
-        .disabled(!ClipboardManager.shared.hasContent)
-
-        Divider()
-
-        Button(action: {
-            onFileOperation?(.delete(paths: targetedItems(for: file).map(\.path)))
-        }) {
-            Label("Delete", systemImage: "trash")
-        }
-
-        Button(action: {
+        addAction("Rename") {
             resetTypeahead()
             onFileOperation?(.requestRename(file: file))
-        }) {
-            Label("Rename", systemImage: "pencil")
         }
-
-        Divider()
-
-        Button(action: {
+        menu.addItem(.separator())
+        addAction("New Folder") {
             resetTypeahead()
             onRequestNewFolder?(currentPath, isLocal)
-        }) {
-            Label("New Folder", systemImage: "folder.badge.plus")
         }
-
-        Button(action: {
-            selectedItems = Set(displayedFiles.map { $0.path })
-        }) {
-            Label("Select All", systemImage: "checkmark.circle")
+        addAction("Select All") {
+            selectedItems = Set(displayedFiles.map(\.path))
         }
+        menu.addItem(.separator())
+        addAction("Properties") { propertiesFile = targeted.first ?? file }
 
-        if isLocal {
-            Button(action: {
-                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file.path)])
-            }) {
-                Label("Show in Finder", systemImage: "finder")
-            }
+        let proxy = AppKitMenuActionProxy(actions: actions)
+        for item in menu.items where !item.isSeparatorItem {
+            item.target = proxy
+            item.representedObject = proxy
         }
-
-        Divider()
-
-        Button(action: {
-            propertiesFile = targetedItems(for: file).first ?? file
-        }) {
-            Label("Properties", systemImage: "info.circle")
-        }
+        return menu
     }
+
 
     private func targetedItems(for file: FileNode) -> [FileNode] {
         guard selectedItems.contains(file.path) else {
@@ -1246,9 +999,6 @@ struct FileExplorerPane: View {
 
         let visiblePaths = Set(displayedFiles.map(\.path))
         selectedItems.formIntersection(visiblePaths)
-        if let lastClickedItemID, !visiblePaths.contains(lastClickedItemID) {
-            self.lastClickedItemID = nil
-        }
 
         if displayedFiles.isEmpty && !files.isEmpty && (!filterText.isEmpty || extensionFilter != nil) {
             loadingState = .empty
@@ -1275,86 +1025,6 @@ struct FileExplorerPane: View {
         }
     }
 
-    private func handleSingleClick(file: FileNode) {
-        resetTypeahead()
-        let flags = NSEvent.modifierFlags
-        if flags.contains(.shift) {
-            handleShiftClick(file: file, additive: flags.contains(.command))
-        } else if flags.contains(.command) {
-            handleCommandClick(file: file)
-        } else {
-            selectedItems = [file.path]
-            lastClickedItemID = file.path
-        }
-    }
-
-    private func dragProvider(for file: FileNode) -> NSItemProvider {
-        let items: [FileNode]
-        if selectedItems.contains(file.path) {
-            items = displayedFiles.filter { selectedItems.contains($0.path) }
-        } else {
-            selectedItems = [file.path]
-            lastClickedItemID = file.path
-            items = [file]
-        }
-        
-        let provider = NSItemProvider()
-        
-        if isLocal {
-        let paths = items.map { $0.path }
-            if let data = try? PropertyListSerialization.data(fromPropertyList: paths, format: .xml, options: 0) {
-                provider.registerDataRepresentation(forTypeIdentifier: "NSFilenamesPboardType", visibility: .all) { completion in
-                    completion(data, nil)
-                    return nil
-                }
-            }
-            
-            if let firstLocal = items.first {
-                let url = URL(fileURLWithPath: firstLocal.path)
-                provider.registerObject(url as NSURL, visibility: .all)
-            }
-        }
-        
-        provider.registerDataRepresentation(for: .utf8PlainText, visibility: .all) { completion in
-            let payloads = items.map { "\(isLocal ? "local" : "mtp"):\($0.isDirectory ? "dir" : "file"):\($0.path)" }.joined(separator: "\n")
-            let data = payloads.data(using: .utf8)
-            completion(data, nil)
-            return nil
-        }
-        provider.suggestedName = items.first?.name ?? file.name
-        return provider
-    }
-
-    private func handleCommandClick(file: FileNode) {
-        resetTypeahead()
-        if selectedItems.contains(file.path) {
-            selectedItems.remove(file.path)
-        } else {
-            selectedItems.insert(file.path)
-        }
-        lastClickedItemID = file.path
-    }
-
-    private func handleShiftClick(file: FileNode, additive: Bool) {
-        resetTypeahead()
-        guard let lastID = lastClickedItemID,
-              let rangeSelection = FileSelectionRules.range(
-                in: displayedFiles.map(\.path),
-                from: lastID,
-                through: file.path
-              ) else {
-            selectedItems = [file.path]
-            lastClickedItemID = file.path
-            return
-        }
-
-        if additive {
-            selectedItems.formUnion(rangeSelection)
-        } else {
-            selectedItems = rangeSelection
-        }
-    }
-
     private func handleKeyPress(_ key: String) {
         guard !key.isEmpty, !displayedFiles.isEmpty else { return }
 
@@ -1370,7 +1040,6 @@ struct FileExplorerPane: View {
         lastKeyTime = result.state.lastKeyTime
         if let selectedPath = result.selectedPath {
             selectedItems = [selectedPath]
-            lastClickedItemID = selectedPath
         }
     }
 
@@ -1649,14 +1318,5 @@ private struct LocalFileDetails: Sendable {
             total = overflow ? Int64.max : sum
         }
         return total
-    }
-}
-
-
-struct ItemFramePreferenceKey: PreferenceKey {
-    static let defaultValue: [String: CGRect] = [:]
-    
-    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
-        value.merge(nextValue()) { current, _ in current }
     }
 }

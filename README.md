@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  Built with <strong>Swift</strong> and <strong>SwiftUI</strong>. The MTP layer uses a bundled Go-based Kalam/go-mtpx engine through a small C bridge.
+Built with <strong>Swift</strong>, SwiftUI, and AppKit-backed file views. The MTP layer uses a bundled Go-based Kalam/go-mtpx engine through a small C bridge.
 </p>
 
 <p align="center">
@@ -175,7 +175,6 @@ Use the universal build if you are unsure which architecture you need.
 - Swift 6.0+ through Xcode or Xcode Command Line Tools
 - Go 1.21+
 - pkg-config and libusb
-- Kalam source from OpenMTP checked out next to this repository
 
 Install the local dependencies:
 
@@ -183,11 +182,10 @@ Install the local dependencies:
 brew install go pkg-config libusb
 ```
 
-Clone both repositories as siblings:
+Clone macMTP and enter the repository:
 
 ```bash
 git clone https://github.com/kalabhaftu/MacMTP.git
-git clone https://github.com/ganeshrvel/openmtp.git
 cd MacMTP
 ```
 
@@ -205,7 +203,11 @@ bash scripts/build.sh release --arch arm64
 bash scripts/build.sh release --arch x86_64
 ```
 
-The build script stages and patches the sibling Kalam sources in a temporary directory, so the OpenMTP checkout is not modified. `swift build` is useful for validating an already-generated `libkalam.a`; use the build script for a fresh app bundle.
+The build script stages the vendored Kalam sources in a temporary directory and
+builds with the checked-in Go dependency tree. No external source checkout is
+needed. Run `scripts/check-upstream-kalam.sh` manually when you want to inspect
+available native-source changes; it never updates the vendored source
+automatically.
 
 ### Universal Builds
 
@@ -273,6 +275,8 @@ The Go MTP engine is compiled as a static C archive (`libkalam.a`) and linked in
 ```text
 macmtp/
 ├── Package.swift
+├── Vendor/
+│   └── Kalam/                    # owned native adapter and vendored Go modules
 ├── Sources/
 │   ├── CKalam/
 │   │   ├── include/
@@ -318,7 +322,6 @@ Governance and decision-making are documented in [GOVERNANCE.md](GOVERNANCE.md).
 
 ## Acknowledgments
 
-- [OpenMTP](https://github.com/ganeshrvel/openmtp), which upstreams the Kalam MTP source this app bundles
 - [go-mtpx](https://github.com/ganeshrvel/go-mtpx)
 - [libusb](https://libusb.info/)
 - [Sentry Cocoa](https://github.com/getsentry/sentry-cocoa)

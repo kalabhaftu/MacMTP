@@ -10,6 +10,85 @@ private actor TestEventLog {
     }
 }
 
+private actor RecordingMTPBridge: MTPBridge {
+    private(set) var files: [GoFileInfo]
+    private(set) var existenceChecks = 0
+    private(set) var makeDirectoryCalls = 0
+
+    init(files: [GoFileInfo] = []) {
+        self.files = files
+    }
+
+    func initialize() async throws -> GoDeviceInfoData {
+        GoDeviceInfoData(
+            mtpDeviceInfo: GoMtpDeviceInfo(
+                Manufacturer: "Test",
+                Model: "Test MTP",
+                DeviceVersion: "1.0",
+                SerialNumber: "test",
+                StandardVersion: nil,
+                MTPVendorExtensionID: nil,
+                MTPVersion: nil,
+                MTPExtension: nil,
+                FunctionalMode: nil
+            ),
+            usbDeviceInfo: nil
+        )
+    }
+
+    func fetchStorages() async throws -> [GoStorageData] {
+        [GoStorageData(
+            Sid: 1,
+            Info: GoStorageInfo(
+                StorageType: 0,
+                FilesystemType: 0,
+                AccessCapability: 0,
+                MaxCapability: 1_000,
+                FreeSpaceInBytes: 500,
+                FreeSpaceInImages: 0,
+                StorageDescription: "Internal",
+                VolumeLabel: ""
+            )
+        )]
+    }
+
+    func dispose() async throws {}
+
+    func listDirectory(storageId: UInt32, path: String, recursive: Bool, skipHidden: Bool) async throws -> [GoFileInfo] {
+        files
+    }
+
+    func makeDirectory(storageId: UInt32, path: String) async throws -> UInt32? {
+        makeDirectoryCalls += 1
+        let name = (path as NSString).lastPathComponent
+        files.append(GoFileInfo(
+            size: 0,
+            isFolder: true,
+            dateAdded: "",
+            name: name,
+            path: path,
+            parentPath: "/",
+            extension: "",
+            parentId: 0,
+            objectId: 42
+        ))
+        return 42
+    }
+
+    func deleteFiles(storageId: UInt32, paths: [String]) async throws {
+        files.removeAll { paths.contains($0.path) }
+    }
+
+    func renameFile(storageId: UInt32, path: String, newName: String) async throws -> UInt32? {
+        nil
+    }
+
+    func checkFilesExist(storageId: UInt32, paths: [String]) async throws -> [Bool] {
+        existenceChecks += 1
+        return paths.map { path in files.contains { $0.path == path } }
+    }
+}
+
 @Test
 func fifoOperationGatePreservesWaitingOrder() async {
     let gate = FIFOOperationGate()
@@ -168,6 +247,52 @@ func mutationReconciliationUsesCanonicalPaths() {
 }
 
 @Test
+func listingFirstPreflightDetectsDuplicatesWithoutASecondNativeProbe() {
+    let existing = FileNode(name: "New Folder", path: "/New Folder", parentPath: "/", isDirectory: true)
+    let request = MTPDirectoryRefreshKey(storageId: 1, path: "/", showHidden: false)
+    let snapshot = MTPDirectorySnapshot(key: request, files: [existing])
+
+    #expect(MTPDirectoryPreflight.destinationExists(in: snapshot, path: existing.path))
+    #expect(!MTPDirectoryPreflight.destinationExists(in: snapshot, path: "/Other"))
+    #expect(!MTPDirectoryPreflight.destinationExists(in: snapshot, path: existing.path, excluding: existing.path))
+}
+
+@Test
+@MainActor
+func managerUsesCurrentListingForDuplicatesAndReconcilesCreates() async throws {
+    let existing = GoFileInfo(
+        size: 0,
+        isFolder: true,
+        dateAdded: "",
+        name: "Existing",
+        path: "/Existing",
+        parentPath: "/",
+        extension: "",
+        parentId: 0,
+        objectId: 9
+    )
+    let bridge = RecordingMTPBridge(files: [existing])
+    let manager = MTPDeviceManager(bridge: bridge)
+    await manager.connectDevice()
+
+    do {
+        try await manager.createFolder(name: " Existing ", in: "/")
+        Issue.record("The current listing should reject a duplicate folder")
+    } catch let error as KalamError {
+        guard case .itemAlreadyExists("Existing") = error else {
+            Issue.record("Duplicate listing was normalized to the wrong error")
+            return
+        }
+    }
+    #expect(await bridge.existenceChecks == 0)
+    #expect(await bridge.makeDirectoryCalls == 0)
+
+    try await manager.createFolder(name: "  New Folder  ", in: "/")
+    #expect(await bridge.makeDirectoryCalls == 1)
+    #expect(manager.mtpFiles.contains { $0.path == "/New Folder" })
+}
+
+@Test
 func usbLifecycleRejectsStaleConnectionCompletions() {
     var lifecycle = USBConnectionLifecycle()
     let first = lifecycle.attachScheduled()
@@ -176,4 +301,18 @@ func usbLifecycleRejectsStaleConnectionCompletions() {
 
     #expect(!lifecycle.accepts(first))
     #expect(lifecycle.accepts(second))
+}
+
+@Test
+func usbLifecycleInvalidatesRapidReplugAndDetachTokens() {
+    var lifecycle = USBConnectionLifecycle()
+    let first = lifecycle.attachScheduled()
+    let second = lifecycle.attachScheduled()
+    #expect(!lifecycle.accepts(first))
+    #expect(lifecycle.accepts(second))
+
+    _ = lifecycle.detached()
+    #expect(!lifecycle.accepts(second))
+    let third = lifecycle.attachScheduled()
+    #expect(lifecycle.accepts(third))
 }

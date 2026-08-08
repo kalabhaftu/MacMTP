@@ -26,15 +26,6 @@ jobs:
     - name: Checkout MacMTP
       uses: actions/checkout@v4
 
-    - name: Checkout OpenMTP
-      uses: actions/checkout@v4
-      with:
-        repository: ganeshrvel/openmtp
-        path: openmtp
-
-    - name: Link OpenMTP for build script
-      run: ln -s "$GITHUB_WORKSPACE/openmtp" "$GITHUB_WORKSPACE/../openmtp"
-
     - name: Set up Go
       uses: actions/setup-go@v5
       with:

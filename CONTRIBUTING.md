@@ -6,7 +6,6 @@
 - Swift 6.0+ (`xcode-select --install`)
 - Go 1.21+ (`brew install go`)
 - libusb (`brew install libusb`)
-- The [OpenMTP](https://github.com/ganeshrvel/openmtp) checkout next to this repository
 
 ## Build & Run
 
@@ -19,10 +18,10 @@ bash scripts/build.sh debug --arch "$(uname -m)"
 open macMTP.app
 ```
 
-The scripted build is the source of truth: it rebuilds the Go/C archive, links
-the correct `libusb` architecture, creates the app bundle, and signs it for
-local use. It stages OpenMTP in a temporary directory and does not modify that
-checkout.
+The scripted build is the source of truth: it rebuilds the vendored Kalam Go/C
+archive, links the correct `libusb` architecture, creates the app bundle, and
+signs it for local use. Native-source comparison is an explicit manual
+maintenance task via `scripts/check-upstream-kalam.sh`.
 
 Run the focused checks before opening a pull request:
 

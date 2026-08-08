@@ -2,8 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SEND_SOURCE="$ROOT_DIR/scripts/send_to_js_main.go.patched"
-KALAM_SOURCE="$ROOT_DIR/scripts/kalam.go.patched"
+SEND_SOURCE="$ROOT_DIR/Vendor/Kalam/native/send_to_js/main.go"
+KALAM_SOURCE="$ROOT_DIR/Vendor/Kalam/native/kalam.go"
 
 require_pattern() {
     local pattern="$1"
@@ -15,7 +15,7 @@ require_pattern() {
 }
 
 # These assertions protect the JSON boundary compiled into the app from the
-# sibling OpenMTP checkout.
+# vendored Kalam source.
 require_pattern 'outputFiles := make\(\[\]FileInfo, 0, len\(files\)\)' "$SEND_SOURCE"
 require_pattern 'fdSlice := make\(\[\]FileExistsData, 0, len\(fc\)\)' "$SEND_SOURCE"
 require_pattern 'storages = make\(\[\]mtpx.StorageData, 0\)' "$SEND_SOURCE"
