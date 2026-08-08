@@ -15,6 +15,7 @@ DerivedData/
 
 # Build artifacts
 macMTP.app/
+*.app.dSYM/
 release/
 
 # IDE

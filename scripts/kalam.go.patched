@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -23,6 +24,27 @@ static void ignore_signal(int sig) {
 import "C"
 
 var container deviceContainer
+
+func snapshotProgress(p *mtpx.ProgressInfo) *mtpx.ProgressInfo {
+	if p == nil {
+		return nil
+	}
+
+	snapshot := *p
+	if p.FileInfo != nil {
+		fileInfo := *p.FileInfo
+		snapshot.FileInfo = &fileInfo
+	}
+	if p.ActiveFileSize != nil {
+		activeSize := *p.ActiveFileSize
+		snapshot.ActiveFileSize = &activeSize
+	}
+	if p.BulkFileSize != nil {
+		bulkSize := *p.BulkFileSize
+		snapshot.BulkFileSize = &bulkSize
+	}
+	return &snapshot
+}
 
 //export Initialize
 func Initialize() {
@@ -184,6 +206,11 @@ func FileExists(fileExistsInputJson *C.char) {
 
 		return
 	}
+	if len(fc) != len(i.Files) {
+		send_to_js.SendError(fmt.Errorf("incomplete file existence response: got %d results for %d paths", len(fc), len(i.Files)))
+
+		return
+	}
 
 	send_to_js.SendFileExists(fc, i.Files)
 }
@@ -290,7 +317,7 @@ func Walk(walkInputJson *C.char) {
 func UploadFiles(uploadFilesInputJson *C.char) {
 
 	if err := lockMtp(); err != nil {
-		send_to_js.SendError(err)
+		send_to_js.SendTransferError(err)
 
 		return
 	}
@@ -300,24 +327,29 @@ func UploadFiles(uploadFilesInputJson *C.char) {
 	var j = jsoniter.ConfigFastest
 	err := j.UnmarshalFromString(C.GoString(uploadFilesInputJson), &i)
 	if err != nil {
-		send_to_js.SendError(fmt.Errorf("error occured while Unmarshalling UploadFiles input data %+v: ", err))
+		send_to_js.SendTransferError(fmt.Errorf("error occured while Unmarshalling UploadFiles input data %+v: ", err))
 
 		return
 	}
 
 	var pInterface interface{}
+	var progressMu sync.RWMutex
 
-	ch := make(chan bool)
+	done := make(chan struct{})
+	defer close(done)
 	go func() {
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
 		for {
 			select {
-			case <-ch:
-				close(ch)
-
+			case <-done:
 				return
-			default:
-				if pInterface != nil {
-					switch v := pInterface.(type) {
+			case <-ticker.C:
+				progressMu.RLock()
+				progress := pInterface
+				progressMu.RUnlock()
+				if progress != nil {
+					switch v := progress.(type) {
 					case UploadPreprocessContainer:
 						send_to_js.SendUploadFilesPreprocess(v.fi, v.fullPath)
 
@@ -328,8 +360,6 @@ func UploadFiles(uploadFilesInputJson *C.char) {
 						log.Panicln("unimplemented UploadFiles.pInterface type")
 					}
 				}
-
-				time.Sleep(time.Millisecond * 500)
 			}
 		}
 	}()
@@ -339,11 +369,17 @@ func UploadFiles(uploadFilesInputJson *C.char) {
 			if err != nil {
 				return err
 			}
+			if fi == nil {
+				return fmt.Errorf("upload preprocessing returned no file information")
+			}
 
+			progressMu.Lock()
+			fileInfo := *fi
 			pInterface = UploadPreprocessContainer{
-				fi:       fi,
+				fi:       &fileInfo,
 				fullPath: fullPath,
 			}
+			progressMu.Unlock()
 
 			return nil
 		},
@@ -351,22 +387,23 @@ func UploadFiles(uploadFilesInputJson *C.char) {
 			if err != nil {
 				return err
 			}
-
-			pInterface = ProgressContainer{
-				pInfo: p,
+			if p == nil || p.FileInfo == nil || p.ActiveFileSize == nil || p.BulkFileSize == nil {
+				return fmt.Errorf("upload progress returned incomplete information")
 			}
+
+			progressMu.Lock()
+			pInterface = ProgressContainer{
+				pInfo: snapshotProgress(p),
+			}
+			progressMu.Unlock()
 
 			return nil
 		})
 	if err != nil {
-		send_to_js.SendError(err)
-
-		ch <- true
+		send_to_js.SendTransferError(err)
 
 		return
 	}
-
-	ch <- true
 
 	send_to_js.SendTransferFilesDone()
 }
@@ -375,7 +412,7 @@ func UploadFiles(uploadFilesInputJson *C.char) {
 func DownloadFiles(downloadFilesInputJson *C.char) {
 
 	if err := lockMtp(); err != nil {
-		send_to_js.SendError(err)
+		send_to_js.SendTransferError(err)
 
 		return
 	}
@@ -385,24 +422,29 @@ func DownloadFiles(downloadFilesInputJson *C.char) {
 	var j = jsoniter.ConfigFastest
 	err := j.UnmarshalFromString(C.GoString(downloadFilesInputJson), &i)
 	if err != nil {
-		send_to_js.SendError(fmt.Errorf("error occured while Unmarshalling DownloadFiles input data %+v: ", err))
+		send_to_js.SendTransferError(fmt.Errorf("error occured while Unmarshalling DownloadFiles input data %+v: ", err))
 
 		return
 	}
 
 	var pInterface interface{}
+	var progressMu sync.RWMutex
 
-	ch := make(chan bool)
+	done := make(chan struct{})
+	defer close(done)
 	go func() {
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
 		for {
 			select {
-			case <-ch:
-				close(ch)
-
+			case <-done:
 				return
-			default:
-				if pInterface != nil {
-					switch v := pInterface.(type) {
+			case <-ticker.C:
+				progressMu.RLock()
+				progress := pInterface
+				progressMu.RUnlock()
+				if progress != nil {
+					switch v := progress.(type) {
 					case DownloadPreprocessContainer:
 						send_to_js.SendDownloadFilesPreprocess(v.fi)
 
@@ -413,8 +455,6 @@ func DownloadFiles(downloadFilesInputJson *C.char) {
 						log.Panicln("unimplemented DownloadFiles.pInterface type")
 					}
 				}
-
-				time.Sleep(time.Millisecond * 500)
 			}
 		}
 	}()
@@ -424,10 +464,16 @@ func DownloadFiles(downloadFilesInputJson *C.char) {
 			if err != nil {
 				return err
 			}
-
-			pInterface = DownloadPreprocessContainer{
-				fi: fi,
+			if fi == nil {
+				return fmt.Errorf("download preprocessing returned no file information")
 			}
+
+			progressMu.Lock()
+			fileInfo := *fi
+			pInterface = DownloadPreprocessContainer{
+				fi: &fileInfo,
+			}
+			progressMu.Unlock()
 
 			return nil
 		},
@@ -435,22 +481,23 @@ func DownloadFiles(downloadFilesInputJson *C.char) {
 			if err != nil {
 				return err
 			}
-
-			pInterface = ProgressContainer{
-				pInfo: p,
+			if p == nil || p.FileInfo == nil || p.ActiveFileSize == nil || p.BulkFileSize == nil {
+				return fmt.Errorf("download progress returned incomplete information")
 			}
+
+			progressMu.Lock()
+			pInterface = ProgressContainer{
+				pInfo: snapshotProgress(p),
+			}
+			progressMu.Unlock()
 
 			return nil
 		})
 	if err != nil {
-		send_to_js.SendError(err)
-
-		ch <- true
+		send_to_js.SendTransferError(err)
 
 		return
 	}
-
-	ch <- true
 
 	send_to_js.SendTransferFilesDone()
 }

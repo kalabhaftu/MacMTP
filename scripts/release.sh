@@ -8,6 +8,7 @@ VERSION="1.0.0"
 RELEASE_DIR="$PROJECT_ROOT/release"
 APP_BUNDLE="$PROJECT_ROOT/$APP_NAME.app"
 APP_DSYM="$PROJECT_ROOT/$APP_NAME.app.dSYM"
+VERIFY_SCRIPT="$SCRIPT_DIR/verify-app.sh"
 TARGETS=()
 
 usage() {
@@ -63,6 +64,11 @@ if ! command -v sentry-cli >/dev/null 2>&1; then
     exit 1
 fi
 
+if [[ ! -x "$VERIFY_SCRIPT" ]]; then
+    echo "ERROR: Bundle verifier is missing or not executable: $VERIFY_SCRIPT" >&2
+    exit 1
+fi
+
 echo "========================================"
 echo "  macMTP Release"
 echo "  Version: $VERSION"
@@ -75,7 +81,12 @@ mkdir -p "$RELEASE_DIR"
 set_version() {
     /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP_BUNDLE/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$APP_BUNDLE/Contents/Info.plist"
-    codesign -s - --force --deep "$APP_BUNDLE"
+    local signing_identity="${MACMTP_SIGNING_IDENTITY:--}"
+    local signing_options=(--force --deep)
+    if [[ "$signing_identity" != "-" ]]; then
+        signing_options+=(--options runtime --timestamp)
+    fi
+    codesign "${signing_options[@]}" --sign "$signing_identity" "$APP_BUNDLE"
 }
 
 build_target() {
@@ -105,6 +116,8 @@ build_target() {
         echo "ERROR: dSYM bundle not found at $APP_DSYM" >&2
         exit 1
     fi
+
+    MACMTP_REQUIRE_SENTRY_DSN=1 "$VERIFY_SCRIPT" "$APP_BUNDLE" "$target"
 }
 
 package_target() {
@@ -153,6 +166,13 @@ package_target() {
         shasum -a 256 "$zip_name" > "$zip_name.sha256"
         shasum -a 256 "$dsym_name" > "$dsym_name.sha256"
     )
+
+    for artifact in "$RELEASE_DIR/$dmg_name" "$RELEASE_DIR/$zip_name" "$RELEASE_DIR/$dsym_name" "$RELEASE_DIR/$dmg_name.sha256" "$RELEASE_DIR/$zip_name.sha256" "$RELEASE_DIR/$dsym_name.sha256"; do
+        if [[ ! -s "$artifact" ]]; then
+            echo "ERROR: Release artifact is missing or empty: $artifact" >&2
+            exit 1
+        fi
+    done
 }
 
 for target in "${TARGETS[@]}"; do
@@ -180,6 +200,11 @@ echo "Writing latest-mac.yml..."
     echo "path: $preferred"
     echo "releaseDate: '$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")'"
 } > "$RELEASE_DIR/latest-mac.yml"
+
+if [[ ! -s "$RELEASE_DIR/latest-mac.yml" ]]; then
+    echo "ERROR: latest-mac.yml was not generated." >&2
+    exit 1
+fi
 
 echo ""
 echo "Release artifacts:"

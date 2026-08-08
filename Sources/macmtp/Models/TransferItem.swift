@@ -161,7 +161,7 @@ public struct TransferItem: Identifiable, Hashable, Sendable {
 
     public let fileName: String
 
-    public let fileSize: Int64
+    public var fileSize: Int64
 
     public let direction: TransferDirection
 
@@ -211,7 +211,7 @@ public struct TransferItem: Identifiable, Hashable, Sendable {
         guard fileSize > 0 else {
             return status == .completed ? 1.0 : 0.0
         }
-        return min(Double(bytesTransferred) / Double(fileSize), 1.0)
+        return max(0, min(Double(bytesTransferred) / Double(fileSize), 1.0))
     }
 
     public var formattedSpeed: String {
@@ -224,7 +224,7 @@ public struct TransferItem: Identifiable, Hashable, Sendable {
             return FormatUtils.formatDuration(eta)
         }
         guard speed > 0 else { return "--" }
-        let remaining = Double(fileSize - bytesTransferred)
+        let remaining = Double(max(0, fileSize - bytesTransferred))
         let computedETA = remaining / speed
         guard computedETA.isFinite, computedETA > 0 else { return "--" }
         return FormatUtils.formatDuration(computedETA)

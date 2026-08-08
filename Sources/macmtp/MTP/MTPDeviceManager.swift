@@ -43,7 +43,7 @@ public final class MTPDeviceManager: ObservableObject {
 
 
     public func connectDevice() async {
-        guard !isLoading else { return }
+        guard !isLoading, !isConnected else { return }
         isLoading = true
         errorMessage = nil
 
@@ -51,6 +51,9 @@ public final class MTPDeviceManager: ObservableObject {
             let goDevInfo = try await bridge.initialize()
             
             let goStorages = try await bridge.fetchStorages()
+            guard !goStorages.isEmpty else {
+                throw KalamError.operationFailed("No storage found on the connected MTP device")
+            }
             
             let mappedStorages = goStorages.map { item -> MTPStorageInfo in
                 let desc = item.Info.StorageDescription
@@ -144,10 +147,31 @@ public final class MTPDeviceManager: ObservableObject {
         self.isLoading = false
     }
 
+    func invalidateConnection(message: String) {
+        refreshGeneration &+= 1
+        isConnected = false
+        deviceInfo = nil
+        storages = []
+        selectedStorageId = nil
+        mtpFiles = []
+        currentMTPPath = "/"
+        backHistory.removeAll()
+        forwardHistory.removeAll()
+        isLoading = false
+        errorMessage = message
+
+        Task {
+            try? await bridge.dispose()
+        }
+    }
+
     public func refreshStorages() async {
         guard isConnected else { return }
         do {
             let goStorages = try await bridge.fetchStorages()
+            guard !goStorages.isEmpty else {
+                throw KalamError.operationFailed("No storage found on the connected MTP device")
+            }
             let mappedStorages = goStorages.map { item -> MTPStorageInfo in
                 let desc = item.Info.StorageDescription
                 let type = MTPStorageType.fromMTPCode(item.Info.StorageType)
@@ -178,6 +202,9 @@ public final class MTPDeviceManager: ObservableObject {
             }
         } catch {
             ErrorLogger.log(error, message: "Failed to refresh storages")
+            if isMTPTransportFailure(error) {
+                invalidateConnection(message: "The MTP connection was lost. Reconnect your Android device and try again.")
+            }
         }
     }
 
@@ -190,17 +217,37 @@ public final class MTPDeviceManager: ObservableObject {
         refreshGeneration += 1
         let generation = refreshGeneration
         let requestedPath = currentMTPPath
+        var retryCount = 0
 
         do {
             let showHidden = UserDefaults.standard.object(forKey: "showHiddenFilesMTP") as? Bool ?? false
             // Keep browsing shallow. Some Android MTP implementations reject a
             // recursive root walk with InvalidObjectHandle, despite remaining connected.
-            let goFiles = try await bridge.listDirectory(
-                storageId: storageId,
-                path: requestedPath,
-                recursive: false,
-                skipHidden: !showHidden
-            )
+            var goFiles: [GoFileInfo]?
+            var lastError: Error?
+            for attempt in 0..<2 {
+                do {
+                    goFiles = try await bridge.listDirectory(
+                        storageId: storageId,
+                        path: requestedPath,
+                        recursive: false,
+                        skipHidden: !showHidden
+                    )
+                    break
+                } catch {
+                    lastError = error
+                    guard attempt == 0, shouldRetryMTPDirectory(error) else { break }
+                    retryCount = 1
+                    try await Task.sleep(nanoseconds: 150_000_000)
+                }
+            }
+            guard let goFiles else {
+                throw lastError ?? KalamError.nativeOperationFailed(
+                    operation: "list_directory",
+                    errorType: nil,
+                    message: "The directory request failed without an error response."
+                )
+            }
 
             // If the user navigated again while this request was in flight,
             // a newer refreshFiles() call already owns the latest generation.
@@ -233,21 +280,16 @@ public final class MTPDeviceManager: ObservableObject {
                     "is_root": requestedPath == "/",
                     "path_depth": requestedPath.split(separator: "/").count,
                     "device_connected": isConnected,
+                    "retry_count": retryCount,
                 ]
             )
-            var isDisconnectError = false
-            if case .deviceNotConnected? = (error as? KalamError) {
-                isDisconnectError = true
-            } else if error.localizedDescription.contains("Code: 1") {
-                isDisconnectError = true
-            }
-
-            if isDisconnectError {
-                try? await bridge.dispose()
-                self.isConnected = false
-                self.errorMessage = "MTP device disconnected or connection lost."
+            if isMTPTransportFailure(error) {
+                invalidateConnection(message: "MTP device disconnected or connection lost.")
             } else {
-                self.errorMessage = "Failed to list directory: \(error.localizedDescription)"
+                let detail = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+                self.errorMessage = detail.isEmpty
+                    ? "Failed to list directory. Try again."
+                    : "Failed to list directory: \(detail)"
             }
             self.mtpFiles = []
         }

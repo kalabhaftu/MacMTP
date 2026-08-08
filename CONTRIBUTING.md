@@ -6,6 +6,7 @@
 - Swift 6.0+ (`xcode-select --install`)
 - Go 1.21+ (`brew install go`)
 - libusb (`brew install libusb`)
+- The [OpenMTP](https://github.com/ganeshrvel/openmtp) checkout next to this repository
 
 ## Build & Run
 
@@ -16,6 +17,20 @@ cd MacMTP
 # Build and run
 bash scripts/build.sh debug --arch "$(uname -m)"
 open macMTP.app
+```
+
+The scripted build is the source of truth: it rebuilds the Go/C archive, links
+the correct `libusb` architecture, creates the app bundle, and signs it for
+local use. It stages OpenMTP in a temporary directory and does not modify that
+checkout.
+
+Run the focused checks before opening a pull request:
+
+```bash
+bash -n scripts/*.sh
+swift test
+bash scripts/build.sh release --arch "$(uname -m)"
+scripts/verify-app.sh macMTP.app "$(uname -m)"
 ```
 
 ## Code Style
@@ -29,7 +44,7 @@ open macMTP.app
 
 1. Fork the repo and create a feature branch (`feature/my-change`).
 2. Make your changes.
-3. Run `swift build` and `swift test` — both must pass.
+3. Run the focused checks above — all must pass.
 4. Open a PR against `main`.
 5. A maintainer will review within 7 days.
 6. Address review feedback if requested.
@@ -53,4 +68,5 @@ Include:
 - Android device model and OS version
 - macMTP version
 - Steps to reproduce
-- Logs from Console.app if applicable
+- Logs from Console.app if applicable; see [SUPPORT.md](SUPPORT.md) for the
+  exact `log` command and the details that make MTP failures diagnosable.

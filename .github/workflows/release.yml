@@ -8,8 +8,13 @@ on:
 jobs:
   build:
     runs-on: macos-latest
+    timeout-minutes: 30
     permissions:
       contents: write
+
+    concurrency:
+      group: macmtp-release-${{ github.ref }}
+      cancel-in-progress: false
 
     env:
       MACMTP_ARM64_LIBUSB_PKGCONFIG: /opt/homebrew/opt/libusb/lib/pkgconfig
@@ -44,11 +49,62 @@ jobs:
         fi
         arch -x86_64 /usr/local/bin/brew install pkg-config libusb
 
+    - name: Validate release metadata
+      run: |
+        VERSION="${GITHUB_REF_NAME#v}"
+        if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "Tag must use vX.Y.Z: $GITHUB_REF_NAME" >&2
+          exit 1
+        fi
+        if ! grep -Eq "^## ${VERSION//./\\.}([[:space:]]|$)" CHANGELOG.md; then
+          echo "CHANGELOG.md has no entry for $VERSION" >&2
+          exit 1
+        fi
+        bash -n scripts/*.sh
+
+    - name: Build and verify host release
+      run: |
+        ARCH="$(uname -m)"
+        bash scripts/build.sh release --arch "$ARCH"
+        scripts/verify-app.sh macMTP.app "$ARCH"
+
+    - name: Run tests
+      run: swift test -v
+
     - name: Build and package all release targets
       run: bash scripts/release.sh "${{ github.ref_name }}" --all
       env:
         SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
         SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+
+    - name: Verify release artifacts
+      run: |
+        test -s release/latest-mac.yml
+        shopt -s nullglob
+        artifacts=(release/*.dmg release/*.zip release/*.sha256)
+        if (( ${#artifacts[@]} == 0 )); then
+          echo "No release artifacts were generated." >&2
+          exit 1
+        fi
+
+    - name: Extract release notes
+      id: release_notes
+      run: |
+        VERSION="${GITHUB_REF_NAME#v}"
+        NOTES="$(awk -v version="$VERSION" '
+          $0 ~ "^## " version "([[:space:]]|$)" { in_section=1; next }
+          in_section && /^## / { exit }
+          in_section { print }
+        ' CHANGELOG.md)"
+        if [[ -z "${NOTES//[[:space:]]/}" ]]; then
+          echo "CHANGELOG.md entry for $VERSION is empty." >&2
+          exit 1
+        fi
+        {
+          echo "body<<MACMTP_RELEASE_NOTES"
+          printf '%s\n' "$NOTES"
+          echo "MACMTP_RELEASE_NOTES"
+        } >> "$GITHUB_OUTPUT"
 
     - name: Release
       uses: softprops/action-gh-release@v2
@@ -60,5 +116,7 @@ jobs:
           release/latest-mac.yml
         draft: false
         prerelease: false
+        generate_release_notes: false
+        body: ${{ steps.release_notes.outputs.body }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

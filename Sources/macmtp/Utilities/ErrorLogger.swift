@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import Sentry
 
 public enum ErrorReportingStatus: Equatable {
@@ -27,6 +28,7 @@ public enum TestReportResult: Equatable, Sendable {
 
 public struct ErrorLogger {
     private static let lifecycleLock = NSLock()
+    private static let systemLogger = Logger(subsystem: "com.macmtp.app", category: "errors")
 
     private static var dsn: String {
         ProcessInfo.processInfo.environment["SENTRY_DSN"]
@@ -55,24 +57,16 @@ public struct ErrorLogger {
     }
 
     public static func log(_ error: Error, message: String? = nil, userInfo: [String: Any]? = nil) {
-        guard ensureStarted() else { return }
-
-        if let kalamError = error as? KalamError {
-            switch kalamError {
-            case .deviceNotConnected:
-                return
-            case .operationFailed(let msg) where msg.localizedCaseInsensitiveContains("no MTP devices found"):
-                return
-            default:
-                break
-            }
-        }
-
         let originalError = error as NSError
         let reportDescription = [message, error.localizedDescription]
             .compactMap { $0 }
             .map(sanitize)
             .joined(separator: ": ")
+        systemLogger.error("\(reportDescription, privacy: .private)")
+
+        guard ensureStarted() else { return }
+        guard shouldReport(error) else { return }
+
         let reportError = NSError(
             domain: originalError.domain,
             code: originalError.code,
@@ -84,6 +78,12 @@ public struct ErrorLogger {
             scope.setTag(value: originalError.domain, key: "error_domain")
             if let kalamError = error as? KalamError {
                 scope.setTag(value: kalamError.reportingCase, key: "kalam_error_case")
+                if case .nativeOperationFailed(let operation, let errorType, _) = kalamError {
+                    scope.setTag(value: operation, key: "mtp_operation")
+                    if let errorType, !errorType.isEmpty {
+                        scope.setTag(value: errorType, key: "native_error_type")
+                    }
+                }
             }
             sanitizedExtras(userInfo).forEach { key, value in
                 scope.setExtra(value: value, key: key)
@@ -92,6 +92,7 @@ public struct ErrorLogger {
     }
 
     public static func logMessage(_ message: String, level: SentryLevel = .error, userInfo: [String: Any]? = nil) {
+        systemLogger.log(level: level == .warning ? .default : .error, "\(sanitize(message), privacy: .private)")
         guard ensureStarted() else { return }
 
         let event = Event(level: level)
@@ -162,6 +163,32 @@ public struct ErrorLogger {
         }
     }
 
+    static func shouldReport(_ error: Error) -> Bool {
+        guard let kalamError = error as? KalamError else { return true }
+
+        switch kalamError {
+        case .deviceNotConnected:
+            return false
+        case .operationFailed(let message)
+            where message.localizedCaseInsensitiveContains("no MTP devices found"):
+            return false
+        case .nativeOperationFailed(_, let errorType, let message):
+            let normalized = "\(errorType ?? "") \(message)".lowercased()
+            return !normalized.contains("no mtp devices found")
+                && !normalized.contains("errormtpdetectfailed")
+        default:
+            return true
+        }
+    }
+
+    static func withAppHangTrackingPaused<T>(_ operation: () throws -> T) rethrows -> T {
+        guard SentrySDK.isEnabled else { return try operation() }
+
+        SentrySDK.pauseAppHangTracking()
+        defer { SentrySDK.resumeAppHangTracking() }
+        return try operation()
+    }
+
     private static func ensureStarted() -> Bool {
         guard reportsEnabled, isValidDSN(dsn) else { return false }
 
@@ -175,6 +202,7 @@ public struct ErrorLogger {
                 options.sendDefaultPii = false
                 options.releaseName = AppVersion.sentryRelease
                 options.environment = "production"
+                options.appHangTimeoutInterval = 5.0
             }
         }
         return SentrySDK.isEnabled
@@ -229,6 +257,7 @@ private extension KalamError {
         case .deviceNotConnected: "device_not_connected"
         case .transferFailed: "transfer_failed"
         case .operationFailed: "operation_failed"
+        case .nativeOperationFailed: "native_operation_failed"
         case .invalidResponse: "invalid_response"
         case .serializationError: "serialization_error"
         case .operationInProgress: "operation_in_progress"

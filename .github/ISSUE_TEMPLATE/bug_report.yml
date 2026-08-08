@@ -1,0 +1,64 @@
+name: Bug report
+description: Report a reproducible macMTP problem.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please remove private filenames, paths, Sentry credentials, and device data before posting logs.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the visible failure and the operation you were performing.
+      placeholder: Opening a folder showed "Error Loading Directory" and Retry did not recover it.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Give the shortest reliable sequence. Include whether the device was unlocked and set to File Transfer.
+      placeholder: |
+        1. Connect the device.
+        2. Open the device storage.
+        3. Open the folder named ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+      description: What should have happened, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include macMTP version, macOS version, Mac architecture, Android model/version, and USB mode.
+      placeholder: |
+        macMTP: 1.6.7
+        macOS: 15.x
+        Mac: Apple Silicon / Intel
+        Device: model, Android version
+        USB mode: File Transfer (MTP)
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Follow SUPPORT.md and paste only relevant com.macmtp.app lines. Redact private paths.
+      render: text
+    validations:
+      required: false
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Screenshots, whether Retry helped, and whether the problem happens after disconnect/reconnect.
+    validations:
+      required: false

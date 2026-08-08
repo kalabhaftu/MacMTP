@@ -5,6 +5,12 @@ public struct GoErrorResponse: Decodable, Sendable {
     public let errorType: String?
 }
 
+public struct GoTransferCompletionResponse: Decodable, Sendable {
+    public let error: String?
+    public let errorType: String?
+    public let data: Bool?
+}
+
 public struct GoMtpDeviceInfo: Decodable, Sendable {
     public let Manufacturer: String
     public let Model: String

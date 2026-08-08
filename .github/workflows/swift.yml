@@ -1,4 +1,4 @@
-name: Swift
+name: CI
 
 on:
   push:
@@ -8,7 +8,15 @@ on:
 
 jobs:
   build:
+    name: Test and package macMTP
     runs-on: macos-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    concurrency:
+      group: macmtp-ci-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
 
     env:
       MACMTP_ARM64_LIBUSB_PKGCONFIG: /opt/homebrew/opt/libusb/lib/pkgconfig
@@ -41,20 +49,23 @@ jobs:
         fi
         arch -x86_64 /usr/local/bin/brew install pkg-config libusb
 
-    - name: Build project app
-      run: bash scripts/build.sh debug --arch "$(uname -m)"
+    - name: Validate scripts
+      run: |
+        bash -n scripts/*.sh
+        git diff --check
 
-    - name: Build Swift package
-      run: swift build -v
-
-    - name: Build arm64 release
-      run: bash scripts/build.sh release --arch arm64
-
-    - name: Build x86_64 release
-      run: bash scripts/build.sh release --arch x86_64
-
-    - name: Build universal release
-      run: bash scripts/build.sh release --universal
+    - name: Build and verify host release
+      run: |
+        ARCH="$(uname -m)"
+        bash scripts/build.sh release --arch "$ARCH"
+        scripts/verify-app.sh macMTP.app "$ARCH"
 
     - name: Run tests
       run: swift test -v
+
+    - name: Upload verified app bundle
+      uses: actions/upload-artifact@v4
+      with:
+        name: macMTP-${{ runner.arch }}-app
+        path: macMTP.app
+        if-no-files-found: error

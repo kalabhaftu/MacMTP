@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/kalabhaftu/MacMTP/security/advisories/new
+    about: Report security issues privately instead of opening a public issue.
+  - name: Support and troubleshooting
+    url: https://github.com/kalabhaftu/MacMTP/blob/main/SUPPORT.md
+    about: Capture the device details and unified logs needed to diagnose MTP failures.

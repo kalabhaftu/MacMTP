@@ -8,6 +8,8 @@
     <string>macMTP</string>
     <key>CFBundleIdentifier</key>
     <string>com.macmtp.app</string>
+    <key>CFBundleDisplayName</key>
+    <string>macMTP</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleIconFile</key>
@@ -22,6 +24,12 @@
     <string>13</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.utilities</string>
+    <key>CFBundleSupportedPlatforms</key>
+    <array>
+        <string>MacOSX</string>
+    </array>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSHumanReadableCopyright</key>

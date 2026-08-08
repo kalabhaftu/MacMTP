@@ -330,9 +330,19 @@ echo -n "APPL????" > "$APP_BUNDLE/Contents/PkgInfo"
 
 echo ""
 echo "Step 4: Code sign"
-codesign -s - --force "$APP_BUNDLE/Contents/MacOS/libusb.dylib"
-codesign -s - --force --deep "$APP_BUNDLE"
-codesign --verify --verbose "$APP_BUNDLE" >/dev/null 2>&1 || true
+if command -v xattr >/dev/null 2>&1; then
+    xattr -cr "$APP_BUNDLE"
+fi
+
+SIGNING_IDENTITY="${MACMTP_SIGNING_IDENTITY:--}"
+SIGNING_OPTIONS=(--force)
+if [[ "$SIGNING_IDENTITY" != "-" ]]; then
+    SIGNING_OPTIONS+=(--options runtime --timestamp)
+fi
+
+codesign "${SIGNING_OPTIONS[@]}" --sign "$SIGNING_IDENTITY" "$APP_BUNDLE/Contents/MacOS/libusb.dylib"
+codesign "${SIGNING_OPTIONS[@]}" --sign "$SIGNING_IDENTITY" --deep "$APP_BUNDLE"
+codesign --verify --deep --strict --verbose "$APP_BUNDLE"
 
 echo ""
 echo "Build complete: $APP_BUNDLE"

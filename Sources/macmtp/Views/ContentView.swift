@@ -129,6 +129,9 @@ struct ContentView: View {
                     },
                     onResume: {
                         FileTransferService.shared.resumeTransfer()
+                    },
+                    onDismiss: {
+                        showTransferProgress = false
                     }
                 )
                 .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -571,16 +574,20 @@ struct ContentView: View {
             }
         } else {
             let direction: TransferDirection = isDestLocal ? .mtpToLocal : .localToMTP
-            let storageId = MTPDeviceManager.shared.selectedStorageId ?? 0
+            guard let storageId = validSelectedMTPStorageID() else { return }
             let sources = ClipboardManager.shared.items
-            FileTransferService.shared.initiateTransfer(
+            let transferAccepted = FileTransferService.shared.initiateTransfer(
                 sources: sources,
                 destinationDir: destinationPath,
                 direction: direction,
                 storageId: storageId,
                 isCut: ClipboardManager.shared.isCutOperation
             )
-            ClipboardManager.shared.clear()
+            if transferAccepted {
+                ClipboardManager.shared.clear()
+            } else if FileTransferService.shared.activeBatch != nil {
+                showTransferProgress = true
+            }
         }
     }
 
@@ -758,25 +765,37 @@ struct ContentView: View {
                 }
             }
             if !mtpSources.isEmpty {
+                guard let storageId = validSelectedMTPStorageID() else { return }
                 let nodes = mtpSources.map { FileNode(name: $0.name, path: $0.path, isDirectory: $0.isDirectory, size: 0, modificationDate: Date()) }
                 FileTransferService.shared.initiateTransfer(
                     sources: nodes,
                     destinationDir: destination,
                     direction: .mtpToLocal,
-                    storageId: MTPDeviceManager.shared.selectedStorageId ?? 0
+                    storageId: storageId
                 )
             }
         } else {
             if !localSources.isEmpty {
+                guard let storageId = validSelectedMTPStorageID() else { return }
                 let nodes = localSources.map { FileNode(name: $0.name, path: $0.path, isDirectory: $0.isDirectory, size: 0, modificationDate: Date()) }
                 FileTransferService.shared.initiateTransfer(
                     sources: nodes,
                     destinationDir: destination,
                     direction: .localToMTP,
-                    storageId: MTPDeviceManager.shared.selectedStorageId ?? 0
+                    storageId: storageId
                 )
             }
         }
+    }
+
+    private func validSelectedMTPStorageID() -> UInt32? {
+        guard MTPDeviceManager.shared.isConnected,
+              let storageId = MTPDeviceManager.shared.selectedStorageId,
+              storageId != 0 else {
+            operationErrorMessage = "Connect your Android device and select a storage before starting a transfer."
+            return nil
+        }
+        return storageId
     }
 
 
@@ -841,10 +860,14 @@ struct ContentView: View {
             pendingDeletePaths.removeAll()
             handleRefresh()
         } else {
+            guard let storageId = validSelectedMTPStorageID() else {
+                pendingDeletePaths.removeAll()
+                return
+            }
             Task {
                 do {
                     try await KalamBridge.shared.deleteFiles(
-                        storageId: MTPDeviceManager.shared.selectedStorageId ?? 0,
+                        storageId: storageId,
                         paths: paths
                     )
                     await MainActor.run {

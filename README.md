@@ -126,7 +126,7 @@ This is size-based conflict handling. It is useful for skipping already-copied f
 
 ### Error Reporting
 
-- Crash and error reporting is opt-in and can be disabled at any time in Preferences.
+- Anonymous crash and error reporting is enabled by default and can be disabled at any time in Preferences.
 - Reports exclude default personal information; macMTP also redacts local paths and does not attach device identifiers to MTP directory errors.
 
 ### Drag and Drop
@@ -227,7 +227,7 @@ Create DMG and ZIP packages for all supported targets:
 bash scripts/release.sh 1.6.2 --all
 ```
 
-Release builds require `SENTRY_DSN`, `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, and `SENTRY_PROJECT`. The auth token is used only by `sentry-cli` during packaging and is never embedded in the app. This generates architecture-specific DMG, app ZIP, and dSYM ZIP files plus SHA-256 checksums and `latest-mac.yml`:
+Release builds require `SENTRY_DSN`, `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, and `SENTRY_PROJECT`. The auth token is used only by `sentry-cli` during packaging and is never embedded in the app. `MACMTP_SIGNING_IDENTITY` is optional: without an Apple Developer ID, local and CI builds use ad-hoc signing; with a configured identity, the same scripts can produce a hardened-runtime signed bundle. Apple notarization is not claimed or attempted without Apple credentials. Packaging verifies the bundle, architecture, bundled `libusb`, embedded DSN, and generated checksums before completing. This generates architecture-specific DMG, app ZIP, and dSYM ZIP files plus SHA-256 checksums and `latest-mac.yml`:
 
 ```text
 release/
@@ -287,10 +287,19 @@ macmtp/
 │       ├── Utilities/
 │       └── Views/
 ├── Resources/
+├── Tests/
+│   └── macmtpTests/
 ├── scripts/
 │   ├── build.sh
-│   └── release.sh
-└── .github/workflows/
+│   ├── release.sh
+│   └── verify-app.sh
+├── .github/
+│   ├── ISSUE_TEMPLATE/
+│   ├── workflows/
+│   └── dependabot.yml
+├── CONTRIBUTING.md
+├── SUPPORT.md
+└── CHANGELOG.md
 ```
 
 ---
@@ -298,6 +307,8 @@ macmtp/
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, code style, PR process, and areas to work on.
+
+For reproducible device-transfer troubleshooting, see [SUPPORT.md](SUPPORT.md).
 
 This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md). Report security issues via [SECURITY.md](SECURITY.md).
 

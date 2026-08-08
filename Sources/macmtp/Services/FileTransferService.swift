@@ -76,16 +76,34 @@ public final class FileTransferService: ObservableObject {
     }
     
     
+    @discardableResult
     public func initiateTransfer(
         sources: [FileNode],
         destinationDir: String,
         direction: TransferDirection,
         storageId: UInt32? = nil,
         isCut: Bool = false
-    ) {
+    ) -> Bool {
         guard !transferInFlight else {
-            ErrorLogger.logMessage("Ignored transfer request while another transfer is active.")
-            return
+            ErrorLogger.logMessage(
+                "Rejected transfer request while another transfer is active.",
+                level: .warning,
+                userInfo: ["has_active_batch": activeBatch != nil]
+            )
+            return false
+        }
+        if direction == .localToMTP || direction == .mtpToLocal {
+            guard let storageId, storageId != 0 else {
+                ErrorLogger.logMessage(
+                    "Rejected MTP transfer because no valid storage is selected.",
+                    level: .warning
+                )
+                return false
+            }
+        }
+
+        guard !sources.isEmpty else {
+            return false
         }
 
         self.isCutOperation = isCut
@@ -112,6 +130,7 @@ public final class FileTransferService: ObservableObject {
                 cutSourcePaths = []
             }
         }
+        return true
     }
     
     
@@ -157,16 +176,14 @@ public final class FileTransferService: ObservableObject {
         showConflictDialog = false
         conflictingFiles = []
         totalFileCount = 0
-    if let oldContinuation = conflictContinuation {
+        if let oldContinuation = conflictContinuation {
             conflictContinuation = nil
             oldContinuation.resume(returning: (.cancel, true))
         }
         
-        if (direction == .localToMTP || direction == .mtpToLocal) && storageId == nil {
-            throw NSError(domain: "FileTransferService", code: 1, userInfo: [NSLocalizedDescriptionKey: "Storage ID is required for MTP transfers"])
+        guard let mStorageId = storageId, mStorageId != 0 else {
+            throw KalamError.deviceNotConnected
         }
-        
-        let mStorageId = storageId ?? 0
         
         let expandedItems = try await expandSources(sources: sources, direction: direction, storageId: mStorageId)
         
@@ -300,9 +317,13 @@ public final class FileTransferService: ObservableObject {
             groups[destParent, default: []].append(index)
         }
         
-        let chunkSize = 50
+        // Keep native calls to one file so pause, cancellation, and failures are
+        // observed at the next file boundary instead of after a large batch.
+        let chunkSize = 1
         
-        for destParent in groupOrder {
+        var terminalTransferError: Error?
+
+        queueLoop: for destParent in groupOrder {
             guard let indices = groups[destParent] else { continue }
             if cancelRequested { break }
             
@@ -347,10 +368,12 @@ public final class FileTransferService: ObservableObject {
                             onPreprocess: { _ in },
                             onProgress: { [weak self] progressInfo in
                                 guard let self = self else { return }
+                                guard let index = chunkIndices.first else { return }
                                 let sent = progressInfo.activeFileSize.sent
+                                let total = progressInfo.activeFileSize.total
                                 let speedMB = progressInfo.speed
                                 Task { @MainActor in
-                                    self.updateActiveItemProgress(sourcePath: progressInfo.fullPath, sent: sent, speedMB: speedMB)
+                                    self.updateActiveItemProgress(index: index, sent: sent, total: total, speedMB: speedMB)
                                 }
                             }
                         )
@@ -362,10 +385,12 @@ public final class FileTransferService: ObservableObject {
                             onPreprocess: { _ in },
                             onProgress: { [weak self] progressInfo in
                                 guard let self = self else { return }
+                                guard let index = chunkIndices.first else { return }
                                 let sent = progressInfo.activeFileSize.sent
+                                let total = progressInfo.activeFileSize.total
                                 let speedMB = progressInfo.speed
                                 Task { @MainActor in
-                                    self.updateActiveItemProgress(sourcePath: progressInfo.fullPath, sent: sent, speedMB: speedMB)
+                                    self.updateActiveItemProgress(index: index, sent: sent, total: total, speedMB: speedMB)
                                 }
                             }
                         )
@@ -388,8 +413,24 @@ public final class FileTransferService: ObservableObject {
                             batch.items[idx] = itm
                         }
                     }
+                    if isMTPTransportFailure(error) {
+                        terminalTransferError = error
+                        break queueLoop
+                    }
                 }
             }
+        }
+
+        if let terminalTransferError {
+            let message = formatTransferError(terminalTransferError)
+            for index in batch.items.indices where !batch.items[index].status.isTerminal {
+                var item = batch.items[index]
+                item.markFailed(message)
+                batch.items[index] = item
+            }
+            MTPDeviceManager.shared.invalidateConnection(
+                message: "The MTP connection stopped responding. Reconnect your Android device and try again."
+            )
         }
         
         if cancelRequested {
@@ -466,17 +507,21 @@ public final class FileTransferService: ObservableObject {
     }
     
     
-    private func updateActiveItemProgress(sourcePath: String, sent: Int64, speedMB: Double) {
-        guard let batch = activeBatch,
-              let index = batch.items.firstIndex(where: { $0.sourcePath == sourcePath }) else { return }
+    private func updateActiveItemProgress(index: Int, sent: Int64, total: Int64, speedMB: Double) {
+        guard let batch = activeBatch, batch.items.indices.contains(index) else { return }
         
         batch.currentItemIndex = index
         var item = batch.items[index]
-        item.bytesTransferred = min(sent, item.fileSize)
-        item.speed = speedMB * 1024 * 1024
-        
+        if total > 0 {
+            item.fileSize = total
+        }
+        let boundedSent = max(0, min(sent, item.fileSize))
+        item.bytesTransferred = min(item.fileSize, max(item.bytesTransferred, boundedSent))
+        // go-mtpx exposes decimal MB/s; the model stores bytes/s.
+        item.speed = speedMB.isFinite ? max(0, speedMB * 1_000_000) : 0
+
         if item.speed > 0 {
-            let remainingBytes = Double(item.fileSize - item.bytesTransferred)
+            let remainingBytes = Double(max(0, item.fileSize - item.bytesTransferred))
             item.estimatedTimeRemaining = remainingBytes / item.speed
         }
         
@@ -738,4 +783,5 @@ public final class FileTransferService: ObservableObject {
         }
         return error.localizedDescription
     }
+
 }

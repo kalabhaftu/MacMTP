@@ -29,7 +29,6 @@ import (
 	"time"
 )
 
-
 func SendError(err error) {
 	errorType, errorMsg := processError(err)
 
@@ -42,6 +41,12 @@ func SendError(err error) {
 	json := toJson(o)
 
 	C.call_done(C.CString(json))
+}
+
+func SendTransferError(err error) {
+	errorType, errorMsg := processError(err)
+	o := ErrorResult{ErrorType: errorType, Error: errorMsg, Data: nil}
+	C.call_transfer_done(C.CString(toJson(o)))
 }
 
 func SendInitialize(deviceInfo *mtp.DeviceInfo, usbDesc *mtp.UsbDeviceInfo) {

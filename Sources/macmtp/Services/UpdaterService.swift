@@ -271,7 +271,9 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
                 }
             }
         } else {
-            let response = alert.runModal()
+            let response = ErrorLogger.withAppHangTrackingPaused {
+                alert.runModal()
+            }
             if response == .alertFirstButtonReturn {
                 NSWorkspace.shared.open(url)
             }
@@ -288,7 +290,9 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
         if let parentWindow = NSApp.keyWindow ?? NSApp.mainWindow {
             alert.beginSheetModal(for: parentWindow)
         } else {
-            alert.runModal()
+            _ = ErrorLogger.withAppHangTrackingPaused {
+                alert.runModal()
+            }
         }
     }
 

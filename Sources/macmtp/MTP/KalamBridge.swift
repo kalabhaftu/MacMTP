@@ -10,6 +10,7 @@ public enum KalamError: Error, LocalizedError {
     case operationInProgress
     case timedOut(String)
     case invalidPath(String)
+    case nativeOperationFailed(operation: String, errorType: String?, message: String)
 
     public var errorDescription: String? {
         switch self {
@@ -29,8 +30,104 @@ public enum KalamError: Error, LocalizedError {
             return "MTP operation timed out: \(msg)"
         case .invalidPath(let msg):
             return "Invalid path: \(msg)"
+        case .nativeOperationFailed(let operation, let errorType, let message):
+            let detail = message.isEmpty ? "The MTP subsystem returned no error details." : message
+            if let errorType, !errorType.isEmpty {
+                return "MTP \(operation) failed (\(errorType)): \(detail)"
+            }
+            return "MTP \(operation) failed: \(detail)"
         }
     }
+}
+
+func isMTPTransportFailure(_ error: Error) -> Bool {
+    guard let kalamError = error as? KalamError else { return false }
+
+    switch kalamError {
+    case .deviceNotConnected, .timedOut:
+        return true
+    case .transferFailed(let message), .operationFailed(let message):
+        let normalized = message.lowercased()
+        return normalized.contains("transaction id mismatch")
+            || normalized.contains("libusb")
+            || normalized.contains("device is not open")
+            || normalized.contains("no mtp device")
+            || normalized.contains("errormtpdetectfailed")
+            || normalized.contains("timed out")
+            || normalized.contains("broken pipe")
+            || normalized.contains("device disconnected")
+    case .nativeOperationFailed(_, let errorType, let message):
+        let normalized = "\(errorType ?? "") \(message)".lowercased()
+        return normalized.contains("transaction id mismatch")
+            || normalized.contains("libusb")
+            || normalized.contains("device is not open")
+            || normalized.contains("no mtp device")
+            || normalized.contains("errormtpdetectfailed")
+            || normalized.contains("timed out")
+            || normalized.contains("broken pipe")
+            || normalized.contains("device disconnected")
+    default:
+        return false
+    }
+}
+
+func shouldRetryMTPDirectory(_ error: Error) -> Bool {
+    guard let kalamError = error as? KalamError else { return false }
+
+    switch kalamError {
+    case .nativeOperationFailed(_, let errorType, let message):
+        let normalized = "\(errorType ?? "") \(message)".lowercased()
+        return normalized.contains("errorlistdirectory")
+            || normalized.contains("device is not open")
+            || normalized.contains("busy")
+            || normalized.contains("lock")
+    case .operationFailed(let message):
+        let normalized = message.lowercased()
+        return normalized.contains("list directory")
+            || normalized.contains("device is not open")
+            || normalized.contains("busy")
+            || normalized.contains("lock")
+    default:
+        return false
+    }
+}
+
+private func nativeOperationError(
+    operation: String,
+    errorType: String?,
+    message: String?,
+    fallback: String
+) -> KalamError {
+    let detail = message?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return .nativeOperationFailed(
+        operation: operation,
+        errorType: errorType?.trimmingCharacters(in: .whitespacesAndNewlines),
+        message: detail.isEmpty ? fallback : detail
+    )
+}
+
+func decodeMTPTransferCompletion(_ json: String) -> Result<Void, Error> {
+    guard let data = json.data(using: .utf8),
+          let response = try? JSONDecoder().decode(GoTransferCompletionResponse.self, from: data) else {
+        return .failure(KalamError.invalidResponse)
+    }
+    if let message = response.error, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        return .failure(nativeOperationError(
+            operation: "transfer",
+            errorType: response.errorType,
+            message: message,
+            fallback: "The transfer failed."
+        ))
+    }
+    if response.errorType?.isEmpty == false || response.data != true {
+        return .failure(nativeOperationError(
+            operation: "transfer",
+            errorType: response.errorType,
+            message: response.error,
+            fallback: "The transfer returned an incomplete completion response."
+        ))
+    }
+    return .success(())
 }
 
 
@@ -81,8 +178,16 @@ private final class KalamRegistry: @unchecked Sendable {
         lock.lock()
         let continuation = doneContinuation
         doneContinuation = nil
+        let transferCallback = continuation == nil ? transferDoneCallback : nil
         lock.unlock()
-        continuation?.resume(returning: json)
+        if let continuation {
+            continuation.resume(returning: json)
+        } else {
+            // Existing Kalam builds report transfer failures through the command
+            // callback. Route that payload to the active transfer instead of
+            // dropping it and leaving the transfer continuation wedged.
+            transferCallback?(json)
+        }
     }
 
     func rejectDone(with error: Error) {
@@ -135,7 +240,6 @@ private final class KalamRegistry: @unchecked Sendable {
     }
 }
 
-
 private let bounceQueue = DispatchQueue(label: "com.macmtp.callback-bounce", qos: .userInitiated)
 
 @_cdecl("macMTP_done_callback")
@@ -186,9 +290,6 @@ public actor KalamBridge {
     private let mtpQueue: DispatchQueue
     private var operationInFlight = false
 
-    private let commandTimeoutNanoseconds: UInt64 = 30_000_000_000
-    private let transferTimeoutNanoseconds: UInt64 = 86_400_000_000_000
-
     private init() {
         self.jsonDecoder = JSONDecoder()
         self.mtpQueue = DispatchQueue(label: "com.macmtp.kalam", qos: .userInitiated)
@@ -205,54 +306,29 @@ public actor KalamBridge {
         operationInFlight = false
     }
 
-    private func waitForDone(
-        timeoutNanoseconds: UInt64,
-        timeoutMessage: String,
-        startOperation: @escaping @Sendable () -> Void
-    ) async throws -> String {
-        let waiter = Task<String, Error> {
-            try await withTaskCancellationHandler {
-                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
-                    if Task.isCancelled {
-                        continuation.resume(throwing: CancellationError())
-                    } else {
-                        KalamRegistry.shared.setDoneContinuation(continuation)
-                        startOperation()
-                    }
-                }
-            } onCancel: {
-                KalamRegistry.shared.rejectDone(with: CancellationError())
-            }
+    private func waitForDone(startOperation: @escaping @Sendable () -> Void) async throws -> String {
+        try await withCheckedThrowingContinuation { continuation in
+            KalamRegistry.shared.setDoneContinuation(continuation)
+            startOperation()
         }
-
-        let timeoutTask = Task {
-            try? await Task.sleep(nanoseconds: timeoutNanoseconds)
-            guard !Task.isCancelled else { return }
-            KalamRegistry.shared.rejectDone(with: KalamError.timedOut(timeoutMessage))
-        }
-
-        defer {
-            timeoutTask.cancel()
-            waiter.cancel()
-        }
-
-        return try await waiter.value
     }
 
 
-    internal func executeMTP<T: Decodable>(_ operation: @escaping @Sendable () -> Void) async throws -> T {
+    internal func executeMTP<T: Decodable>(
+        operationName: String,
+        _ operation: @escaping @Sendable () -> Void
+    ) async throws -> T {
         try beginOperation()
         defer { endOperation() }
 
-        let jsonString = try await waitForDone(
-            timeoutNanoseconds: commandTimeoutNanoseconds,
-            timeoutMessage: "The MTP command did not respond.",
-            startOperation: { self.mtpQueue.async { operation() } }
-        )
-        return try decodeResponse(jsonString)
+        let jsonString = try await waitForDone {
+            self.mtpQueue.async { operation() }
+        }
+        return try decodeResponse(jsonString, operation: operationName)
     }
 
     internal func executeMTPWithInput<T: Decodable, I: Encodable>(
+        operationName: String,
         _ input: I,
         _ operation: @escaping @Sendable (UnsafeMutablePointer<CChar>?) -> Void
     ) async throws -> T {
@@ -264,51 +340,68 @@ public actor KalamBridge {
         try beginOperation()
         defer { endOperation() }
 
-        let jsonString = try await waitForDone(
-            timeoutNanoseconds: commandTimeoutNanoseconds,
-            timeoutMessage: "The MTP command did not respond.",
-            startOperation: {
-                self.mtpQueue.async {
-                    var cInput = inputJson.utf8CString
-                    cInput.withUnsafeMutableBufferPointer { buffer in
-                        operation(buffer.baseAddress)
-                    }
+        let jsonString = try await waitForDone {
+            self.mtpQueue.async {
+                var cInput = inputJson.utf8CString
+                cInput.withUnsafeMutableBufferPointer { buffer in
+                    operation(buffer.baseAddress)
                 }
             }
-        )
-        return try decodeResponse(jsonString)
+        }
+        return try decodeResponse(jsonString, operation: operationName)
     }
 
-    private func decodeResponse<T: Decodable>(_ json: String) throws -> T {
+    private func decodeResponse<T: Decodable>(_ json: String, operation: String) throws -> T {
         if let errResp = try? jsonDecoder.decode(GoErrorResponse.self, from: json.data(using: .utf8) ?? Data()),
-           let errMsg = errResp.error, !errMsg.isEmpty {
-            throw KalamError.operationFailed(errMsg)
+           (errResp.error?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            || errResp.errorType?.isEmpty == false) {
+            throw nativeOperationError(
+                operation: operation,
+                errorType: errResp.errorType,
+                message: errResp.error,
+                fallback: "The MTP subsystem returned an error without details."
+            )
         }
 
         do {
             return try jsonDecoder.decode(T.self, from: json.data(using: .utf8) ?? Data())
         } catch {
-            throw KalamError.invalidResponse
+            throw nativeOperationError(
+                operation: operation,
+                errorType: nil,
+                message: nil,
+                fallback: "The MTP subsystem returned an invalid response."
+            )
         }
     }
 
 
     public func initialize() async throws -> GoDeviceInfoData {
-        let result: GoDeviceInfoResult = try await executeMTP {
+        let result: GoDeviceInfoResult = try await executeMTP(operationName: "initialize") {
             Initialize()
         }
         guard let data = result.data else {
-            throw KalamError.operationFailed(result.error ?? "Failed to initialize device")
+            throw nativeOperationError(
+                operation: "initialize",
+                errorType: result.errorType,
+                message: result.error,
+                fallback: "The initialize response did not include device data."
+            )
         }
         return data
     }
 
     public func fetchStorages() async throws -> [GoStorageData] {
-        let result: GoStoragesResult = try await executeMTP {
+        let result: GoStoragesResult = try await executeMTP(operationName: "fetch_storages") {
             FetchStorages()
         }
         guard let data = result.data else {
-            throw KalamError.operationFailed(result.error ?? "Failed to fetch storages")
+            throw nativeOperationError(
+                operation: "fetch_storages",
+                errorType: result.errorType,
+                message: result.error,
+                fallback: "The storage response did not include storage data."
+            )
         }
         return data
     }
@@ -335,11 +428,16 @@ public actor KalamBridge {
             skipHiddenFiles: skipHidden
         )
 
-        let result: GoWalkResult = try await executeMTPWithInput(input) { inputJson in
+        let result: GoWalkResult = try await executeMTPWithInput(operationName: "list_directory", input) { inputJson in
             Walk(inputJson)
         }
         guard let data = result.data else {
-            throw KalamError.operationFailed(result.error ?? "Failed to walk directory")
+            throw nativeOperationError(
+                operation: "list_directory",
+                errorType: result.errorType,
+                message: result.error,
+                fallback: "The directory response did not include file data."
+            )
         }
         return data
     }
@@ -351,7 +449,7 @@ public actor KalamBridge {
         }
 
         let input = MakeDirectoryInput(storageId: storageId, fullPath: path)
-        let result: GoSimpleResult = try await executeMTPWithInput(input) { inputJson in
+        let result: GoSimpleResult = try await executeMTPWithInput(operationName: "make_directory", input) { inputJson in
             MakeDirectory(inputJson)
         }
         if let err = result.error, !err.isEmpty {
@@ -366,7 +464,7 @@ public actor KalamBridge {
         }
 
         let input = DeleteFileInput(storageId: storageId, Files: paths)
-        let result: GoSimpleResult = try await executeMTPWithInput(input) { inputJson in
+        let result: GoSimpleResult = try await executeMTPWithInput(operationName: "delete_files", input) { inputJson in
             DeleteFile(inputJson)
         }
         if let err = result.error, !err.isEmpty {
@@ -382,7 +480,7 @@ public actor KalamBridge {
         }
 
         let input = RenameFileInput(storageId: storageId, fullPath: path, newFileName: newName)
-        let result: GoSimpleResult = try await executeMTPWithInput(input) { inputJson in
+        let result: GoSimpleResult = try await executeMTPWithInput(operationName: "rename_file", input) { inputJson in
             RenameFile(inputJson)
         }
         if let err = result.error, !err.isEmpty {
@@ -397,18 +495,36 @@ public actor KalamBridge {
         }
 
         let input = FileExistsInput(storageId: storageId, Files: paths)
-        let result: GoFileExistsResult = try await executeMTPWithInput(input) { inputJson in
+        let result: GoFileExistsResult = try await executeMTPWithInput(operationName: "check_files_exist", input) { inputJson in
             FileExists(inputJson)
         }
         guard let data = result.data else {
-            throw KalamError.operationFailed(result.error ?? "Failed to check file existence")
+            throw nativeOperationError(
+                operation: "check_files_exist",
+                errorType: result.errorType,
+                message: result.error,
+                fallback: "The file-existence response did not include file data."
+            )
+        }
+        guard data.count == paths.count else {
+            throw nativeOperationError(
+                operation: "check_files_exist",
+                errorType: nil,
+                message: "Expected \(paths.count) results but received \(data.count).",
+                fallback: "The file-existence response was incomplete."
+            )
         }
 
         var resultMap = [String: Bool]()
         for entry in data {
             resultMap[entry.fullpath] = entry.exists
         }
-        return paths.map { resultMap[$0] ?? false }
+        return try paths.map { path in
+            guard let exists = resultMap[path] else {
+                throw KalamError.invalidResponse
+            }
+            return exists
+        }
     }
 
     public func uploadFiles(
@@ -429,7 +545,7 @@ public actor KalamBridge {
             storageId: storageId,
             sources: sources,
             destination: destination,
-            preprocessFiles: true
+            preprocessFiles: false
         )
 
         let inputData = try JSONEncoder().encode(input)
@@ -440,11 +556,9 @@ public actor KalamBridge {
         try beginOperation()
         defer { endOperation() }
 
-        let waiter = Task<Void, Error> {
-            try await withTaskCancellationHandler {
-                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                    KalamRegistry.shared.setTransferCallbacks(
-                        continuation: continuation,
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            KalamRegistry.shared.setTransferCallbacks(
+                continuation: continuation,
                 preprocess: { json in
                     if let result = try? self.jsonDecoder.decode(GoPreprocessResult.self, from: json.data(using: .utf8) ?? Data()),
                        let data = result.data {
@@ -454,40 +568,21 @@ public actor KalamBridge {
                 progress: { json in
                     if let result = try? self.jsonDecoder.decode(GoProgressResult.self, from: json.data(using: .utf8) ?? Data()),
                        let data = result.data {
-                        onProgress(data)
+                            onProgress(data)
                     }
                 },
                 done: { json in
-                    if let errResp = try? self.jsonDecoder.decode(GoErrorResponse.self, from: json.data(using: .utf8) ?? Data()),
-                       let errMsg = errResp.error, !errMsg.isEmpty {
-                        KalamRegistry.shared.finishTransfer(with: .failure(KalamError.transferFailed(errMsg)))
-                    } else {
-                        KalamRegistry.shared.finishTransfer(with: .success(()))
-                    }
-                })
-
-                    mtpQueue.async {
-                        var cInput = inputJson.utf8CString
-                        cInput.withUnsafeMutableBufferPointer { buffer in
-                            UploadFiles(buffer.baseAddress)
-                        }
-                    }
+                    KalamRegistry.shared.finishTransfer(with: decodeMTPTransferCompletion(json))
                 }
-            } onCancel: {
-                KalamRegistry.shared.finishTransfer(with: .failure(CancellationError()))
+            )
+
+            mtpQueue.async {
+                var cInput = inputJson.utf8CString
+                cInput.withUnsafeMutableBufferPointer { buffer in
+                    UploadFiles(buffer.baseAddress)
+                }
             }
         }
-
-        let timeoutTask = Task {
-            try? await Task.sleep(nanoseconds: transferTimeoutNanoseconds)
-            guard !Task.isCancelled else { return }
-            KalamRegistry.shared.finishTransfer(with: .failure(KalamError.timedOut("The upload did not finish.")))
-        }
-        defer {
-            timeoutTask.cancel()
-            waiter.cancel()
-        }
-        try await waiter.value
     }
 
     public func downloadFiles(
@@ -508,7 +603,7 @@ public actor KalamBridge {
             storageId: storageId,
             sources: sources,
             destination: destination,
-            preprocessFiles: true
+            preprocessFiles: false
         )
 
         let inputData = try JSONEncoder().encode(input)
@@ -519,11 +614,9 @@ public actor KalamBridge {
         try beginOperation()
         defer { endOperation() }
 
-        let waiter = Task<Void, Error> {
-            try await withTaskCancellationHandler {
-                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                    KalamRegistry.shared.setTransferCallbacks(
-                        continuation: continuation,
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            KalamRegistry.shared.setTransferCallbacks(
+                continuation: continuation,
                 preprocess: { json in
                     if let result = try? self.jsonDecoder.decode(GoPreprocessResult.self, from: json.data(using: .utf8) ?? Data()),
                        let data = result.data {
@@ -537,36 +630,17 @@ public actor KalamBridge {
                     }
                 },
                 done: { json in
-                    if let errResp = try? self.jsonDecoder.decode(GoErrorResponse.self, from: json.data(using: .utf8) ?? Data()),
-                       let errMsg = errResp.error, !errMsg.isEmpty {
-                        KalamRegistry.shared.finishTransfer(with: .failure(KalamError.transferFailed(errMsg)))
-                    } else {
-                        KalamRegistry.shared.finishTransfer(with: .success(()))
-                    }
-                })
-
-                    mtpQueue.async {
-                        var cInput = inputJson.utf8CString
-                        cInput.withUnsafeMutableBufferPointer { buffer in
-                            DownloadFiles(buffer.baseAddress)
-                        }
-                    }
+                    KalamRegistry.shared.finishTransfer(with: decodeMTPTransferCompletion(json))
                 }
-            } onCancel: {
-                KalamRegistry.shared.finishTransfer(with: .failure(CancellationError()))
+            )
+
+            mtpQueue.async {
+                var cInput = inputJson.utf8CString
+                cInput.withUnsafeMutableBufferPointer { buffer in
+                    DownloadFiles(buffer.baseAddress)
+                }
             }
         }
-
-        let timeoutTask = Task {
-            try? await Task.sleep(nanoseconds: transferTimeoutNanoseconds)
-            guard !Task.isCancelled else { return }
-            KalamRegistry.shared.finishTransfer(with: .failure(KalamError.timedOut("The download did not finish.")))
-        }
-        defer {
-            timeoutTask.cancel()
-            waiter.cancel()
-        }
-        try await waiter.value
     }
 
     func walk(storageId: UInt32, path: String, recursive: Bool, skipHidden: Bool) async throws -> [GoFileInfo] {
@@ -579,7 +653,7 @@ public actor KalamBridge {
     }
 
     public func dispose() async throws {
-        let _: GoSimpleResult = try await executeMTP {
+        let _: GoSimpleResult = try await executeMTP(operationName: "dispose") {
             Dispose()
         }
     }

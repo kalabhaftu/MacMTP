@@ -14,6 +14,7 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
     private var removedIterator: io_iterator_t = 0
     private var runLoopSource: CFRunLoopSource?
     private var isWatching = false
+    private var autoConnectGeneration: UInt64 = 0
     
     
     private init() {}
@@ -95,6 +96,7 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
     }
 
     private func cleanupWatchingResources() {
+        autoConnectGeneration &+= 1
         
         if let source = runLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes)
@@ -130,9 +132,12 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         if deviceCount > 0, !getConnectedAndroidVendorIDs().isEmpty {
             let autoDetect = UserDefaults.standard.object(forKey: "autoDetectDevice") as? Bool ?? true
             if autoDetect {
+                autoConnectGeneration &+= 1
+                let generation = autoConnectGeneration
                 if !isInitialScan {
                     try? await Task.sleep(nanoseconds: 1_000_000_000)
                 }
+                guard generation == autoConnectGeneration else { return }
                 await MTPDeviceManager.shared.connectDevice()
             }
         }

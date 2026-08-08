@@ -40,7 +40,7 @@ public class TransferBatch: ObservableObject {
 
     public var overallProgress: Double {
         guard totalBytes > 0 else { return 0 }
-        return Double(totalBytesTransferred) / Double(totalBytes)
+        return max(0, min(Double(totalBytesTransferred) / Double(totalBytes), 1.0))
     }
 
     public var currentItem: TransferItem? {
@@ -55,7 +55,7 @@ public class TransferBatch: ObservableObject {
 
     public var estimatedTimeRemaining: TimeInterval? {
         guard bytesPerSecond > 0 else { return nil }
-        let remainingBytes = Double(totalBytes - totalBytesTransferred)
+        let remainingBytes = Double(max(0, totalBytes - totalBytesTransferred))
         return remainingBytes / bytesPerSecond
     }
 
@@ -112,7 +112,7 @@ public class TransferBatch: ObservableObject {
 
     public func updateCurrentItemProgress(bytesTransferred: Int64) {
         guard currentItemIndex < items.count else { return }
-        items[currentItemIndex].bytesTransferred = bytesTransferred
+        items[currentItemIndex].updateProgress(bytesTransferred: bytesTransferred)
         recordSpeedSample(bytesTransferredNow: totalBytesTransferred)
     }
 
@@ -144,6 +144,7 @@ public struct TransferProgressView: View {
     public var onCancel: () -> Void = {}
     public var onPause: () -> Void = {}
     public var onResume: () -> Void = {}
+    public var onDismiss: () -> Void = {}
 
     @State private var isPulsing: Bool = false
 
@@ -258,7 +259,6 @@ public struct TransferProgressView: View {
 
             if batch.isActive || batch.state == .paused {
                 Button(role: .destructive, action: {
-                    batch.cancel()
                     onCancel()
                 }) {
                     Image(systemName: "xmark.circle.fill")
@@ -275,12 +275,14 @@ public struct TransferProgressView: View {
         batch: TransferBatch,
         onCancel: @escaping () -> Void = {},
         onPause: @escaping () -> Void = {},
-        onResume: @escaping () -> Void = {}
+        onResume: @escaping () -> Void = {},
+        onDismiss: @escaping () -> Void = {}
     ) {
         self.batch = batch
         self.onCancel = onCancel
         self.onPause = onPause
         self.onResume = onResume
+        self.onDismiss = onDismiss
     }
 
 
@@ -557,7 +559,6 @@ public struct TransferProgressView: View {
 
             if batch.canPause {
                 Button(action: {
-                    batch.pause()
                     onPause()
                 }) {
                     Label("Pause", systemImage: "pause.fill")
@@ -570,7 +571,6 @@ public struct TransferProgressView: View {
 
             if batch.canResume {
                 Button(action: {
-                    batch.resume()
                     onResume()
                 }) {
                     Label("Resume", systemImage: "play.fill")
@@ -583,7 +583,6 @@ public struct TransferProgressView: View {
 
             if batch.isActive || batch.state == .paused {
                 Button(role: .destructive, action: {
-                    batch.cancel()
                     onCancel()
                 }) {
                     Label("Cancel", systemImage: "xmark.circle.fill")
@@ -595,7 +594,7 @@ public struct TransferProgressView: View {
             }
 
             if batch.state == .completed || batch.state == .cancelled {
-                Button(action: onCancel) {
+                Button(action: onDismiss) {
                     Label("Dismiss", systemImage: "xmark")
                         .font(.subheadline)
                         .fontWeight(.medium)

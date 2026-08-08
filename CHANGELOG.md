@@ -2,7 +2,10 @@
 
 ## Unreleased
 
-- Nothing yet.
+- Fixed duplicate USB auto-connect attempts, blocked transfers without a valid MTP storage, repaired frozen upload progress, preserved clipboard items when a transfer is already active, and routed native transfer failures to the correct callback.
+- Fixed queue pause/resume controls so requests reach the transfer service and take effect at the next file boundary.
+- Prevented expected AppKit modal waits and short launch rendering delays from producing false Sentry app-hang reports.
+- Hardened CI and release packaging with bundle architecture, signature, Sentry, artifact, and changelog validation; added reproducible support-log guidance.
 
 ## 1.6.7 - 2026-07-29
 
