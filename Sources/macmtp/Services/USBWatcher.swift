@@ -123,6 +123,17 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         cleanupWatchingResources()
     }
 
+    public func reconnectIfAvailable() {
+        guard isWatching,
+              UserDefaults.standard.object(forKey: "autoDetectDevice") as? Bool ?? true else { return }
+        let identities = connectedDeviceIdentities()
+        guard let identity = activeDeviceIdentity,
+              identities.contains(identity) else { return }
+        knownDeviceIdentities.formUnion(identities)
+        activeDeviceIdentity = identity
+        scheduleAutoConnect(isInitialScan: false)
+    }
+
     private func cleanupWatchingResources() {
         pendingAutoConnectTask?.cancel()
         pendingAutoConnectTask = nil
@@ -180,15 +191,18 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
             IOObjectRelease(device)
         }
         
-        guard !removedIdentities.isEmpty else { return }
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        let remainingIdentities = connectedDeviceIdentities()
         let removedActiveDevice = activeDeviceIdentity.map(removedIdentities.contains) ?? false
-        let noTrackedDevicesRemain = connectedDeviceIdentities().isEmpty
-        guard removedActiveDevice || noTrackedDevicesRemain else { return }
+        let activeDeviceIsGone = activeDeviceIdentity.map { !remainingIdentities.contains($0) } ?? false
+        let noTrackedDevicesRemain = remainingIdentities.isEmpty
+        guard removedActiveDevice || activeDeviceIsGone || noTrackedDevicesRemain else { return }
 
         pendingAutoConnectTask?.cancel()
         pendingAutoConnectTask = nil
         _ = connectionLifecycle.detached()
         activeDeviceIdentity = nil
+        knownDeviceIdentities = remainingIdentities
         ErrorLogger.logMessage(
             "USB device detached",
             level: .info,

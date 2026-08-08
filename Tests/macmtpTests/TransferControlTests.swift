@@ -9,7 +9,7 @@ func transferServiceOwnsPauseAndResumeStateTransitions() {
     defer { service.activeBatch = nil }
 
     batch.start()
-    service.pauseTransfer()
+    #expect(service.pauseTransfer())
     #expect(batch.state == .paused)
 
     service.resumeTransfer()

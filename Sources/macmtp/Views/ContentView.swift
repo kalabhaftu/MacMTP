@@ -32,6 +32,8 @@ struct ContentView: View {
 
 
     @State private var showTransferProgress: Bool = false
+    @State private var transferToastMessage: String?
+    @State private var transferToastGeneration = 0
 
 
     @State private var statusIsTransferring: Bool = false
@@ -129,7 +131,11 @@ struct ContentView: View {
                         showTransferProgress = false
                     },
                     onPause: {
-                        FileTransferService.shared.pauseTransfer()
+                        if FileTransferService.shared.pauseTransfer() {
+                            showTransferToast(
+                                "Pause requested. The current file will finish, then the next file will wait."
+                            )
+                        }
                     },
                     onResume: {
                         FileTransferService.shared.resumeTransfer()
@@ -164,6 +170,15 @@ struct ContentView: View {
         }
         .frame(minWidth: 960, minHeight: 600)
         .background(Color(NSColor.windowBackgroundColor))
+        .overlay(alignment: .bottomTrailing) {
+            if let transferToastMessage {
+                TransferToastView(message: transferToastMessage)
+                    .padding(.trailing, 18)
+                    .padding(.bottom, 42)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: transferToastMessage)
         .sheet(isPresented: $showConflictDialog) {
             ConflictDialogView(
                 conflictingFiles: conflictingFiles.isEmpty ? FileTransferService.shared.conflictingFiles : conflictingFiles,
@@ -377,6 +392,7 @@ struct ContentView: View {
             files: $localFiles,
             isActivePane: activePane == .local,
             clipboardManager: ClipboardManager.shared,
+            onActivate: { activePane = .local },
             onFilesDropped: { files, destination in
                 handleFilesDropped(files: files, destination: destination, isLocal: true)
             },
@@ -391,15 +407,10 @@ struct ContentView: View {
         .usesProvidedFiles(screenshotMode)
         .frame(minWidth: 350, idealWidth: 420)
         .layoutPriority(1)
-        .simultaneousGesture(
-            TapGesture().onEnded { activePane = .local },
-            including: .all
-        )
         .overlay(
             RoundedRectangle(cornerRadius: 0)
                 .stroke(activePane == .local ? Color.accentColor.opacity(0.4) : Color.clear, lineWidth: 2)
         )
-        .onChange(of: selectedLocalItems) { _, _ in activePane = .local }
     }
 
     @ViewBuilder
@@ -427,6 +438,7 @@ struct ContentView: View {
                 files: $mtpFiles,
                 isActivePane: activePane == .mtp,
                 clipboardManager: ClipboardManager.shared,
+                onActivate: { activePane = .mtp },
                 onFilesDropped: { files, destination in
                     handleFilesDropped(files: files, destination: destination, isLocal: false)
                 },
@@ -442,15 +454,10 @@ struct ContentView: View {
         }
         .frame(minWidth: 350, idealWidth: 420)
         .layoutPriority(1)
-        .simultaneousGesture(
-            TapGesture().onEnded { activePane = .mtp },
-            including: .all
-        )
         .overlay(
             RoundedRectangle(cornerRadius: 0)
                 .stroke(activePane == .mtp ? Color.accentColor.opacity(0.4) : Color.clear, lineWidth: 2)
         )
-        .onChange(of: selectedMTPItems) { _, _ in activePane = .mtp }
     }
 
     private func installKeyboardMonitor() {
@@ -459,11 +466,13 @@ struct ContentView: View {
             let hasCmd = event.modifierFlags.contains(.command)
             let hasShift = event.modifierFlags.contains(.shift)
             let modifiersOnly = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            let isTextEditing = NSApp.modalWindow != nil
-                || NSApp.keyWindow?.firstResponder is NSTextField
-                || NSApp.keyWindow?.firstResponder is NSTextView
+            let isTextEditing = isTextInputActive(for: event)
 
-            guard !isTextEditing else { return event }
+            // Let the sheet's native field editor receive every key. Checking
+            // the responder alone is unreliable while SwiftUI presents a sheet.
+            guard !isTextEditing,
+                  newFolderRequest == nil,
+                  renameRequest == nil else { return event }
 
             if !hasCmd, modifiersOnly == [],
                let characters = event.charactersIgnoringModifiers?.lowercased(),
@@ -540,6 +549,24 @@ struct ContentView: View {
         if let monitor = eventMonitor {
             NSEvent.removeMonitor(monitor)
             eventMonitor = nil
+        }
+    }
+
+    private func isTextInputActive(for event: NSEvent) -> Bool {
+        let window = event.window ?? NSApp.keyWindow
+        guard let responder = window?.firstResponder else { return false }
+        return responder is NSTextField || responder is NSTextView
+    }
+
+    private func showTransferToast(_ message: String) {
+        transferToastGeneration &+= 1
+        let generation = transferToastGeneration
+        transferToastMessage = message
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            guard !Task.isCancelled, transferToastGeneration == generation else { return }
+            transferToastMessage = nil
         }
     }
 
@@ -712,10 +739,10 @@ struct ContentView: View {
             }
             isSubmittingFileOperation = false
         } else {
-            Task {
+            Task { @MainActor in
+                defer { isSubmittingFileOperation = false }
                 do {
                     try await MTPDeviceManager.shared.renameFile(path: file.path, newName: trimmed)
-                    isSubmittingFileOperation = false
                     renameRequest = nil
                 } catch {
                     ErrorLogger.log(
@@ -729,7 +756,6 @@ struct ContentView: View {
                         ]
                     )
                     dialogErrorMessage = error.localizedDescription
-                    isSubmittingFileOperation = false
                 }
             }
         }
@@ -1040,10 +1066,10 @@ struct ContentView: View {
                 isSubmittingFileOperation = false
             }
         } else {
-            Task {
+            Task { @MainActor in
+                defer { isSubmittingFileOperation = false }
                 do {
                     try await MTPDeviceManager.shared.createFolder(name: trimmedName, in: parentPath)
-                    isSubmittingFileOperation = false
                     newFolderRequest = nil
                 } catch {
                     ErrorLogger.log(
@@ -1057,7 +1083,6 @@ struct ContentView: View {
                         ]
                     )
                     dialogErrorMessage = error.localizedDescription
-                    isSubmittingFileOperation = false
                 }
             }
         }

@@ -44,10 +44,12 @@ public final class FileTransferService: ObservableObject {
     private init() {}
     
     
-    public func pauseTransfer() {
-        guard activeBatch?.state == .transferring else { return }
+    @discardableResult
+    public func pauseTransfer() -> Bool {
+        guard activeBatch?.state == .transferring else { return false }
         pauseRequested = true
         activeBatch?.pause()
+        return true
     }
     
     public func resumeTransfer() {

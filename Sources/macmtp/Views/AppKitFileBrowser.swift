@@ -9,6 +9,7 @@ struct AppKitFileBrowser: NSViewRepresentable {
     let fontScale: Double
     let isLocal: Bool
     let onOpen: (FileNode) -> Void
+    let onActivate: () -> Void
     let onSelectionChanged: () -> Void
     let onContextMenu: (FileNode) -> NSMenu?
 
@@ -16,6 +17,7 @@ struct AppKitFileBrowser: NSViewRepresentable {
         Coordinator(
             selectedPaths: $selectedPaths,
             onOpen: onOpen,
+            onActivate: onActivate,
             onSelectionChanged: onSelectionChanged,
             onContextMenu: onContextMenu,
             isLocal: isLocal
@@ -37,6 +39,7 @@ struct AppKitFileBrowser: NSViewRepresentable {
         context.coordinator.update(
             selectedPaths: $selectedPaths,
             onOpen: onOpen,
+            onActivate: onActivate,
             onSelectionChanged: onSelectionChanged,
             onContextMenu: onContextMenu,
             isLocal: isLocal
@@ -55,6 +58,7 @@ struct AppKitFileBrowser: NSViewRepresentable {
         var mode: FileViewMode = .icons
         var selectedPaths: Binding<Set<String>>
         var onOpen: (FileNode) -> Void
+        var onActivate: () -> Void
         var onSelectionChanged: () -> Void
         var onContextMenu: (FileNode) -> NSMenu?
         var isLocal: Bool
@@ -63,12 +67,14 @@ struct AppKitFileBrowser: NSViewRepresentable {
         init(
             selectedPaths: Binding<Set<String>>,
             onOpen: @escaping (FileNode) -> Void,
+            onActivate: @escaping () -> Void,
             onSelectionChanged: @escaping () -> Void,
             onContextMenu: @escaping (FileNode) -> NSMenu?,
             isLocal: Bool
         ) {
             self.selectedPaths = selectedPaths
             self.onOpen = onOpen
+            self.onActivate = onActivate
             self.onSelectionChanged = onSelectionChanged
             self.onContextMenu = onContextMenu
             self.isLocal = isLocal
@@ -77,12 +83,14 @@ struct AppKitFileBrowser: NSViewRepresentable {
         func update(
             selectedPaths: Binding<Set<String>>,
             onOpen: @escaping (FileNode) -> Void,
+            onActivate: @escaping () -> Void,
             onSelectionChanged: @escaping () -> Void,
             onContextMenu: @escaping (FileNode) -> NSMenu?,
             isLocal: Bool
         ) {
             self.selectedPaths = selectedPaths
             self.onOpen = onOpen
+            self.onActivate = onActivate
             self.onSelectionChanged = onSelectionChanged
             self.onContextMenu = onContextMenu
             self.isLocal = isLocal
@@ -324,6 +332,7 @@ final class ClearingCollectionView: NSCollectionView {
     weak var coordinator: AppKitFileBrowser.Coordinator?
 
     override func mouseDown(with event: NSEvent) {
+        coordinator?.onActivate()
         let point = convert(event.locationInWindow, from: nil)
         if indexPathForItem(at: point) == nil {
             deselectAll(nil)
@@ -348,6 +357,7 @@ final class ClearingTableView: NSTableView {
     var fontScale: Double = 1
 
     override func mouseDown(with event: NSEvent) {
+        coordinator?.onActivate()
         let row = row(at: convert(event.locationInWindow, from: nil))
         if row < 0 {
             deselectAll(nil)

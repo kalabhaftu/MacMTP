@@ -69,6 +69,7 @@ struct FileExplorerPane: View {
 
     let isActivePane: Bool
     let clipboardManager: ClipboardManager
+    var onActivate: (() -> Void)? = nil
     var onFilesDropped: (([DroppedFile], String) -> Void)? = nil
     var onFileOperation: ((FileOperation) -> Void)? = nil
     var onRequestNewFolder: ((String, Bool) -> Void)? = nil
@@ -131,6 +132,11 @@ struct FileExplorerPane: View {
             contentArea
         }
         .background(Color(NSColor.controlBackgroundColor))
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            TapGesture().onEnded { onActivate?() },
+            including: .subviews
+        )
         .overlay(alignment: .top) {
             if !isLocal, !files.isEmpty, let message = nonBlockingErrorMessage {
                 HStack(spacing: 8) {
@@ -568,6 +574,7 @@ struct FileExplorerPane: View {
             fontScale: appFontScale,
             isLocal: isLocal,
             onOpen: handleDoubleClick,
+            onActivate: { onActivate?() },
             onSelectionChanged: resetTypeahead,
             onContextMenu: { file in appKitContextMenu(for: file) }
         )
@@ -589,6 +596,7 @@ struct FileExplorerPane: View {
             fontScale: appFontScale,
             isLocal: isLocal,
             onOpen: handleDoubleClick,
+            onActivate: { onActivate?() },
             onSelectionChanged: resetTypeahead,
             onContextMenu: { file in appKitContextMenu(for: file) }
         )

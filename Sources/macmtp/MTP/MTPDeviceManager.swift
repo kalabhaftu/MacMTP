@@ -178,6 +178,7 @@ public final class MTPDeviceManager: ObservableObject {
     func invalidateConnection(message: String) {
         connectionGeneration &+= 1
         refreshGeneration &+= 1
+        let invalidatedGeneration = connectionGeneration
         directoryCoordinator.invalidateSnapshot()
 
         if FileTransferService.shared.activeBatch?.isActive == true {
@@ -201,8 +202,11 @@ public final class MTPDeviceManager: ObservableObject {
         isLoading = false
         errorMessage = message
 
-        Task {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
             try? await bridge.dispose()
+            guard self.connectionGeneration == invalidatedGeneration else { return }
+            USBWatcher.shared.reconnectIfAvailable()
         }
     }
 
@@ -498,7 +502,6 @@ public final class MTPDeviceManager: ObservableObject {
             reportMutationFailure(error, operation: "make_directory", phase: "mutation")
             throw error
         }
-        await refreshStorages()
     }
 
     public func deleteFiles(paths: [String]) async throws {
@@ -519,7 +522,6 @@ public final class MTPDeviceManager: ObservableObject {
             mtpFiles = previousFiles
             throw KalamError.operationNotReconciled("deletion")
         }
-        await refreshStorages()
     }
 
     public func renameFile(path: String, newName: String) async throws {

@@ -16,6 +16,8 @@ struct HelpView: View {
                             detail: "Use the sidebar to navigate local volumes and your MTP device (positionable on Left or Right in Preferences). Files are shown in a sortable table.")
                     helpRow(icon: "arrow.left.arrow.right", title: "Transfer Files",
                             detail: "Select files, then use Copy (⌘C) and Paste (⌘V) to transfer between your Mac and Android device.")
+                    helpRow(icon: "pause.circle", title: "Pause Transfers",
+                            detail: "Pause takes effect between files. The current file finishes first, then the remaining files wait until you resume.")
                     helpRow(icon: "rectangle.on.rectangle", title: "Drag & Drop",
                             detail: "Drag files from Finder into macMTP, or drag files between the local and MTP panes.")
                     helpRow(icon: "trash", title: "Delete",
