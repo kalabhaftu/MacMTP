@@ -266,6 +266,7 @@ private extension KalamError {
         case .operationInProgress: "operation_in_progress"
         case .timedOut: "timed_out"
         case .invalidPath: "invalid_path"
+        case .operationNotReconciled: "operation_not_reconciled"
         }
     }
 }

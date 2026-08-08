@@ -76,6 +76,9 @@ func SendDeviceInfo(deviceInfo *mtp.DeviceInfo, usbDesc *mtp.UsbDeviceInfo) {
 }
 
 func SendStorages(storages []mtpx.StorageData) {
+	if storages == nil {
+		storages = make([]mtpx.StorageData, 0)
+	}
 	o := StoragesResult{
 		Data: storages,
 	}
@@ -85,10 +88,15 @@ func SendStorages(storages []mtpx.StorageData) {
 	C.call_done(C.CString(json))
 }
 
-func SendMakeDirectory() {
-	o := MakeDirectoryResult{
-		Data: true,
-	}
+type MutationResult struct {
+	ErrorType ErrorType `json:"errorType"`
+	Error     string    `json:"error"`
+	Data      bool      `json:"data"`
+	ObjectId  uint32    `json:"objectId"`
+}
+
+func SendMakeDirectory(objectId uint32) {
+	o := MutationResult{Data: true, ObjectId: objectId}
 
 	json := toJson(o)
 
@@ -96,7 +104,7 @@ func SendMakeDirectory() {
 }
 
 func SendFileExists(fc []mtpx.FileExistsContainer, inputFiles []string) {
-	var fdSlice []FileExistsData
+	fdSlice := make([]FileExistsData, 0, len(fc))
 	for i, f := range fc {
 		fd := FileExistsData{
 			Fullpath: inputFiles[i],
@@ -125,10 +133,8 @@ func SendDeleteFile() {
 	C.call_done(C.CString(json))
 }
 
-func SendRenameFile() {
-	o := RenameFileResult{
-		Data: true,
-	}
+func SendRenameFile(objectId uint32) {
+	o := MutationResult{Data: true, ObjectId: objectId}
 
 	json := toJson(o)
 
@@ -136,7 +142,7 @@ func SendRenameFile() {
 }
 
 func SendWalk(files []*mtpx.FileInfo) {
-	var outputFiles []FileInfo
+	outputFiles := make([]FileInfo, 0, len(files))
 
 	for _, f := range files {
 		outputFile := FileInfo{

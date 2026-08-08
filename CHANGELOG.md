@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed empty MTP directory responses, serialized native mutation identifiers, coalesced refreshes, and reconciled create, rename, and delete state through the device manager.
+- Added Finder-style typeahead and immediate fixed-cell selection, centralized rename and new-folder dialogs, and made USB detach handling cancel stale connection work promptly.
 - Fixed duplicate USB auto-connect attempts, blocked transfers without a valid MTP storage, repaired frozen upload progress, preserved clipboard items when a transfer is already active, and routed native transfer failures to the correct callback.
 - Fixed queue pause/resume controls so requests reach the transfer service and take effect at the next file boundary.
 - Prevented expected AppKit modal waits and short launch rendering delays from producing false Sentry app-hang reports.

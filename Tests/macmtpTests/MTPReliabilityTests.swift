@@ -71,6 +71,23 @@ func simpleMTPResponsesRequireTrueDataAndPreserveNativeErrorType() {
 }
 
 @Test
+func emptyDirectoryResponsesDecodeAsAnEmptyCollection() throws {
+    let payload = #"{"error":"","errorType":"","data":[]}"#.data(using: .utf8)!
+    let result = try JSONDecoder().decode(GoWalkResult.self, from: payload)
+
+    #expect(result.data.isEmpty)
+}
+
+@Test
+func mutationResponsesPreserveNativeObjectIdentifiers() throws {
+    let payload = #"{"error":"","errorType":"","data":true,"objectId":42}"#.data(using: .utf8)!
+    let result = try JSONDecoder().decode(GoSimpleResult.self, from: payload)
+
+    #expect(result.data == true)
+    #expect(result.objectId == 42)
+}
+
+@Test
 func mtpFolderNamesAreTrimmedAndInvalidNamesRejected() {
     do {
         #expect(try normalizedMTPChildName("  New Folder  ") == "New Folder")
@@ -102,4 +119,61 @@ func refreshRequestsOnlyShareWhenStoragePathAndVisibilityMatch() {
         active: request,
         requested: MTPDirectoryRefreshKey(storageId: 1, path: "/", showHidden: true)
     ))
+}
+
+@Test
+@MainActor
+func directoryCoordinatorCoalescesSameRefreshAndKeepsSnapshotsKeyed() async {
+    let coordinator = MTPDirectoryCoordinator()
+    let request = MTPDirectoryRefreshKey(storageId: 7, path: "/DCIM", showHidden: false)
+
+    #expect(coordinator.beginRefresh(for: request))
+    #expect(!coordinator.beginRefresh(for: request))
+
+    let waiter = Task { @MainActor in
+        await coordinator.waitForActiveRefresh()
+    }
+    try? await Task.sleep(nanoseconds: 10_000_000)
+    #expect(coordinator.activeRefreshWaiterCount == 1)
+
+    let node = FileNode(name: "photo.jpg", path: "/DCIM/photo.jpg", parentPath: "/DCIM")
+    coordinator.recordSuccessfulListing([node], for: request)
+    coordinator.finishRefresh(for: request)
+    await waiter.value
+
+    #expect(coordinator.snapshot?.key == request)
+    #expect(coordinator.snapshot?.files.map(\.path) == ["/DCIM/photo.jpg"])
+    #expect(coordinator.refreshSucceeded(for: request))
+
+    #expect(coordinator.beginRefresh(for: request))
+    coordinator.recordFailedRefresh(for: request)
+    coordinator.finishRefresh(for: request)
+    #expect(!coordinator.refreshSucceeded(for: request))
+}
+
+@Test
+func mutationReconciliationUsesCanonicalPaths() {
+    let original = FileNode(name: "old", path: "/old", parentPath: "/")
+    let renamed = MTPDirectoryMutation.rename(oldPath: "/old", newPath: "/new")
+    let renamedFiles = MTPDirectoryReconciliation.applying(renamed, to: [original])
+
+    #expect(MTPDirectoryReconciliation.isSatisfied(renamed, by: renamedFiles))
+    #expect(renamedFiles.first?.path == "/new")
+
+    let deleted = MTPDirectoryMutation.delete(paths: ["/new"])
+    #expect(MTPDirectoryReconciliation.isSatisfied(
+        deleted,
+        by: MTPDirectoryReconciliation.applying(deleted, to: renamedFiles)
+    ))
+}
+
+@Test
+func usbLifecycleRejectsStaleConnectionCompletions() {
+    var lifecycle = USBConnectionLifecycle()
+    let first = lifecycle.attachScheduled()
+    _ = lifecycle.detached()
+    let second = lifecycle.attachScheduled()
+
+    #expect(!lifecycle.accepts(first))
+    #expect(lifecycle.accepts(second))
 }

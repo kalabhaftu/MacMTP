@@ -52,6 +52,7 @@ jobs:
     - name: Validate scripts
       run: |
         bash -n scripts/*.sh
+        bash scripts/test-native-contract.sh
         git diff --check
 
     - name: Build and verify host release

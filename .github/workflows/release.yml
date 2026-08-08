@@ -61,6 +61,7 @@ jobs:
           exit 1
         fi
         bash -n scripts/*.sh
+        bash scripts/test-native-contract.sh
 
     - name: Build and verify host release
       run: |

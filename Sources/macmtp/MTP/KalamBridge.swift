@@ -11,6 +11,7 @@ public enum KalamError: Error, LocalizedError {
     case timedOut(String)
     case invalidPath(String)
     case itemAlreadyExists(String)
+    case operationNotReconciled(String)
     case nativeOperationFailed(operation: String, errorType: String?, message: String)
 
     public var errorDescription: String? {
@@ -33,6 +34,8 @@ public enum KalamError: Error, LocalizedError {
             return "Invalid path: \(msg)"
         case .itemAlreadyExists(let name):
             return "A file or folder named \"\(name)\" already exists in this directory."
+        case .operationNotReconciled(let operation):
+            return "The MTP device accepted \(operation), but the directory did not confirm the change. Refresh and try again."
         case .nativeOperationFailed(let operation, let errorType, let message):
             let detail = message.isEmpty ? "The MTP subsystem returned no error details." : message
             if let errorType, !errorType.isEmpty {
@@ -127,6 +130,7 @@ func nativeErrorType(for error: Error) -> String {
     case .timedOut: return "timed_out"
     case .invalidPath: return "invalid_path"
     case .itemAlreadyExists: return "item_already_exists"
+    case .operationNotReconciled: return "operation_not_reconciled"
     }
 }
 
@@ -485,15 +489,7 @@ public actor KalamBridge {
         let result: GoStoragesResult = try await executeMTP(operationName: "fetch_storages") {
             FetchStorages()
         }
-        guard let data = result.data else {
-            throw nativeOperationError(
-                operation: "fetch_storages",
-                errorType: result.errorType,
-                message: result.error,
-                fallback: "The storage response did not include storage data."
-            )
-        }
-        return data
+        return result.data
     }
 
     public func listDirectory(
@@ -521,18 +517,10 @@ public actor KalamBridge {
         let result: GoWalkResult = try await executeMTPWithInput(operationName: "list_directory", input) { inputJson in
             Walk(inputJson)
         }
-        guard let data = result.data else {
-            throw nativeOperationError(
-                operation: "list_directory",
-                errorType: result.errorType,
-                message: result.error,
-                fallback: "The directory response did not include file data."
-            )
-        }
-        return data
+        return result.data
     }
 
-    public func makeDirectory(storageId: UInt32, path: String) async throws {
+    public func makeDirectory(storageId: UInt32, path: String) async throws -> UInt32? {
         struct MakeDirectoryInput: Encodable {
             let storageId: UInt32
             let fullPath: String
@@ -547,6 +535,7 @@ public actor KalamBridge {
             operation: "make_directory",
             fallback: "The MTP subsystem did not confirm directory creation."
         )
+        return result.objectId
     }
 
     public func deleteFiles(storageId: UInt32, paths: [String]) async throws {
@@ -566,7 +555,7 @@ public actor KalamBridge {
         )
     }
 
-    public func renameFile(storageId: UInt32, path: String, newName: String) async throws {
+    public func renameFile(storageId: UInt32, path: String, newName: String) async throws -> UInt32? {
         struct RenameFileInput: Encodable {
             let storageId: UInt32
             let fullPath: String
@@ -582,6 +571,7 @@ public actor KalamBridge {
             operation: "rename_file",
             fallback: "The MTP subsystem did not confirm renaming."
         )
+        return result.objectId
     }
 
     public func checkFilesExist(storageId: UInt32, paths: [String]) async throws -> [Bool] {
@@ -594,25 +584,17 @@ public actor KalamBridge {
         let result: GoFileExistsResult = try await executeMTPWithInput(operationName: "check_files_exist", input) { inputJson in
             FileExists(inputJson)
         }
-        guard let data = result.data else {
-            throw nativeOperationError(
-                operation: "check_files_exist",
-                errorType: result.errorType,
-                message: result.error,
-                fallback: "The file-existence response did not include file data."
-            )
-        }
-        guard data.count == paths.count else {
+        guard result.data.count == paths.count else {
             throw nativeOperationError(
                 operation: "check_files_exist",
                 errorType: nil,
-                message: "Expected \(paths.count) results but received \(data.count).",
+                message: "Expected \(paths.count) results but received \(result.data.count).",
                 fallback: "The file-existence response was incomplete."
             )
         }
 
         var resultMap = [String: Bool]()
-        for entry in data {
+        for entry in result.data {
             resultMap[entry.fullpath] = entry.exists
         }
         return try paths.map { path in

@@ -165,13 +165,14 @@ func MakeDirectory(makeDirectoryInputJson *C.char) {
 		return
 	}
 
-	if err := _makeDirectory(i.StorageId, i.FullPath); err != nil {
+	objectId, err := makeDirectoryWithResult(i.StorageId, i.FullPath)
+	if err != nil {
 		send_to_js.SendError(err)
 
 		return
 	}
 
-	send_to_js.SendMakeDirectory()
+	send_to_js.SendMakeDirectory(objectId)
 }
 
 //export FileExists
@@ -274,14 +275,36 @@ func RenameFile(renameFileInputJson *C.char) {
 		FullPath: i.FullPath,
 	}
 
-	err = _renameFile(i.StorageId, fProp, i.NewFileName)
+	objectId, err := renameFileWithResult(i.StorageId, fProp, i.NewFileName)
 	if err != nil {
 		send_to_js.SendError(err)
 
 		return
 	}
 
-	send_to_js.SendRenameFile()
+	send_to_js.SendRenameFile(objectId)
+}
+
+func makeDirectoryWithResult(storageId uint32, fullPath string) (uint32, error) {
+	if err := verifyMtpSession(verifyMtpSessionMode{}); err != nil {
+		return 0, err
+	}
+	objectId, err := mtpx.MakeDirectory(container.dev, storageId, fullPath)
+	if err != nil {
+		return 0, err
+	}
+	return objectId, nil
+}
+
+func renameFileWithResult(storageId uint32, fileProp mtpx.FileProp, newFileName string) (uint32, error) {
+	if err := verifyMtpSession(verifyMtpSessionMode{}); err != nil {
+		return 0, err
+	}
+	objectId, err := mtpx.RenameFile(container.dev, storageId, fileProp, newFileName)
+	if err != nil {
+		return 0, err
+	}
+	return objectId, nil
 }
 
 //export Walk

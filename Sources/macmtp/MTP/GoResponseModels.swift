@@ -62,7 +62,7 @@ public struct GoStorageData: Decodable, Sendable {
 public struct GoStoragesResult: Decodable, Sendable {
     public let error: String?
     public let errorType: String?
-    public let data: [GoStorageData]?
+    public let data: [GoStorageData]
 }
 
 public struct GoFileInfo: Decodable, Sendable {
@@ -80,13 +80,21 @@ public struct GoFileInfo: Decodable, Sendable {
 public struct GoWalkResult: Decodable, Sendable {
     public let error: String?
     public let errorType: String?
-    public let data: [GoFileInfo]?
+    public let data: [GoFileInfo]
 }
 
 public struct GoSimpleResult: Decodable, Sendable {
     public let error: String?
     public let errorType: String?
     public let data: Bool?
+    public let objectId: UInt32?
+
+    public init(error: String?, errorType: String?, data: Bool?, objectId: UInt32? = nil) {
+        self.error = error
+        self.errorType = errorType
+        self.data = data
+        self.objectId = objectId
+    }
 }
 
 public struct GoFileExistsEntry: Decodable, Sendable {
@@ -97,7 +105,7 @@ public struct GoFileExistsEntry: Decodable, Sendable {
 public struct GoFileExistsResult: Decodable, Sendable {
     public let error: String?
     public let errorType: String?
-    public let data: [GoFileExistsEntry]?
+    public let data: [GoFileExistsEntry]
 }
 
 public struct GoTransferPreprocessData: Decodable, Sendable {

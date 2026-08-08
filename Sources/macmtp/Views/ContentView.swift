@@ -57,6 +57,10 @@ struct ContentView: View {
     @State private var newFolderName: String = "New Folder"
     @State private var newFolderTargetPath: String = "/"
     @State private var newFolderTargetIsLocal: Bool = true
+    @State private var showRenameDialog: Bool = false
+    @State private var renameTargetFile: FileNode?
+    @State private var renameTargetIsLocal: Bool = true
+    @State private var renameText: String = ""
     @State private var operationErrorMessage: String?
 
 
@@ -188,6 +192,17 @@ struct ContentView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Enter a name for the new folder:")
+        }
+        .alert("Rename", isPresented: $showRenameDialog) {
+            TextField("New name", text: $renameText)
+            Button("Rename") {
+                performRename()
+            }
+            Button("Cancel", role: .cancel) {
+                renameTargetFile = nil
+            }
+        } message: {
+            Text("Enter a new name for this item.")
         }
         .alert("Privacy First", isPresented: $showPrivacyPrompt) {
             Button("I Agree") {
@@ -440,6 +455,28 @@ struct ContentView: View {
             let hasCmd = event.modifierFlags.contains(.command)
             let hasShift = event.modifierFlags.contains(.shift)
             let modifiersOnly = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            let isTextEditing = NSApp.modalWindow != nil
+                || NSApp.keyWindow?.firstResponder is NSTextField
+                || NSApp.keyWindow?.firstResponder is NSTextView
+
+            guard !isTextEditing else { return event }
+
+            if !hasCmd, modifiersOnly == [],
+               let characters = event.charactersIgnoringModifiers?.lowercased(),
+               let first = characters.first,
+               first.unicodeScalars.allSatisfy({ CharacterSet.letters.contains($0) }) {
+                let hasFiles: Bool
+                switch self.activePane {
+                case .local: hasFiles = !self.localFiles.isEmpty
+                case .mtp: hasFiles = !self.mtpFiles.isEmpty
+                }
+                guard hasFiles else { return event }
+                NotificationCenter.default.post(
+                    name: .fileTypeaheadKeyPressed,
+                    object: String(first)
+                )
+                return nil
+            }
 
             if event.keyCode == 53 {
                 switch self.activePane {
@@ -622,11 +659,66 @@ struct ContentView: View {
     }
 
     private func beginNewFolder(path: String, isLocal: Bool) {
+        NotificationCenter.default.post(name: .fileTypeaheadReset, object: nil)
         newFolderTargetPath = path.isEmpty ? "/" : path
         newFolderTargetIsLocal = isLocal
         newFolderName = "New Folder"
         operationErrorMessage = nil
         showNewFolderDialog = true
+    }
+
+    private func beginRename(file: FileNode, isLocal: Bool) {
+        NotificationCenter.default.post(name: .fileTypeaheadReset, object: nil)
+        renameTargetFile = file
+        renameTargetIsLocal = isLocal
+        renameText = file.name
+        operationErrorMessage = nil
+        showRenameDialog = true
+    }
+
+    private func performRename() {
+        guard let file = renameTargetFile else { return }
+        let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isValidChildName(trimmed) else {
+            operationErrorMessage = "A file or folder name must not be empty or contain path separators."
+            return
+        }
+        guard trimmed != file.name else {
+            showRenameDialog = false
+            renameTargetFile = nil
+            return
+        }
+
+        showRenameDialog = false
+        renameTargetFile = nil
+        if renameTargetIsLocal {
+            let sourceURL = URL(fileURLWithPath: file.path)
+            let destinationURL = sourceURL.deletingLastPathComponent().appendingPathComponent(trimmed)
+            do {
+                try FileManager.default.moveItem(at: sourceURL, to: destinationURL)
+                NotificationCenter.default.post(name: .localDirectoryNeedsRefresh, object: nil)
+            } catch {
+                ErrorLogger.log(error, message: "Rename failed")
+                operationErrorMessage = error.localizedDescription
+            }
+        } else {
+            Task {
+                do {
+                    try await MTPDeviceManager.shared.renameFile(path: file.path, newName: trimmed)
+                } catch {
+                    ErrorLogger.log(
+                        error,
+                        message: "Rename failed",
+                        userInfo: [
+                            "operation": "rename_file",
+                            "native_error_type": nativeErrorType(for: error),
+                            "conflict_classification": isDuplicateNameError(error) ? "duplicate_name" : "native_or_transport_failure"
+                        ]
+                    )
+                    operationErrorMessage = error.localizedDescription
+                }
+            }
+        }
     }
 
     func handleEnter() {
@@ -664,6 +756,7 @@ struct ContentView: View {
     }
 
     func handleRefresh() {
+        NotificationCenter.default.post(name: .fileTypeaheadReset, object: nil)
         switch activePane {
         case .local:
             NotificationCenter.default.post(name: .localDirectoryNeedsRefresh, object: nil)
@@ -713,11 +806,22 @@ struct ContentView: View {
                     do {
                         try await MTPDeviceManager.shared.renameFile(path: oldPath, newName: newName)
                     } catch {
-                        ErrorLogger.log(error, message: "Rename failed")
+                        ErrorLogger.log(
+                            error,
+                            message: "Rename failed",
+                            userInfo: [
+                                "operation": "rename_file",
+                                "native_error_type": nativeErrorType(for: error),
+                                "conflict_classification": isDuplicateNameError(error) ? "duplicate_name" : "native_or_transport_failure"
+                            ]
+                        )
                         operationErrorMessage = error.localizedDescription
                     }
                 }
             }
+
+        case .requestRename(let file):
+            beginRename(file: file, isLocal: isLocal)
 
         case .open(let path):
             if isLocal {
@@ -850,23 +954,23 @@ struct ContentView: View {
             pendingDeletePaths.removeAll()
             handleRefresh()
         } else {
-            guard let storageId = validSelectedMTPStorageID() else {
-                pendingDeletePaths.removeAll()
-                return
-            }
             Task {
                 do {
-                    try await KalamBridge.shared.deleteFiles(
-                        storageId: storageId,
-                        paths: paths
-                    )
+                    try await MTPDeviceManager.shared.deleteFiles(paths: paths)
                     await MainActor.run {
                         selectedMTPItems.removeAll()
                         pendingDeletePaths.removeAll()
                     }
-                    await MTPDeviceManager.shared.refreshFiles()
                 } catch {
-                    ErrorLogger.log(error, message: "MTP delete failed")
+                    ErrorLogger.log(
+                        error,
+                        message: "MTP delete failed",
+                        userInfo: [
+                            "operation": "delete_files",
+                            "native_error_type": nativeErrorType(for: error),
+                            "conflict_classification": "none"
+                        ]
+                    )
                     operationErrorMessage = error.localizedDescription
                     await MainActor.run {
                         pendingDeletePaths.removeAll()
@@ -943,11 +1047,25 @@ struct ContentView: View {
                 do {
                     try await MTPDeviceManager.shared.createFolder(name: trimmedName, in: parentPath)
                 } catch {
-                    ErrorLogger.log(error, message: "Create MTP folder failed")
+                    ErrorLogger.log(
+                        error,
+                        message: "Create MTP folder failed",
+                        userInfo: [
+                            "operation": "make_directory",
+                            "native_error_type": nativeErrorType(for: error),
+                            "conflict_classification": isDuplicateNameError(error) ? "duplicate_name" : "native_or_transport_failure"
+                        ]
+                    )
                     operationErrorMessage = error.localizedDescription
                 }
             }
         }
+    }
+
+    private func isDuplicateNameError(_ error: Error) -> Bool {
+        guard let kalamError = error as? KalamError else { return false }
+        if case .itemAlreadyExists = kalamError { return true }
+        return false
     }
 
     private func isValidChildName(_ name: String) -> Bool {

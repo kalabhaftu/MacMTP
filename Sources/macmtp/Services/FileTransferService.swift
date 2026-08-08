@@ -4,6 +4,8 @@ import UserNotifications
 
 extension Notification.Name {
     static let localDirectoryNeedsRefresh = Notification.Name("localDirectoryNeedsRefresh")
+    static let fileTypeaheadKeyPressed = Notification.Name("fileTypeaheadKeyPressed")
+    static let fileTypeaheadReset = Notification.Name("fileTypeaheadReset")
     static let menuNewFolderRequested = Notification.Name("menuNewFolderRequested")
     static let menuRefreshRequested = Notification.Name("menuRefreshRequested")
 }
@@ -755,7 +757,7 @@ public final class FileTransferService: ObservableObject {
                 try await ensureDirectoryExists(path: parent, direction: direction, storageId: storageId)
             }
             
-            try await bridge.makeDirectory(storageId: storageId, path: path)
+            _ = try await bridge.makeDirectory(storageId: storageId, path: path)
             verifiedDirectories.insert(path)
         } else {
             let fileManager = FileManager.default

@@ -2,6 +2,24 @@ import Foundation
 import IOKit
 import IOKit.usb
 
+struct USBConnectionLifecycle: Equatable {
+    private(set) var generation: UInt64 = 0
+
+    mutating func attachScheduled() -> UInt64 {
+        generation &+= 1
+        return generation
+    }
+
+    mutating func detached() -> UInt64 {
+        generation &+= 1
+        return generation
+    }
+
+    func accepts(_ token: UInt64) -> Bool {
+        token == generation
+    }
+}
+
 @MainActor
 public final class USBWatcher: ObservableObject, @unchecked Sendable {
     
@@ -14,7 +32,8 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
     private var removedIterator: io_iterator_t = 0
     private var runLoopSource: CFRunLoopSource?
     private var isWatching = false
-    private var autoConnectGeneration: UInt64 = 0
+    private var connectionLifecycle = USBConnectionLifecycle()
+    private var pendingAutoConnectTask: Task<Void, Never>?
     
     
     private init() {}
@@ -96,7 +115,9 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
     }
 
     private func cleanupWatchingResources() {
-        autoConnectGeneration &+= 1
+        pendingAutoConnectTask?.cancel()
+        pendingAutoConnectTask = nil
+        _ = connectionLifecycle.detached()
         
         if let source = runLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes)
@@ -129,18 +150,9 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
             IOObjectRelease(device)
         }
         
-        if deviceCount > 0, !getConnectedAndroidVendorIDs().isEmpty {
-            let autoDetect = UserDefaults.standard.object(forKey: "autoDetectDevice") as? Bool ?? true
-            if autoDetect {
-                autoConnectGeneration &+= 1
-                let generation = autoConnectGeneration
-                if !isInitialScan {
-                    try? await Task.sleep(nanoseconds: 1_000_000_000)
-                }
-                guard generation == autoConnectGeneration else { return }
-                await MTPDeviceManager.shared.connectDevice()
-            }
-        }
+        guard deviceCount > 0 else { return }
+        guard UserDefaults.standard.object(forKey: "autoDetectDevice") as? Bool ?? true else { return }
+        scheduleAutoConnect(isInitialScan: isInitialScan)
     }
     
     private func handleDevicesRemoved(iterator: io_iterator_t) async {
@@ -150,17 +162,46 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
             IOObjectRelease(device)
         }
         
-        if deviceCount > 0, getConnectedAndroidVendorIDs().isEmpty {
-            await verifyMtpConnection()
-        }
-    }
-    
-    private func verifyMtpConnection() async {
-        guard MTPDeviceManager.shared.isConnected else { return }
+        guard deviceCount > 0, getConnectedAndroidVendorIDs().isEmpty else { return }
 
-        let result = try? await KalamBridge.shared.fetchStorages()
-        if result == nil {
-            await MTPDeviceManager.shared.disconnectDevice()
+        pendingAutoConnectTask?.cancel()
+        pendingAutoConnectTask = nil
+        _ = connectionLifecycle.detached()
+        ErrorLogger.logMessage(
+            "USB device detached",
+            level: .info,
+            userInfo: [
+                "usb_event": "detach",
+                "connection_state": MTPDeviceManager.shared.isConnected ? "connected" : "connecting"
+            ]
+        )
+        MTPDeviceManager.shared.invalidateConnection(
+            message: "The Android device was disconnected. Reconnect it and try again."
+        )
+    }
+
+    private func scheduleAutoConnect(isInitialScan: Bool) {
+        pendingAutoConnectTask?.cancel()
+        let token = connectionLifecycle.attachScheduled()
+        ErrorLogger.logMessage(
+            "USB device attached",
+            level: .info,
+            userInfo: [
+                "usb_event": "attach",
+                "connection_state": "pending",
+                "initial_scan": isInitialScan
+            ]
+        )
+
+        pendingAutoConnectTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled,
+                  let self,
+                  self.connectionLifecycle.accepts(token),
+                  !self.getConnectedAndroidVendorIDs().isEmpty else { return }
+
+            self.pendingAutoConnectTask = nil
+            await MTPDeviceManager.shared.connectDevice()
         }
     }
     

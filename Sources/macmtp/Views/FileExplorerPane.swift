@@ -101,10 +101,6 @@ struct FileExplorerPane: View {
     @State private var isEditingPath: Bool = false
     @State private var editablePathText: String = ""
 
-    @State private var showRenameDialog: Bool = false
-    @State private var renameTargetFile: FileNode? = nil
-    @State private var renameText: String = ""
-
     @State private var propertiesFile: FileNode?
 
     @State private var isDropTargeted: Bool = false
@@ -124,6 +120,7 @@ struct FileExplorerPane: View {
     enum FileOperation {
         case delete(paths: [String])
         case rename(oldPath: String, newName: String)
+        case requestRename(file: FileNode)
         case open(path: String)
     }
 
@@ -182,6 +179,7 @@ struct FileExplorerPane: View {
             }
         }
         .onChange(of: files) { _, newFiles in
+            resetTypeahead()
             applyFilterAndSort(using: newFiles)
         }
         .onChange(of: isDisabled) { _, disabled in
@@ -193,6 +191,7 @@ struct FileExplorerPane: View {
         .onReceive(MTPDeviceManager.shared.$mtpFiles) { newFiles in
             guard !usesProvidedFiles else { return }
             guard !isLocal else { return }
+            resetTypeahead()
             applyFilterAndSort(using: newFiles)
             if newFiles.isEmpty {
                 if let err = MTPDeviceManager.shared.errorMessage {
@@ -228,34 +227,25 @@ struct FileExplorerPane: View {
                 loadDirectory()
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .fileTypeaheadKeyPressed)) { notification in
+            guard isActivePane, !isDisabled,
+                  let key = notification.object as? String else { return }
+            handleKeyPress(key)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .fileTypeaheadReset)) { _ in
+            resetTypeahead()
+        }
         .onChange(of: browserOrganization) { _, _ in
             applyFilterAndSort()
         }
         .onChange(of: viewMode) { _, _ in
             applyFilterAndSort()
         }
-        .background(
-            KeyboardLetterNav(
-                onKeyPress: { key in handleKeyPress(key) },
-                isActive: isDisabled ? false : isActivePane
-            )
-        )
         .onChange(of: isActivePane) { _, active in
             if active { resetTypeahead() }
         }
         .sheet(item: $propertiesFile) { file in
             FilePropertiesView(file: file, isLocal: isLocal)
-        }
-        .alert("Rename", isPresented: $showRenameDialog) {
-            TextField("New name", text: $renameText)
-            Button("Cancel", role: .cancel) { }
-            Button("Rename") {
-                if let file = renameTargetFile {
-                    commitRename(file: file)
-                }
-            }
-        } message: {
-            Text("Enter a new name for this item.")
         }
     }
 
@@ -705,10 +695,6 @@ struct FileExplorerPane: View {
             RoundedRectangle(cornerRadius: 0)
                 .stroke(isDropTargeted ? Color.accentColor : Color.clear, lineWidth: 2)
         )
-        .onTapGesture {
-            resetTypeahead()
-            selectedItems.removeAll()
-        }
         .onDrop(of: [.fileURL, .utf8PlainText], isTargeted: $isDropTargeted) { providers in
             handleDrop(providers: providers)
         }
@@ -734,7 +720,7 @@ struct FileExplorerPane: View {
         let labelHeight = CGFloat(FileGridLayout.labelHeight(large: isLarge))
         let cellHeight = CGFloat(FileGridLayout.cellHeight(large: isLarge))
 
-        return VStack(spacing: 4) {
+        let cellContent = VStack(spacing: 4) {
             Image(systemName: file.iconName)
                 .font(.system(size: iconSize))
                 .foregroundColor(file.iconColor)
@@ -756,11 +742,15 @@ struct FileExplorerPane: View {
                     .frame(height: 10)
             }
         }
-        .frame(
-            width: cellWidth,
-            height: cellHeight,
-            alignment: .top
-        )
+        .frame(width: cellWidth, height: cellHeight, alignment: .top)
+
+        return FileGridCellInteraction(
+            onPress: { handleSingleClick(file: file) },
+            onDoubleClick: { handleDoubleClick(file: file) }
+        ) {
+            cellContent
+        }
+        .frame(width: cellWidth, height: cellHeight, alignment: .top)
         .background(
             RoundedRectangle(cornerRadius: 6)
                 .fill(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
@@ -777,11 +767,8 @@ struct FileExplorerPane: View {
                 )
             }
         )
-        .onTapGesture(count: 2) {
-            handleDoubleClick(file: file)
-        }
-        .onTapGesture(count: 1) {
-            handleSingleClick(file: file)
+        .transaction { transaction in
+            transaction.animation = nil
         }
         .onDrag { dragProvider(for: file) }
         .onDrop(of: file.isDirectory ? [.fileURL, .utf8PlainText] : [], isTargeted: nil) { providers in
@@ -878,9 +865,8 @@ struct FileExplorerPane: View {
         }
 
         Button(action: {
-            renameTargetFile = file
-            renameText = file.name
-            showRenameDialog = true
+            resetTypeahead()
+            onFileOperation?(.requestRename(file: file))
         }) {
             Label("Rename", systemImage: "pencil")
         }
@@ -1394,26 +1380,6 @@ struct FileExplorerPane: View {
     }
 
 
-    private func commitRename(file: FileNode) {
-        let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard isValidChildName(trimmed), trimmed != file.name else {
-            return
-        }
-
-        if isLocal {
-            let sourceURL = URL(fileURLWithPath: file.path)
-            let destURL = sourceURL.deletingLastPathComponent().appendingPathComponent(trimmed)
-            do {
-                try FileManager.default.moveItem(at: sourceURL, to: destURL)
-                loadDirectory()
-            } catch {
-                ErrorLogger.log(error, message: "Rename failed")
-            }
-        } else {
-            onFileOperation?(.rename(oldPath: file.path, newName: trimmed))
-        }
-    }
-
     private func handleDrop(providers: [NSItemProvider], targetDirectory: String? = nil) -> Bool {
         let collectedFiles = ThreadSafeArray<DroppedFile>()
         let group = DispatchGroup()
@@ -1513,77 +1479,6 @@ extension FileExplorerPane {
         var copy = self
         copy.usesProvidedFiles = enabled
         return copy
-    }
-}
-
-
-    struct KeyboardLetterNav: NSViewRepresentable {
-    var onKeyPress: (String) -> Void
-    var isActive: Bool
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onKeyPress: onKeyPress)
-    }
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        context.coordinator.installMonitor()
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        context.coordinator.onKeyPress = onKeyPress
-        context.coordinator.isActive = isActive
-    }
-
-    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
-        coordinator.removeMonitor()
-    }
-
-    class Coordinator: NSObject {
-        var onKeyPress: (String) -> Void
-        var isActive: Bool = false
-        private var monitor: Any?
-
-        init(onKeyPress: @escaping (String) -> Void) {
-            self.onKeyPress = onKeyPress
-        }
-
-        func installMonitor() {
-            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                guard let self = self, self.isActive else { return event }
-                let isTextEditing = MainActor.assumeIsolated {
-                    NSApp.modalWindow != nil
-                        || (NSApp.keyWindow?.firstResponder is NSTextField)
-                        || (NSApp.keyWindow?.firstResponder is NSTextView)
-                }
-                guard !isTextEditing else { return event }
-                if let responder = MainActor.assumeIsolated({ NSApp.keyWindow?.firstResponder }),
-                   responder is NSTextField || responder is NSTextView {
-                    return event
-                }
-                let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-                guard modifiers == [] else { return event }
-                guard let chars = event.charactersIgnoringModifiers?.lowercased(),
-                      let first = chars.first,
-                      first.unicodeScalars.allSatisfy({ CharacterSet.letters.contains($0) }) else {
-                    return event
-                }
-                self.onKeyPress(String(first))
-                return nil
-            }
-        }
-
-        func removeMonitor() {
-            if let m = monitor {
-                NSEvent.removeMonitor(m)
-                monitor = nil
-            }
-        }
-
-        deinit {
-            removeMonitor()
-        }
     }
 }
 
