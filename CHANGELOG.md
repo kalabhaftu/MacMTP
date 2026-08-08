@@ -1,16 +1,36 @@
 # Changelog
 
 ## Unreleased
-- Vendored the Kalam native adapter and pinned Go dependencies so source and CI builds are self-contained; added a manual native-source comparison command.
-- Added Finder-style organization headers with category counts and explicit sort/group/filter summaries; expanded Sentry context tags for native, reconciliation, USB, and reconnect events.
-- Stopped issuing an immediate post-mutation directory walk after confirmed native create, rename, and delete responses; the confirmed result is published immediately, avoiding Android devices that time out and close the USB session during the follow-up walk.
+- Next release.
 
-- Fixed empty MTP directory responses, serialized native mutation identifiers, coalesced refreshes, and reconciled create, rename, and delete state through the device manager.
-- Added Finder-style typeahead and immediate fixed-cell selection, centralized rename and new-folder dialogs, and made USB detach handling cancel stale connection work promptly.
-- Fixed duplicate USB auto-connect attempts, blocked transfers without a valid MTP storage, repaired frozen upload progress, preserved clipboard items when a transfer is already active, and routed native transfer failures to the correct callback.
-- Fixed queue pause/resume controls so requests reach the transfer service and take effect at the next file boundary.
-- Prevented expected AppKit modal waits and short launch rendering delays from producing false Sentry app-hang reports.
-- Hardened CI and release packaging with bundle architecture, signature, Sentry, artifact, and changelog validation; added reproducible support-log guidance.
+## 1.6.8 - 2026-08-08
+
+### MTP reliability
+- Vendored the Kalam native adapter and its pinned Go dependency tree into macMTP, including license metadata and native contract checks. Builds and CI are now self-contained.
+- Preserved the upstream MTP contracts across the native bridge: empty collections decode as `[]`, successful mutations require `data: true`, native `errorType` values are retained, and create/rename object IDs are available to Swift.
+- Added a FIFO native-operation gate and a directory coordinator that serializes refresh, create, rename, and delete work, coalesces identical refreshes, rejects stale results, and keys snapshots by storage, path, and hidden-file visibility.
+- Fixed empty-directory loading and refresh failure handling so a failed listing cannot masquerade as a different folder or a false empty directory.
+- Made create, rename, and delete publish confirmed native results immediately. macMTP no longer sends an extra directory walk immediately after a mutation, avoiding Android devices that time out and close the USB session during that follow-up request.
+- Added trimmed-name validation, listing-first duplicate detection, native fallback checks when a valid listing is unavailable, explicit duplicate conflict messages, and captured mutation destinations that are independent of selection.
+
+### Finder-like file browser
+- Replaced custom SwiftUI file-cell interaction with AppKit-backed collection and table views for native pointer-down selection, Command/Shift selection, blank-space deselection, keyboard focus, and double-click-only opening.
+- Stabilized icon-grid geometry with fixed cells, reserved icon and label regions, fixed column sizing, two-line names, and selection backgrounds aligned to the cell bounds.
+- Added Finder-style typeahead with repeated-letter cycling, multi-character queries, no-match recovery, exact single selection, modal/text-field suppression, and reset behavior after navigation, refresh, clicks, and dialogs.
+- Centralized rename and New Folder dialogs with captured destination paths, reliable initial text, duplicate-submit protection, progress state, and dialog-preserving retry errors.
+- Added visible organization headers with separator rules, group names, item counts, and explicit summaries for active grouping, sorting direction, and extension filters.
+
+### Transfer and connection behavior
+- Fixed transfer progress callback routing and frozen progress states, converted the upstream decimal MB/s callback to bytes per second without changing its units, and prevented invalid-storage transfers from starting.
+- Made pause/resume operate at the file boundary: the current file finishes, then the queued transfer waits. Added visible pause feedback and transfer status notifications.
+- Preserved clipboard state when a transfer request is rejected because another transfer is active, and routed native transfer failures to the correct completion callback.
+- Reworked USB lifecycle handling around the active device identity with interface-settling debounce, immediate verified detach state, connection generations, cancellation of stale connection tasks, and reconnect reporting.
+
+### Reporting, support, and release quality
+- Expanded structured Sentry context for native operation, operation phase, error type, retry count, refresh coalescing, conflict classification, reconciliation state, USB events, reconnect results, and session generation while keeping paths and device identifiers redacted.
+- Kept expected user/device conditions out of noisy error reports while preserving actionable native and transport failures for diagnosis.
+- Added bug and feature issue templates, support-log guidance, native response fixtures, reliability tests, typeahead and grid tests, USB lifecycle tests, and release bundle validation.
+- Hardened CI and release packaging with vendored native builds, shell/plist checks, architecture and signature verification, Sentry DSN/symbol validation, artifact checks, and changelog-driven release notes.
 
 ## 1.6.7 - 2026-07-29
 
