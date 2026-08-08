@@ -162,3 +162,83 @@ enum FileSelectionRules {
         return Set(bounds.map { orderedPaths[$0] })
     }
 }
+
+struct FileTypeaheadState: Equatable {
+    var query = ""
+    var lastKeyTime = Date.distantPast
+}
+
+struct FileTypeaheadResult: Equatable {
+    let state: FileTypeaheadState
+    let selectedPath: String?
+}
+
+enum FileTypeaheadRules {
+    static let timeout: TimeInterval = 1.0
+
+    static func advance(
+        key: String,
+        files: [FileNode],
+        selectedPath: String?,
+        state: FileTypeaheadState,
+        now: Date,
+        timeout: TimeInterval = timeout
+    ) -> FileTypeaheadResult {
+        let normalizedKey = String(key.lowercased().prefix(1))
+        guard !normalizedKey.isEmpty,
+              normalizedKey.unicodeScalars.allSatisfy({ CharacterSet.letters.contains($0) }) else {
+            return FileTypeaheadResult(state: state, selectedPath: nil)
+        }
+
+        let withinTimeout = now.timeIntervalSince(state.lastKeyTime) < timeout
+        let repeatedLetter = withinTimeout && state.query == normalizedKey
+        let query = repeatedLetter
+            ? normalizedKey
+            : (withinTimeout && !state.query.isEmpty ? state.query + normalizedKey : normalizedKey)
+        let matches = files.filter { $0.name.lowercased().hasPrefix(query) }
+
+        if !matches.isEmpty {
+            let selected: FileNode?
+            if repeatedLetter,
+               let selectedPath,
+               let selectedIndex = matches.firstIndex(where: { $0.path == selectedPath }) {
+                selected = matches[(selectedIndex + 1) % matches.count]
+            } else {
+                selected = matches.first
+            }
+            return FileTypeaheadResult(
+                state: FileTypeaheadState(query: query, lastKeyTime: now),
+                selectedPath: selected?.path
+            )
+        }
+
+        // A failed multi-character query should not poison the next key. Keep
+        // the latest letter as the new query and let the caller keep selection.
+        return FileTypeaheadResult(
+            state: FileTypeaheadState(query: normalizedKey, lastKeyTime: now),
+            selectedPath: nil
+        )
+    }
+}
+
+enum FileGridLayout {
+    static let spacing = 8.0
+    static let horizontalPadding = 12.0
+
+    static func cellWidth(large: Bool) -> Double {
+        large ? 96 : 80
+    }
+
+    static func cellHeight(large: Bool) -> Double {
+        large ? 116 : 76
+    }
+
+    static func labelHeight(large: Bool) -> Double {
+        large ? 34 : 30
+    }
+
+    static func columnCount(containerWidth: Double, large: Bool) -> Int {
+        let availableWidth = max(0, containerWidth - (horizontalPadding * 2))
+        return max(1, Int((availableWidth + spacing) / (cellWidth(large: large) + spacing)))
+    }
+}

@@ -82,6 +82,78 @@ func selectionRangeUsesDisplayedOrderInEitherDirection() {
 }
 
 @Test
+func repeatedLetterTypeaheadCyclesMatchingItems() {
+    let files = [file("nano"), file("nimo"), file("node")]
+    let start = Date(timeIntervalSince1970: 1_700_000_000)
+
+    let first = FileTypeaheadRules.advance(
+        key: "n",
+        files: files,
+        selectedPath: nil,
+        state: FileTypeaheadState(),
+        now: start
+    )
+    let second = FileTypeaheadRules.advance(
+        key: "n",
+        files: files,
+        selectedPath: first.selectedPath,
+        state: first.state,
+        now: start.addingTimeInterval(0.1)
+    )
+
+    #expect(first.selectedPath == "/nano")
+    #expect(second.selectedPath == "/nimo")
+}
+
+@Test
+func typeaheadBuildsQueriesAndFallsBackAfterNoMatch() {
+    let files = [file("nano"), file("nimo"), file("alpha")]
+    let start = Date(timeIntervalSince1970: 1_700_000_000)
+    let n = FileTypeaheadRules.advance(
+        key: "n",
+        files: files,
+        selectedPath: nil,
+        state: FileTypeaheadState(),
+        now: start
+    )
+    let ni = FileTypeaheadRules.advance(
+        key: "i",
+        files: files,
+        selectedPath: n.selectedPath,
+        state: n.state,
+        now: start.addingTimeInterval(0.1)
+    )
+    let noMatch = FileTypeaheadRules.advance(
+        key: "x",
+        files: files,
+        selectedPath: ni.selectedPath,
+        state: ni.state,
+        now: start.addingTimeInterval(0.2)
+    )
+    let afterTimeout = FileTypeaheadRules.advance(
+        key: "a",
+        files: files,
+        selectedPath: nil,
+        state: noMatch.state,
+        now: start.addingTimeInterval(2.0)
+    )
+
+    #expect(ni.state.query == "ni")
+    #expect(ni.selectedPath == "/nimo")
+    #expect(noMatch.selectedPath == nil)
+    #expect(noMatch.state.query == "x")
+    #expect(afterTimeout.selectedPath == "/alpha")
+}
+
+@Test
+func iconGridReservesStableCellsForWrappedNames() {
+    #expect(FileGridLayout.cellHeight(large: false) > FileGridLayout.labelHeight(large: false))
+    #expect(FileGridLayout.cellHeight(large: true) > FileGridLayout.labelHeight(large: true))
+    #expect(FileGridLayout.columnCount(containerWidth: 640, large: false) == 7)
+    #expect(FileGridLayout.columnCount(containerWidth: 640, large: true) == 6)
+}
+
+@Test
 func directSizeSummaryNeverTraversesOrCountsFolderPlaceholders() {
     let files = [
         file("Folder", size: 999, isDirectory: true),

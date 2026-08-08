@@ -10,6 +10,7 @@ public enum KalamError: Error, LocalizedError {
     case operationInProgress
     case timedOut(String)
     case invalidPath(String)
+    case itemAlreadyExists(String)
     case nativeOperationFailed(operation: String, errorType: String?, message: String)
 
     public var errorDescription: String? {
@@ -30,6 +31,8 @@ public enum KalamError: Error, LocalizedError {
             return "MTP operation timed out: \(msg)"
         case .invalidPath(let msg):
             return "Invalid path: \(msg)"
+        case .itemAlreadyExists(let name):
+            return "A file or folder named \"\(name)\" already exists in this directory."
         case .nativeOperationFailed(let operation, let errorType, let message):
             let detail = message.isEmpty ? "The MTP subsystem returned no error details." : message
             if let errorType, !errorType.isEmpty {
@@ -104,6 +107,64 @@ private func nativeOperationError(
         errorType: errorType?.trimmingCharacters(in: .whitespacesAndNewlines),
         message: detail.isEmpty ? fallback : detail
     )
+}
+
+func nativeErrorType(for error: Error) -> String {
+    guard let kalamError = error as? KalamError else {
+        return String(describing: type(of: error))
+    }
+
+    switch kalamError {
+    case .nativeOperationFailed(_, let errorType, _):
+        if let errorType, !errorType.isEmpty { return errorType }
+        return "unknown"
+    case .deviceNotConnected: return "device_not_connected"
+    case .transferFailed: return "transfer_failed"
+    case .operationFailed: return "operation_failed"
+    case .invalidResponse: return "invalid_response"
+    case .serializationError: return "serialization_error"
+    case .operationInProgress: return "operation_in_progress"
+    case .timedOut: return "timed_out"
+    case .invalidPath: return "invalid_path"
+    case .itemAlreadyExists: return "item_already_exists"
+    }
+}
+
+func validateSimpleMTPResult(
+    _ result: GoSimpleResult,
+    operation: String,
+    fallback: String
+) throws {
+    let errorMessage = result.error?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let errorType = result.errorType?.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard errorMessage.isEmpty, errorType?.isEmpty != false else {
+        throw nativeOperationError(
+            operation: operation,
+            errorType: errorType,
+            message: errorMessage,
+            fallback: fallback
+        )
+    }
+    guard result.data == true else {
+        throw nativeOperationError(
+            operation: operation,
+            errorType: errorType,
+            message: nil,
+            fallback: fallback
+        )
+    }
+}
+
+func normalizedMTPChildName(_ name: String) throws -> String {
+    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty,
+          trimmed != ".",
+          trimmed != "..",
+          !trimmed.contains("/"),
+          !trimmed.contains("\\") else {
+        throw KalamError.invalidPath("A file or folder name must not be empty or contain path separators.")
+    }
+    return trimmed
 }
 
 func decodeMTPTransferCompletion(_ json: String) -> Result<Void, Error> {
@@ -242,6 +303,38 @@ private final class KalamRegistry: @unchecked Sendable {
 
 private let bounceQueue = DispatchQueue(label: "com.macmtp.callback-bounce", qos: .userInitiated)
 
+final class FIFOOperationGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var occupied = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func enter() async {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if occupied {
+                waiters.append(continuation)
+                lock.unlock()
+            } else {
+                occupied = true
+                lock.unlock()
+                continuation.resume()
+            }
+        }
+    }
+
+    func leave() {
+        lock.lock()
+        guard !waiters.isEmpty else {
+            occupied = false
+            lock.unlock()
+            return
+        }
+        let continuation = waiters.removeFirst()
+        lock.unlock()
+        continuation.resume()
+    }
+}
+
 @_cdecl("macMTP_done_callback")
 public func macMTP_done_callback(jsonPtr: UnsafeMutablePointer<CChar>?) {
     guard let jsonPtr = jsonPtr else { return }
@@ -288,22 +381,19 @@ public actor KalamBridge {
 
     private let jsonDecoder: JSONDecoder
     private let mtpQueue: DispatchQueue
-    private var operationInFlight = false
+    private let operationGate = FIFOOperationGate()
 
     private init() {
         self.jsonDecoder = JSONDecoder()
         self.mtpQueue = DispatchQueue(label: "com.macmtp.kalam", qos: .userInitiated)
     }
 
-    private func beginOperation() throws {
-        guard !operationInFlight else {
-            throw KalamError.operationInProgress
-        }
-        operationInFlight = true
+    private func beginOperation() async {
+        await operationGate.enter()
     }
 
     private func endOperation() {
-        operationInFlight = false
+        operationGate.leave()
     }
 
     private func waitForDone(startOperation: @escaping @Sendable () -> Void) async throws -> String {
@@ -318,7 +408,7 @@ public actor KalamBridge {
         operationName: String,
         _ operation: @escaping @Sendable () -> Void
     ) async throws -> T {
-        try beginOperation()
+        await beginOperation()
         defer { endOperation() }
 
         let jsonString = try await waitForDone {
@@ -337,7 +427,7 @@ public actor KalamBridge {
             throw KalamError.serializationError
         }
 
-        try beginOperation()
+        await beginOperation()
         defer { endOperation() }
 
         let jsonString = try await waitForDone {
@@ -452,9 +542,11 @@ public actor KalamBridge {
         let result: GoSimpleResult = try await executeMTPWithInput(operationName: "make_directory", input) { inputJson in
             MakeDirectory(inputJson)
         }
-        if let err = result.error, !err.isEmpty {
-            throw KalamError.operationFailed(err)
-        }
+        try validateSimpleMTPResult(
+            result,
+            operation: "make_directory",
+            fallback: "The MTP subsystem did not confirm directory creation."
+        )
     }
 
     public func deleteFiles(storageId: UInt32, paths: [String]) async throws {
@@ -467,9 +559,11 @@ public actor KalamBridge {
         let result: GoSimpleResult = try await executeMTPWithInput(operationName: "delete_files", input) { inputJson in
             DeleteFile(inputJson)
         }
-        if let err = result.error, !err.isEmpty {
-            throw KalamError.operationFailed(err)
-        }
+        try validateSimpleMTPResult(
+            result,
+            operation: "delete_files",
+            fallback: "The MTP subsystem did not confirm deletion."
+        )
     }
 
     public func renameFile(storageId: UInt32, path: String, newName: String) async throws {
@@ -483,9 +577,11 @@ public actor KalamBridge {
         let result: GoSimpleResult = try await executeMTPWithInput(operationName: "rename_file", input) { inputJson in
             RenameFile(inputJson)
         }
-        if let err = result.error, !err.isEmpty {
-            throw KalamError.operationFailed(err)
-        }
+        try validateSimpleMTPResult(
+            result,
+            operation: "rename_file",
+            fallback: "The MTP subsystem did not confirm renaming."
+        )
     }
 
     public func checkFilesExist(storageId: UInt32, paths: [String]) async throws -> [Bool] {
@@ -553,7 +649,7 @@ public actor KalamBridge {
             throw KalamError.serializationError
         }
 
-        try beginOperation()
+        await beginOperation()
         defer { endOperation() }
 
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -611,7 +707,7 @@ public actor KalamBridge {
             throw KalamError.serializationError
         }
 
-        try beginOperation()
+        await beginOperation()
         defer { endOperation() }
 
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -657,4 +753,5 @@ public actor KalamBridge {
             Dispose()
         }
     }
+
 }

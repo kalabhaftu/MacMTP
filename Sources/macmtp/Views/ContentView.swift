@@ -55,6 +55,8 @@ struct ContentView: View {
     @State private var pendingDeletePaths: [String] = []
     @State private var showNewFolderDialog: Bool = false
     @State private var newFolderName: String = "New Folder"
+    @State private var newFolderTargetPath: String = "/"
+    @State private var newFolderTargetIsLocal: Bool = true
     @State private var operationErrorMessage: String?
 
 
@@ -362,6 +364,9 @@ struct ContentView: View {
             onFileOperation: { operation in
                 handleFileOperation(operation, isLocal: true)
             },
+            onRequestNewFolder: { path, isLocal in
+                beginNewFolder(path: path, isLocal: isLocal)
+            },
             onPaste: handlePaste
         )
         .usesProvidedFiles(screenshotMode)
@@ -408,6 +413,9 @@ struct ContentView: View {
                 },
                 onFileOperation: { operation in
                     handleFileOperation(operation, isLocal: false)
+                },
+                onRequestNewFolder: { path, isLocal in
+                    beginNewFolder(path: path, isLocal: isLocal)
                 },
                 onPaste: handlePaste
             )
@@ -607,7 +615,17 @@ struct ContentView: View {
     }
 
     func handleNewFolder() {
+        beginNewFolder(
+            path: activePane == .local ? currentLocalPath : currentMTPPath,
+            isLocal: activePane == .local
+        )
+    }
+
+    private func beginNewFolder(path: String, isLocal: Bool) {
+        newFolderTargetPath = path.isEmpty ? "/" : path
+        newFolderTargetIsLocal = isLocal
         newFolderName = "New Folder"
+        operationErrorMessage = nil
         showNewFolderDialog = true
     }
 
@@ -696,34 +714,6 @@ struct ContentView: View {
                         try await MTPDeviceManager.shared.renameFile(path: oldPath, newName: newName)
                     } catch {
                         ErrorLogger.log(error, message: "Rename failed")
-                        operationErrorMessage = error.localizedDescription
-                    }
-                }
-            }
-
-        case .newFolder(let parent, let name):
-            if isLocal {
-                guard isValidChildName(name) else {
-                    operationErrorMessage = "A file or folder name must not be empty or contain path separators."
-                    return
-                }
-                let folderURL = URL(fileURLWithPath: parent).appendingPathComponent(name)
-                do {
-                    try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: false)
-                    handleRefresh()
-                } catch {
-                    ErrorLogger.log(error, message: "Create folder failed")
-                    operationErrorMessage = error.localizedDescription
-                }
-            } else {
-                Task {
-                    do {
-                        guard parent == MTPDeviceManager.shared.currentMTPPath else {
-                            throw KalamError.invalidPath("The destination folder changed. Please retry.")
-                        }
-                        try await MTPDeviceManager.shared.createFolder(name: name)
-                    } catch {
-                        ErrorLogger.log(error, message: "Create MTP folder failed")
                         operationErrorMessage = error.localizedDescription
                     }
                 }
@@ -937,25 +927,21 @@ struct ContentView: View {
             return
         }
 
-        let parentPath: String
-        switch activePane {
-        case .local: parentPath = currentLocalPath
-        case .mtp: parentPath = currentMTPPath
-        }
+        let parentPath = newFolderTargetPath
 
-        let folderURL = URL(fileURLWithPath: parentPath).appendingPathComponent(trimmedName)
-
-        if activePane == .local {
+        if newFolderTargetIsLocal {
+            let folderURL = URL(fileURLWithPath: parentPath).appendingPathComponent(trimmedName)
             do {
                 try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: false)
-                handleRefresh()
+                NotificationCenter.default.post(name: .localDirectoryNeedsRefresh, object: nil)
             } catch {
                 ErrorLogger.log(error, message: "Create folder failed")
+                operationErrorMessage = error.localizedDescription
             }
         } else {
             Task {
                 do {
-                    try await MTPDeviceManager.shared.createFolder(name: trimmedName)
+                    try await MTPDeviceManager.shared.createFolder(name: trimmedName, in: parentPath)
                 } catch {
                     ErrorLogger.log(error, message: "Create MTP folder failed")
                     operationErrorMessage = error.localizedDescription

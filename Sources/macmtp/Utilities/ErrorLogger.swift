@@ -169,6 +169,8 @@ public struct ErrorLogger {
         switch kalamError {
         case .deviceNotConnected:
             return false
+        case .itemAlreadyExists:
+            return false
         case .operationFailed(let message)
             where message.localizedCaseInsensitiveContains("no MTP devices found"):
             return false
@@ -255,6 +257,7 @@ private extension KalamError {
     var reportingCase: String {
         switch self {
         case .deviceNotConnected: "device_not_connected"
+        case .itemAlreadyExists: "item_already_exists"
         case .transferFailed: "transfer_failed"
         case .operationFailed: "operation_failed"
         case .nativeOperationFailed: "native_operation_failed"

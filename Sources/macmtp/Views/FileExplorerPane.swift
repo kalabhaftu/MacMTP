@@ -71,11 +71,13 @@ struct FileExplorerPane: View {
     let clipboardManager: ClipboardManager
     var onFilesDropped: (([DroppedFile], String) -> Void)? = nil
     var onFileOperation: ((FileOperation) -> Void)? = nil
+    var onRequestNewFolder: ((String, Bool) -> Void)? = nil
     var onPaste: (() -> Void)? = nil
     var usesProvidedFiles: Bool = false
     
 
     @State private var loadingState: FileExplorerLoadingState = .idle
+    @State private var nonBlockingErrorMessage: String?
     @State private var displayedFiles: [FileNode] = []
     @State private var ungroupedFiles: [FileNode] = []
     @State private var displayedGroups: [FileGroup] = []
@@ -103,8 +105,6 @@ struct FileExplorerPane: View {
     @State private var renameTargetFile: FileNode? = nil
     @State private var renameText: String = ""
 
-    @State private var isCreatingNewFolder: Bool = false
-    @State private var newFolderName: String = ""
     @State private var propertiesFile: FileNode?
 
     @State private var isDropTargeted: Bool = false
@@ -124,7 +124,6 @@ struct FileExplorerPane: View {
     enum FileOperation {
         case delete(paths: [String])
         case rename(oldPath: String, newName: String)
-        case newFolder(parentPath: String, name: String)
         case open(path: String)
     }
 
@@ -145,6 +144,29 @@ struct FileExplorerPane: View {
             contentArea
         }
         .background(Color(NSColor.controlBackgroundColor))
+        .overlay(alignment: .top) {
+            if !isLocal, !files.isEmpty, let message = nonBlockingErrorMessage {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.yellow)
+                    Text(message)
+                        .font(.caption)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button {
+                        Task { await MTPDeviceManager.shared.refreshFiles() }
+                    } label: {
+                        Label("Retry", systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(.regularMaterial)
+                .overlay(alignment: .bottom) { Divider() }
+            }
+        }
         .onAppear {
             if usesProvidedFiles {
                 seedProvidedFiles()
@@ -182,6 +204,13 @@ struct FileExplorerPane: View {
                 loadingState = .loaded
             }
         }
+        .onReceive(MTPDeviceManager.shared.$errorMessage) { error in
+            guard !usesProvidedFiles, !isLocal else { return }
+            nonBlockingErrorMessage = error
+            if error != nil, !files.isEmpty {
+                loadingState = .loaded
+            }
+        }
         .onChange(of: showHiddenFilesLocal) { _, _ in
             if isLocal { applyFilterAndSort() }
         }
@@ -212,7 +241,7 @@ struct FileExplorerPane: View {
             )
         )
         .onChange(of: isActivePane) { _, active in
-            if active { lastKeyTime = Date.distantPast }
+            if active { resetTypeahead() }
         }
         .sheet(item: $propertiesFile) { file in
             FilePropertiesView(file: file, isLocal: isLocal)
@@ -227,15 +256,6 @@ struct FileExplorerPane: View {
             }
         } message: {
             Text("Enter a new name for this item.")
-        }
-        .alert("New Folder", isPresented: $isCreatingNewFolder) {
-            TextField("Folder name", text: $newFolderName)
-            Button("Cancel", role: .cancel) { }
-            Button("Create") {
-                commitNewFolder()
-            }
-        } message: {
-            Text("Enter a name for the new folder.")
         }
     }
 
@@ -584,8 +604,19 @@ struct FileExplorerPane: View {
     }
 
     private var iconGridView: some View {
-        let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: viewMode == .largeIcons ? 4 : 7)
         return GeometryReader { scrollGeo in
+            let isLarge = viewMode == .largeIcons
+            let cellWidth = CGFloat(FileGridLayout.cellWidth(large: isLarge))
+            let columnSpacing = CGFloat(FileGridLayout.spacing)
+            let columnCount = FileGridLayout.columnCount(
+                containerWidth: scrollGeo.size.width,
+                large: isLarge
+            )
+            let columns = Array(
+                repeating: GridItem(.fixed(cellWidth), spacing: columnSpacing, alignment: .top),
+                count: columnCount
+            )
+
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     LazyVGrid(columns: columns, spacing: 8) {
@@ -595,7 +626,7 @@ struct FileExplorerPane: View {
                                     .gridCellColumns(columns.count)
                             }
                             ForEach(group.files) { file in
-                                gridItemWithPreference(for: file)
+                                gridItemWithPreference(for: file, cellWidth: cellWidth)
                             }
                         }
                     }
@@ -674,7 +705,10 @@ struct FileExplorerPane: View {
             RoundedRectangle(cornerRadius: 0)
                 .stroke(isDropTargeted ? Color.accentColor : Color.clear, lineWidth: 2)
         )
-        .onTapGesture { selectedItems.removeAll() }
+        .onTapGesture {
+            resetTypeahead()
+            selectedItems.removeAll()
+        }
         .onDrop(of: [.fileURL, .utf8PlainText], isTargeted: $isDropTargeted) { providers in
             handleDrop(providers: providers)
         }
@@ -693,33 +727,39 @@ struct FileExplorerPane: View {
         .padding(.vertical, 3)
     }
 
-    private func gridItemWithPreference(for file: FileNode) -> some View {
+    private func gridItemWithPreference(for file: FileNode, cellWidth: CGFloat) -> some View {
         let isSelected = selectedItems.contains(file.path)
         let iconSize: CGFloat = viewMode == .largeIcons ? 48 : 28
+        let isLarge = viewMode == .largeIcons
+        let labelHeight = CGFloat(FileGridLayout.labelHeight(large: isLarge))
+        let cellHeight = CGFloat(FileGridLayout.cellHeight(large: isLarge))
 
         return VStack(spacing: 4) {
             Image(systemName: file.iconName)
                 .font(.system(size: iconSize))
                 .foregroundColor(file.iconColor)
                 .symbolRenderingMode(.hierarchical)
+                .frame(height: iconSize)
 
             Text(file.name)
                 .font(viewMode == .largeIcons ? .caption : .caption2)
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
                 .truncationMode(.tail)
-                .frame(maxWidth: viewMode == .largeIcons ? 80 : 60)
+                .frame(width: cellWidth - 8, height: labelHeight, alignment: .top)
 
             if viewMode == .largeIcons {
                 Text(fileSizeDisplay(for: file))
                     .font(.system(size: 8 * appFontScale))
                     .foregroundColor(.secondary)
                     .monospacedDigit()
+                    .frame(height: 10)
             }
         }
         .frame(
-            width: viewMode == .largeIcons ? 90 : 70,
-            height: viewMode == .largeIcons ? 110 : 70
+            width: cellWidth,
+            height: cellHeight,
+            alignment: .top
         )
         .background(
             RoundedRectangle(cornerRadius: 6)
@@ -848,8 +888,8 @@ struct FileExplorerPane: View {
         Divider()
 
         Button(action: {
-            isCreatingNewFolder = true
-            newFolderName = "New Folder"
+            resetTypeahead()
+            onRequestNewFolder?(currentPath, isLocal)
         }) {
             Label("New Folder", systemImage: "folder.badge.plus")
         }
@@ -903,8 +943,8 @@ struct FileExplorerPane: View {
         Divider()
         
         Button(action: {
-            isCreatingNewFolder = true
-            newFolderName = "New Folder"
+            resetTypeahead()
+            onRequestNewFolder?(currentPath, isLocal)
         }) {
             Label("New Folder", systemImage: "folder.badge.plus")
         }
@@ -1043,6 +1083,7 @@ struct FileExplorerPane: View {
 
 
     private func navigateTo(path: String) {
+        resetTypeahead()
         let cleanPath = path.isEmpty ? "/" : path
         if usesProvidedFiles {
             if pathHistoryIndex < pathHistory.count - 1 {
@@ -1097,6 +1138,7 @@ struct FileExplorerPane: View {
     }
 
     private func navigateBack() {
+        resetTypeahead()
         if isLocal {
             guard pathHistoryIndex > 0 else { return }
             pathHistoryIndex -= 1
@@ -1111,6 +1153,7 @@ struct FileExplorerPane: View {
     }
 
     private func navigateForward() {
+        resetTypeahead()
         if isLocal {
             guard pathHistoryIndex >= 0 && pathHistoryIndex < pathHistory.count - 1 else { return }
             pathHistoryIndex += 1
@@ -1125,6 +1168,7 @@ struct FileExplorerPane: View {
     }
 
     private func navigateUp() {
+        resetTypeahead()
         if isLocal {
             let url  = URL(fileURLWithPath: currentPath)
             let parentPath = url.deletingLastPathComponent().path
@@ -1205,6 +1249,7 @@ struct FileExplorerPane: View {
     @AppStorage("showHiddenFilesMTP") private var showHiddenFilesMTP: Bool = false
 
     private func applyFilterAndSort(using input: [FileNode]? = nil) {
+        resetTypeahead()
         let showHidden = isLocal ? showHiddenFilesLocal : showHiddenFilesMTP
         let organization = browserOrganization
         displayedGroups = organization.organize(input ?? files, showHidden: showHidden)
@@ -1245,6 +1290,7 @@ struct FileExplorerPane: View {
     }
 
     private func handleSingleClick(file: FileNode) {
+        resetTypeahead()
         let flags = NSEvent.modifierFlags
         if flags.contains(.shift) {
             handleShiftClick(file: file, additive: flags.contains(.command))
@@ -1294,6 +1340,7 @@ struct FileExplorerPane: View {
     }
 
     private func handleCommandClick(file: FileNode) {
+        resetTypeahead()
         if selectedItems.contains(file.path) {
             selectedItems.remove(file.path)
         } else {
@@ -1303,6 +1350,7 @@ struct FileExplorerPane: View {
     }
 
     private func handleShiftClick(file: FileNode, additive: Bool) {
+        resetTypeahead()
         guard let lastID = lastClickedItemID,
               let rangeSelection = FileSelectionRules.range(
                 in: displayedFiles.map(\.path),
@@ -1325,30 +1373,24 @@ struct FileExplorerPane: View {
         guard !key.isEmpty, !displayedFiles.isEmpty else { return }
 
         let now = Date()
-        let timeDiff = now.timeIntervalSince(lastKeyTime)
-        lastKeyTime = now
-
-        if timeDiff < 1.0, keySearchBuffer != key.lowercased() {
-            keySearchBuffer += key.lowercased()
-        } else {
-            keySearchBuffer = key.lowercased()
+        let result = FileTypeaheadRules.advance(
+            key: key,
+            files: displayedFiles,
+            selectedPath: selectedItems.count == 1 ? selectedItems.first : nil,
+            state: FileTypeaheadState(query: keySearchBuffer, lastKeyTime: lastKeyTime),
+            now: now
+        )
+        keySearchBuffer = result.state.query
+        lastKeyTime = result.state.lastKeyTime
+        if let selectedPath = result.selectedPath {
+            selectedItems = [selectedPath]
+            lastClickedItemID = selectedPath
         }
+    }
 
-        let matches = displayedFiles.filter { $0.name.lowercased().hasPrefix(keySearchBuffer) }
-        guard !matches.isEmpty else { return }
-
-        let selectedMatch = matches.first { selectedItems.contains($0.path) }
-
-        if let current = selectedMatch, let currentIndex = matches.firstIndex(of: current) {
-            let nextIndex = (currentIndex + 1) % matches.count
-            let next = matches[nextIndex]
-            selectedItems = [next.path]
-            lastClickedItemID = next.path
-        } else {
-            let first = matches[0]
-            selectedItems = [first.path]
-            lastClickedItemID = first.path
-        }
+    private func resetTypeahead() {
+        keySearchBuffer = ""
+        lastKeyTime = .distantPast
     }
 
 
@@ -1371,24 +1413,6 @@ struct FileExplorerPane: View {
             onFileOperation?(.rename(oldPath: file.path, newName: trimmed))
         }
     }
-
-    private func commitNewFolder() {
-        let trimmed = newFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard isValidChildName(trimmed) else { return }
-
-        if isLocal {
-            let folderURL = URL(fileURLWithPath: currentPath).appendingPathComponent(trimmed)
-            do {
-                try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: false)
-                loadDirectory()
-            } catch {
-                ErrorLogger.log(error, message: "Create folder failed")
-            }
-        } else {
-            onFileOperation?(.newFolder(parentPath: currentPath, name: trimmed))
-        }
-    }
-
 
     private func handleDrop(providers: [NSItemProvider], targetDirectory: String? = nil) -> Bool {
         let collectedFiles = ThreadSafeArray<DroppedFile>()
@@ -1528,12 +1552,25 @@ extension FileExplorerPane {
         func installMonitor() {
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 guard let self = self, self.isActive else { return event }
+                let isTextEditing = MainActor.assumeIsolated {
+                    NSApp.modalWindow != nil
+                        || (NSApp.keyWindow?.firstResponder is NSTextField)
+                        || (NSApp.keyWindow?.firstResponder is NSTextView)
+                }
+                guard !isTextEditing else { return event }
+                if let responder = MainActor.assumeIsolated({ NSApp.keyWindow?.firstResponder }),
+                   responder is NSTextField || responder is NSTextView {
+                    return event
+                }
                 let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
                 guard modifiers == [] else { return event }
-                guard let chars = event.charactersIgnoringModifiers?.lowercased(), !chars.isEmpty else { return event }
-                guard chars.rangeOfCharacter(from: .letters) != nil else { return event }
-                self.onKeyPress(chars)
-                return event
+                guard let chars = event.charactersIgnoringModifiers?.lowercased(),
+                      let first = chars.first,
+                      first.unicodeScalars.allSatisfy({ CharacterSet.letters.contains($0) }) else {
+                    return event
+                }
+                self.onKeyPress(String(first))
+                return nil
             }
         }
 
