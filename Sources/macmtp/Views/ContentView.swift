@@ -32,6 +32,7 @@ struct ContentView: View {
 
 
     @State private var showTransferProgress: Bool = false
+    @State private var showCancelTransferConfirmation = false
     @State private var transferToastMessage: String?
     @State private var transferToastGeneration = 0
 
@@ -127,8 +128,7 @@ struct ContentView: View {
                 TransferProgressView(
                     batch: batch,
                     onCancel: {
-                        FileTransferService.shared.cancelTransfer()
-                        showTransferProgress = false
+                        showCancelTransferConfirmation = true
                     },
                     onPause: {
                         if FileTransferService.shared.pauseTransfer() {
@@ -196,6 +196,15 @@ struct ContentView: View {
             }
         } message: {
             Text("Are you sure you want to delete \(pendingDeletePaths.count) item\(pendingDeletePaths.count == 1 ? "" : "s")? This cannot be undone.")
+        }
+        .alert("Cancel Transfer?", isPresented: $showCancelTransferConfirmation) {
+            Button("Cancel Transfer", role: .destructive) {
+                FileTransferService.shared.cancelTransfer()
+                showTransferProgress = false
+            }
+            Button("Keep Transferring", role: .cancel) {}
+        } message: {
+            Text("The current transfer will stop. Files already completed will remain on the device.")
         }
         .sheet(item: $newFolderRequest) { request in
             FileOperationDialog(

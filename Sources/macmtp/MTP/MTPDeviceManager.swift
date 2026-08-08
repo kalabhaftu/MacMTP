@@ -13,6 +13,7 @@ public final class MTPDeviceManager: ObservableObject {
     @Published public var currentMTPPath = "/"
     @Published public var mtpFiles: [FileNode] = []
     @Published public var isLoading = false
+    @Published public private(set) var isPerformingMutation = false
     @Published public var errorMessage: String?
 
 
@@ -32,7 +33,6 @@ public final class MTPDeviceManager: ObservableObject {
     private var connectionGeneration: UInt64 = 0
     private let directoryCoordinator = MTPDirectoryCoordinator()
     private var displayedDirectoryKey: MTPDirectoryRefreshKey?
-    private var lastRefreshError: Error?
 
     init(bridge: any MTPBridge = KalamBridge.shared) {
         self.bridge = bridge
@@ -304,7 +304,6 @@ public final class MTPDeviceManager: ObservableObject {
         }
         isLoading = true
         errorMessage = nil
-        lastRefreshError = nil
         refreshGeneration &+= 1
         let generation = refreshGeneration
         var retryCount = 0
@@ -368,7 +367,6 @@ public final class MTPDeviceManager: ObservableObject {
             guard generation == refreshGeneration,
                   currentDirectoryRefreshRequest() == request else { return false }
             directoryCoordinator.recordFailedRefresh(for: request)
-            lastRefreshError = error
             ErrorLogger.log(
                 error,
                 message: "Failed to list MTP directory",
@@ -464,7 +462,11 @@ public final class MTPDeviceManager: ObservableObject {
     public func createFolder(name: String, in targetPath: String? = nil) async throws {
         let normalizedName = try normalizedMTPChildName(name)
         await directoryCoordinator.beginMutation()
-        defer { directoryCoordinator.endMutation() }
+        isPerformingMutation = true
+        defer {
+            isPerformingMutation = false
+            directoryCoordinator.endMutation()
+        }
 
         guard isConnected, let storageId = selectedStorageId else {
             throw KalamError.deviceNotConnected
@@ -498,12 +500,7 @@ public final class MTPDeviceManager: ObservableObject {
                 objectId: objectId ?? 0
             )
             let mutation = MTPDirectoryMutation.create(optimisticNode)
-            mtpFiles = MTPDirectoryReconciliation.applying(mutation, to: previousFiles)
-
-            guard try await reconcile(mutation) else {
-                mtpFiles = previousFiles
-                throw KalamError.operationNotReconciled("folder creation")
-            }
+            publishConfirmedMutation(mutation, replacing: previousFiles)
         } catch {
             mtpFiles = previousFiles
             if isMTPDuplicateError(error) {
@@ -517,7 +514,11 @@ public final class MTPDeviceManager: ObservableObject {
     public func deleteFiles(paths: [String]) async throws {
         guard !paths.isEmpty else { return }
         await directoryCoordinator.beginMutation()
-        defer { directoryCoordinator.endMutation() }
+        isPerformingMutation = true
+        defer {
+            isPerformingMutation = false
+            directoryCoordinator.endMutation()
+        }
         guard isConnected, let storageId = selectedStorageId else {
             throw KalamError.deviceNotConnected
         }
@@ -527,17 +528,17 @@ public final class MTPDeviceManager: ObservableObject {
         let previousFiles = mtpFiles
         let mutation = MTPDirectoryMutation.delete(paths: Set(paths))
         try await bridge.deleteFiles(storageId: storageId, paths: paths)
-        mtpFiles = MTPDirectoryReconciliation.applying(mutation, to: previousFiles)
-        guard try await reconcile(mutation) else {
-            mtpFiles = previousFiles
-            throw KalamError.operationNotReconciled("deletion")
-        }
+        publishConfirmedMutation(mutation, replacing: previousFiles)
     }
 
     public func renameFile(path: String, newName: String) async throws {
         let normalizedName = try normalizedMTPChildName(newName)
         await directoryCoordinator.beginMutation()
-        defer { directoryCoordinator.endMutation() }
+        isPerformingMutation = true
+        defer {
+            isPerformingMutation = false
+            directoryCoordinator.endMutation()
+        }
         guard isConnected, let storageId = selectedStorageId else {
             throw KalamError.deviceNotConnected
         }
@@ -568,10 +569,21 @@ public final class MTPDeviceManager: ObservableObject {
             throw error
         }
         let mutation = MTPDirectoryMutation.rename(oldPath: path, newPath: destinationPath)
-        mtpFiles = MTPDirectoryReconciliation.applying(mutation, to: previousFiles)
-        guard try await reconcile(mutation) else {
-            mtpFiles = previousFiles
-            throw KalamError.operationNotReconciled("renaming")
+        publishConfirmedMutation(mutation, replacing: previousFiles)
+    }
+
+    private func publishConfirmedMutation(_ mutation: MTPDirectoryMutation, replacing previousFiles: [FileNode]) {
+        let updatedFiles = MTPDirectoryReconciliation.applying(mutation, to: previousFiles)
+        mtpFiles = updatedFiles
+
+        // Kalam returns a successful mutation response (and an object ID for
+        // create/rename). A second immediate walk is not part of that contract;
+        // some Android devices close the USB session when that walk follows a
+        // mutation too quickly. Keep the confirmed result visible and let an
+        // explicit refresh perform authoritative reconciliation later.
+        if let request = currentDirectoryRefreshRequest() {
+            displayedDirectoryKey = request
+            directoryCoordinator.recordSuccessfulListing(updatedFiles, for: request)
         }
     }
 
@@ -610,46 +622,6 @@ public final class MTPDeviceManager: ObservableObject {
             reportMutationFailure(error, operation: operation, phase: "preflight")
             throw error
         }
-    }
-
-    private func reconcile(_ mutation: MTPDirectoryMutation) async throws -> Bool {
-        let delays: [UInt64] = [0, 150_000_000, 300_000_000, 600_000_000]
-        for (attempt, delay) in delays.enumerated() {
-            if delay > 0 {
-                try await Task.sleep(nanoseconds: delay)
-            }
-
-            guard await refreshFilesWithoutWaitingForMutation() else {
-                if let lastRefreshError { throw lastRefreshError }
-                continue
-            }
-            if MTPDirectoryReconciliation.isSatisfied(mutation, by: mtpFiles) {
-                ErrorLogger.logMessage(
-                    "MTP mutation reconciled",
-                    level: .info,
-                    userInfo: [
-                        "operation": mutation.operationName,
-                        "operation_phase": "reconciliation",
-                        "reconciliation_attempt": attempt,
-                        "reconciliation_result": "confirmed",
-                        "session_generation": Int64(connectionGeneration)
-                    ]
-                )
-                return true
-            }
-        }
-
-        ErrorLogger.logMessage(
-            "MTP mutation was not visible after bounded reconciliation",
-            level: .warning,
-            userInfo: [
-                "operation": mutation.operationName,
-                "operation_phase": "reconciliation",
-                "session_generation": Int64(connectionGeneration),
-                "reconciliation_result": "not_confirmed"
-            ]
-        )
-        return false
     }
 
     private func isMTPDuplicateError(_ error: Error) -> Bool {

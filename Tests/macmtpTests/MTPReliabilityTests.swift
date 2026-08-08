@@ -14,9 +14,12 @@ private actor RecordingMTPBridge: MTPBridge {
     private(set) var files: [GoFileInfo]
     private(set) var existenceChecks = 0
     private(set) var makeDirectoryCalls = 0
+    private(set) var listDirectoryCalls = 0
+    private let failListingAfterMutation: Bool
 
-    init(files: [GoFileInfo] = []) {
+    init(files: [GoFileInfo] = [], failListingAfterMutation: Bool = false) {
         self.files = files
+        self.failListingAfterMutation = failListingAfterMutation
     }
 
     func initialize() async throws -> GoDeviceInfoData {
@@ -55,7 +58,11 @@ private actor RecordingMTPBridge: MTPBridge {
     func dispose() async throws {}
 
     func listDirectory(storageId: UInt32, path: String, recursive: Bool, skipHidden: Bool) async throws -> [GoFileInfo] {
-        files
+        listDirectoryCalls += 1
+        if failListingAfterMutation && makeDirectoryCalls > 0 {
+            throw KalamError.timedOut("directory walk after mutation")
+        }
+        return files
     }
 
     func makeDirectory(storageId: UInt32, path: String) async throws -> UInt32? {
@@ -259,7 +266,7 @@ func listingFirstPreflightDetectsDuplicatesWithoutASecondNativeProbe() {
 
 @Test
 @MainActor
-func managerUsesCurrentListingForDuplicatesAndReconcilesCreates() async throws {
+func managerUsesCurrentListingForDuplicatesAndPublishesCreates() async throws {
     let existing = GoFileInfo(
         size: 0,
         isFolder: true,
@@ -290,6 +297,21 @@ func managerUsesCurrentListingForDuplicatesAndReconcilesCreates() async throws {
     try await manager.createFolder(name: "  New Folder  ", in: "/")
     #expect(await bridge.makeDirectoryCalls == 1)
     #expect(manager.mtpFiles.contains { $0.path == "/New Folder" })
+}
+
+@Test
+@MainActor
+func confirmedCreateDoesNotPerformASecondWalkAfterNativeSuccess() async throws {
+    let bridge = RecordingMTPBridge(failListingAfterMutation: true)
+    let manager = MTPDeviceManager(bridge: bridge)
+    await manager.connectDevice()
+
+    try await manager.createFolder(name: "New Folder", in: "/")
+
+    #expect(await bridge.listDirectoryCalls == 1)
+    #expect(manager.isConnected)
+    #expect(manager.mtpFiles.contains { $0.path == "/New Folder" })
+    #expect(!manager.isPerformingMutation)
 }
 
 @Test

@@ -3,6 +3,7 @@
 ## Unreleased
 - Vendored the Kalam native adapter and pinned Go dependencies so source and CI builds are self-contained; added a manual native-source comparison command.
 - Added Finder-style organization headers with category counts and explicit sort/group/filter summaries; expanded Sentry context tags for native, reconciliation, USB, and reconnect events.
+- Stopped issuing an immediate post-mutation directory walk after confirmed native create, rename, and delete responses; the confirmed result is published immediately, avoiding Android devices that time out and close the USB session during the follow-up walk.
 
 - Fixed empty MTP directory responses, serialized native mutation identifiers, coalesced refreshes, and reconciled create, rename, and delete state through the device manager.
 - Added Finder-style typeahead and immediate fixed-cell selection, centralized rename and new-folder dialogs, and made USB detach handling cancel stale connection work promptly.

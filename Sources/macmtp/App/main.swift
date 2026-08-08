@@ -7,6 +7,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var preferencesWindowController: NSWindowController?
     var aboutWindowController: NSWindowController?
     var helpWindowController: NSWindowController?
+    private var terminationPromptInFlight = false
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         ErrorLogger.startIfEnabled()
@@ -64,6 +65,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     func applicationWillTerminate(_ notification: Notification) {
         USBWatcher.shared.stopWatching()
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let transferState = FileTransferService.shared.activeBatch?.state
+        let transferActive = transferState == .transferring || transferState == .paused
+        let mtpMutationActive = MTPDeviceManager.shared.isPerformingMutation
+
+        guard transferActive || mtpMutationActive else { return .terminateNow }
+        guard !terminationPromptInFlight else { return .terminateLater }
+
+        terminationPromptInFlight = true
+        defer { terminationPromptInFlight = false }
+
+        let alert = NSAlert()
+        alert.messageText = "Quit macMTP?"
+        alert.informativeText = transferActive
+            ? "A file transfer is still in progress. Quitting will interrupt it."
+            : "An MTP operation is still in progress. Quitting may interrupt it."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Quit")
+        alert.addButton(withTitle: "Keep Working")
+
+        return alert.runModal() == .alertFirstButtonReturn ? .terminateNow : .terminateCancel
     }
     
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
