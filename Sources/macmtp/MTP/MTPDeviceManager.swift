@@ -206,7 +206,17 @@ public final class MTPDeviceManager: ObservableObject {
             guard let self else { return }
             try? await bridge.dispose()
             guard self.connectionGeneration == invalidatedGeneration else { return }
-            USBWatcher.shared.reconnectIfAvailable()
+            let scheduled = USBWatcher.shared.reconnectIfAvailable()
+            ErrorLogger.logMessage(
+                scheduled ? "MTP connection recovery scheduled" : "MTP connection recovery was not scheduled",
+                level: scheduled ? .info : .warning,
+                userInfo: [
+                    "operation": "reconnect",
+                    "operation_phase": "connection",
+                    "reconnect_result": scheduled ? "scheduled" : "no_active_usb_identity",
+                    "session_generation": Int64(invalidatedGeneration),
+                ]
+            )
         }
     }
 

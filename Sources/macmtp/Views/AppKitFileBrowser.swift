@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct AppKitFileBrowser: NSViewRepresentable {
     let files: [FileNode]
+    let groups: [FileGroup]
     @Binding var selectedPaths: Set<String>
     let mode: FileViewMode
     let fontScale: Double
@@ -16,6 +17,7 @@ struct AppKitFileBrowser: NSViewRepresentable {
     func makeCoordinator() -> Coordinator {
         Coordinator(
             selectedPaths: $selectedPaths,
+            groups: groups,
             onOpen: onOpen,
             onActivate: onActivate,
             onSelectionChanged: onSelectionChanged,
@@ -28,6 +30,7 @@ struct AppKitFileBrowser: NSViewRepresentable {
         let view = FileBrowserHostView()
         view.update(
             files: files,
+            groups: groups,
             mode: mode,
             fontScale: fontScale,
             coordinator: context.coordinator
@@ -38,6 +41,7 @@ struct AppKitFileBrowser: NSViewRepresentable {
     func updateNSView(_ nsView: FileBrowserHostView, context: Context) {
         context.coordinator.update(
             selectedPaths: $selectedPaths,
+            groups: groups,
             onOpen: onOpen,
             onActivate: onActivate,
             onSelectionChanged: onSelectionChanged,
@@ -46,6 +50,7 @@ struct AppKitFileBrowser: NSViewRepresentable {
         )
         nsView.update(
             files: files,
+            groups: groups,
             mode: mode,
             fontScale: fontScale,
             coordinator: context.coordinator
@@ -55,6 +60,7 @@ struct AppKitFileBrowser: NSViewRepresentable {
     @MainActor
     final class Coordinator: NSObject, NSCollectionViewDataSource, NSCollectionViewDelegate, NSTableViewDataSource, NSTableViewDelegate {
         var files: [FileNode] = []
+        var groups: [FileGroup] = []
         var mode: FileViewMode = .icons
         var selectedPaths: Binding<Set<String>>
         var onOpen: (FileNode) -> Void
@@ -66,6 +72,7 @@ struct AppKitFileBrowser: NSViewRepresentable {
 
         init(
             selectedPaths: Binding<Set<String>>,
+            groups: [FileGroup],
             onOpen: @escaping (FileNode) -> Void,
             onActivate: @escaping () -> Void,
             onSelectionChanged: @escaping () -> Void,
@@ -73,6 +80,7 @@ struct AppKitFileBrowser: NSViewRepresentable {
             isLocal: Bool
         ) {
             self.selectedPaths = selectedPaths
+            self.groups = groups
             self.onOpen = onOpen
             self.onActivate = onActivate
             self.onSelectionChanged = onSelectionChanged
@@ -82,6 +90,7 @@ struct AppKitFileBrowser: NSViewRepresentable {
 
         func update(
             selectedPaths: Binding<Set<String>>,
+            groups: [FileGroup],
             onOpen: @escaping (FileNode) -> Void,
             onActivate: @escaping () -> Void,
             onSelectionChanged: @escaping () -> Void,
@@ -89,6 +98,7 @@ struct AppKitFileBrowser: NSViewRepresentable {
             isLocal: Bool
         ) {
             self.selectedPaths = selectedPaths
+            self.groups = groups
             self.onOpen = onOpen
             self.onActivate = onActivate
             self.onSelectionChanged = onSelectionChanged
@@ -96,10 +106,23 @@ struct AppKitFileBrowser: NSViewRepresentable {
             self.isLocal = isLocal
         }
 
-        func numberOfSections(in collectionView: NSCollectionView) -> Int { 1 }
+        private var collectionGroups: [FileGroup] {
+            groups.isEmpty ? [FileGroup(title: "", files: files)] : groups
+        }
+
+        private func file(at indexPath: IndexPath) -> FileNode? {
+            guard collectionGroups.indices.contains(indexPath.section) else { return nil }
+            let section = collectionGroups[indexPath.section]
+            guard section.files.indices.contains(indexPath.item) else { return nil }
+            return section.files[indexPath.item]
+        }
+
+        func numberOfSections(in collectionView: NSCollectionView) -> Int {
+            collectionGroups.count
+        }
 
         func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int {
-            files.count
+            collectionGroups.indices.contains(section) ? collectionGroups[section].files.count : 0
         }
 
         func collectionView(
@@ -110,8 +133,7 @@ struct AppKitFileBrowser: NSViewRepresentable {
                 withIdentifier: AppKitFileCollectionItem.identifier,
                 for: indexPath
             ) as? AppKitFileCollectionItem ?? AppKitFileCollectionItem()
-            if files.indices.contains(indexPath.item) {
-                let file = files[indexPath.item]
+            if let file = file(at: indexPath) {
                 item.configure(
                     file: file,
                     large: mode == .largeIcons,
@@ -122,6 +144,25 @@ struct AppKitFileBrowser: NSViewRepresentable {
                 item.updateSelection(selectedPaths.wrappedValue.contains(file.path))
             }
             return item
+        }
+
+        func collectionView(
+            _ collectionView: NSCollectionView,
+            viewForSupplementaryElementOfKind kind: NSCollectionView.SupplementaryElementKind,
+            at indexPath: IndexPath
+        ) -> NSView {
+            guard kind == NSCollectionView.elementKindSectionHeader,
+                  collectionGroups.indices.contains(indexPath.section) else {
+                return NSView()
+            }
+            let header = collectionView.makeSupplementaryView(
+                ofKind: kind,
+                withIdentifier: AppKitFileGroupHeaderView.identifier,
+                for: indexPath
+            ) as? AppKitFileGroupHeaderView ?? AppKitFileGroupHeaderView()
+            let group = collectionGroups[indexPath.section]
+            header.configure(title: group.title, count: group.files.count)
+            return header
         }
 
         func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {
@@ -142,8 +183,9 @@ struct AppKitFileBrowser: NSViewRepresentable {
 
         private func updateSelection(indexPaths: Set<IndexPath>, selected: Bool) {
             var paths = selectedPaths.wrappedValue
-            for indexPath in indexPaths where files.indices.contains(indexPath.item) {
-                let path = files[indexPath.item].path
+            for indexPath in indexPaths {
+                guard let file = file(at: indexPath) else { continue }
+                let path = file.path
                 if selected { paths.insert(path) } else { paths.remove(path) }
             }
             selectedPaths.wrappedValue = paths
@@ -151,15 +193,16 @@ struct AppKitFileBrowser: NSViewRepresentable {
         }
 
         func openCollectionItem(at indexPath: IndexPath) {
-            guard files.indices.contains(indexPath.item) else { return }
-            onOpen(files[indexPath.item])
+            guard let file = file(at: indexPath) else { return }
+            onOpen(file)
         }
 
         func collectionView(
             _ collectionView: NSCollectionView,
             pasteboardWriterForItemAt indexPath: IndexPath
         ) -> NSPasteboardWriting? {
-            pasteboardWriter(at: indexPath.item)
+            guard let file = file(at: indexPath) else { return nil }
+            return pasteboardWriter(for: file)
         }
 
         func numberOfRows(in tableView: NSTableView) -> Int { files.count }
@@ -202,7 +245,10 @@ struct AppKitFileBrowser: NSViewRepresentable {
 
         private func pasteboardWriter(at index: Int) -> NSPasteboardWriting? {
             guard files.indices.contains(index) else { return nil }
-            let file = files[index]
+            return pasteboardWriter(for: files[index])
+        }
+
+        private func pasteboardWriter(for file: FileNode) -> NSPasteboardWriting? {
             let nodes: [FileNode]
             if selectedPaths.wrappedValue.contains(file.path) {
                 nodes = files.filter { selectedPaths.wrappedValue.contains($0.path) }
@@ -216,7 +262,13 @@ struct AppKitFileBrowser: NSViewRepresentable {
 
         func applySelection(to collectionView: NSCollectionView) {
             let paths = selectedPaths.wrappedValue
-            let indexes = Set(files.indices.compactMap { paths.contains(files[$0].path) ? IndexPath(item: $0, section: 0) : nil })
+            let indexes = Set(collectionGroups.indices.flatMap { section in
+                collectionGroups[section].files.indices.compactMap { item in
+                    paths.contains(collectionGroups[section].files[item].path)
+                        ? IndexPath(item: item, section: section)
+                        : nil
+                }
+            })
             applyingSelection = true
             collectionView.deselectAll(nil)
             collectionView.selectItems(at: indexes, scrollPosition: [])
@@ -241,20 +293,24 @@ final class FileBrowserHostView: NSView {
     private var tableView: ClearingTableView?
     private var scrollView: NSScrollView?
     private weak var coordinator: AppKitFileBrowser.Coordinator?
+    private var isGrouped = false
 
     override var isFlipped: Bool { true }
 
     func update(
         files: [FileNode],
+        groups: [FileGroup],
         mode: FileViewMode,
         fontScale: Double,
         coordinator: AppKitFileBrowser.Coordinator
     ) {
         self.coordinator = coordinator
         coordinator.files = files
+        coordinator.groups = groups
         coordinator.mode = mode
-        if self.mode != mode {
-            rebuild(mode: mode, fontScale: fontScale, coordinator: coordinator)
+        let shouldGroup = !groups.isEmpty
+        if self.mode != mode || self.isGrouped != shouldGroup {
+            rebuild(mode: mode, isGrouped: shouldGroup, fontScale: fontScale, coordinator: coordinator)
         }
         if mode == .list {
             tableView?.fontScale = fontScale
@@ -266,12 +322,13 @@ final class FileBrowserHostView: NSView {
         }
     }
 
-    private func rebuild(mode: FileViewMode, fontScale: Double, coordinator: AppKitFileBrowser.Coordinator) {
+    private func rebuild(mode: FileViewMode, isGrouped: Bool, fontScale: Double, coordinator: AppKitFileBrowser.Coordinator) {
         subviews.forEach { $0.removeFromSuperview() }
         collectionView = nil
         tableView = nil
         scrollView = nil
         self.mode = mode
+        self.isGrouped = isGrouped
 
         let scroll = NSScrollView(frame: bounds)
         scroll.autoresizingMask = [.width, .height]
@@ -311,6 +368,7 @@ final class FileBrowserHostView: NSView {
             layout.minimumInteritemSpacing = FileGridLayout.spacing
             layout.minimumLineSpacing = FileGridLayout.spacing
             layout.sectionInset = NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+            layout.headerReferenceSize = isGrouped ? NSSize(width: 0, height: 30) : .zero
             collection.collectionViewLayout = layout
             collection.isSelectable = true
             collection.allowsMultipleSelection = true
@@ -319,6 +377,13 @@ final class FileBrowserHostView: NSView {
                 AppKitFileCollectionItem.self,
                 forItemWithIdentifier: AppKitFileCollectionItem.identifier
             )
+            if isGrouped {
+                collection.register(
+                    AppKitFileGroupHeaderView.self,
+                    forSupplementaryViewOfKind: NSCollectionView.elementKindSectionHeader,
+                    withIdentifier: AppKitFileGroupHeaderView.identifier
+                )
+            }
             collection.dataSource = coordinator
             collection.delegate = coordinator
             collection.coordinator = coordinator
@@ -369,6 +434,50 @@ final class ClearingTableView: NSTableView {
 
     @objc func doubleClick(_ sender: Any?) {
         coordinator?.openTableRow(clickedRow)
+    }
+}
+
+final class AppKitFileGroupHeaderView: NSView {
+    static let identifier = NSUserInterfaceItemIdentifier("MacMTPFileGroupHeader")
+
+    private let leadingRule = NSBox()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let countLabel = NSTextField(labelWithString: "")
+    private let trailingRule = NSBox()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+
+        leadingRule.boxType = .separator
+        trailingRule.boxType = .separator
+        titleLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+        titleLabel.textColor = .secondaryLabelColor
+        countLabel.font = .systemFont(ofSize: 10)
+        countLabel.textColor = .tertiaryLabelColor
+
+        let stack = NSStackView(views: [leadingRule, titleLabel, countLabel, trailingRule])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 8
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        leadingRule.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        trailingRule.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: 7),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -7),
+            leadingRule.heightAnchor.constraint(equalToConstant: 1),
+            trailingRule.heightAnchor.constraint(equalToConstant: 1)
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func configure(title: String, count: Int) {
+        titleLabel.stringValue = title
+        countLabel.stringValue = String(count) + (count == 1 ? " item" : " items")
     }
 }
 

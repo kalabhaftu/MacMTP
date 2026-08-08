@@ -74,6 +74,15 @@ func kindGroupingProducesStableFinderStyleCategories() {
 }
 
 @Test
+func extensionGroupingProducesLabeledSections() {
+    let files = [file("photo.jpg"), file("notes.txt"), file("README")]
+    let options = FileBrowserOrganization(grouping: .extensionName)
+
+    #expect(options.organize(files, showHidden: true).map(\.title) == ["No Extension", ".jpg", ".txt"])
+    #expect(options.organize(files, showHidden: true).allSatisfy { !$0.title.isEmpty })
+}
+
+@Test
 func selectionRangeUsesDisplayedOrderInEitherDirection() {
     let paths = ["a", "b", "c", "d"]
     #expect(FileSelectionRules.range(in: paths, from: "b", through: "d") == Set(["b", "c", "d"]))

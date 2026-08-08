@@ -72,6 +72,7 @@ public struct ErrorLogger {
             code: originalError.code,
             userInfo: [NSLocalizedDescriptionKey: reportDescription]
         )
+        let extras = sanitizedExtras(userInfo)
 
         SentrySDK.capture(error: reportError) { scope in
             scope.setTag(value: String(describing: type(of: error)), key: "error_type")
@@ -85,12 +86,7 @@ public struct ErrorLogger {
                     }
                 }
             }
-            let extras = sanitizedExtras(userInfo)
-            for key in ["operation_phase", "conflict_classification", "reconciliation_result"] {
-                if let value = extras[key] as? String {
-                    scope.setTag(value: value, key: key)
-                }
-            }
+            setContextTags(extras, on: scope)
             extras.forEach { key, value in
                 scope.setExtra(value: value, key: key)
             }
@@ -103,8 +99,11 @@ public struct ErrorLogger {
 
         let event = Event(level: level)
         event.message = SentryMessage(formatted: sanitize(message))
-        event.extra = sanitizedExtras(userInfo)
-        SentrySDK.capture(event: event)
+        let extras = sanitizedExtras(userInfo)
+        event.extra = extras
+        SentrySDK.capture(event: event) { scope in
+            setContextTags(extras, on: scope)
+        }
     }
 
     public static func captureTestReport() async -> TestReportResult {
@@ -226,6 +225,28 @@ public struct ErrorLogger {
             } else if entry.value is Bool || entry.value is Int || entry.value is Int64 || entry.value is Double {
                 result[entry.key] = entry.value
             }
+        }
+    }
+
+    private static func setContextTags(_ extras: [String: Any], on scope: Scope) {
+        let keys = [
+            "operation",
+            "operation_phase",
+            "native_error_type",
+            "conflict_classification",
+            "reconciliation_result",
+            "retry_count",
+            "refresh_coalesced",
+            "refresh_waiter_count",
+            "session_generation",
+            "usb_event",
+            "connection_state",
+            "initial_scan",
+            "reconnect_result",
+        ]
+        for key in keys {
+            guard let value = extras[key] else { continue }
+            scope.setTag(value: String(describing: value), key: key)
         }
     }
 

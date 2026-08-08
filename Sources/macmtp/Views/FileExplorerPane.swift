@@ -120,6 +120,10 @@ struct FileExplorerPane: View {
         VStack(spacing: 0) {
             navigationHeader
 
+            if organizationIsActive {
+                organizationSummary
+            }
+
             if isFilterVisible {
                 filterBar
             }
@@ -422,23 +426,14 @@ struct FileExplorerPane: View {
     private var organizationMenu: some View {
         Menu {
             Section("Sort By") {
-                ForEach(FileSortColumn.allCases) { column in
-                    Button {
-                        if sortColumn == column {
-                            sortDirection = sortDirection.toggled
-                        } else {
-                            sortColumn = column
-                            sortDirection = .ascending
-                        }
-                    } label: {
-                        if sortColumn == column {
-                            Label(column.rawValue, systemImage: sortDirection.iconName)
-                        } else {
-                            Text(column.rawValue)
-                        }
+                Picker("Column", selection: $sortColumn) {
+                    ForEach(FileSortColumn.allCases) { column in
+                        Text(column.rawValue).tag(column)
                     }
                 }
-                Divider()
+            }
+
+            Section("Sort Direction") {
                 Picker("Direction", selection: $sortDirection) {
                     ForEach(FileSortDirection.allCases) { direction in
                         Text(direction.rawValue).tag(direction)
@@ -454,7 +449,7 @@ struct FileExplorerPane: View {
                 }
             }
 
-            Section("File Extension") {
+            Section("Filter by Extension") {
                 Button("All Extensions") { extensionFilter = nil }
                 ForEach(availableExtensions, id: \.self) { ext in
                     Button {
@@ -475,7 +470,51 @@ struct FileExplorerPane: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
-        .help("Sort, group, and filter by extension")
+        .help("Sort, group, and filter files")
+    }
+
+    private var organizationSummary: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "arrow.up.arrow.down.circle.fill")
+                .foregroundColor(.accentColor)
+
+            if grouping != .none {
+                Text("Grouped by " + grouping.rawValue)
+            }
+
+            if grouping != .none && (sortColumn != .name || sortDirection != .ascending) {
+                Divider().frame(height: 12)
+            }
+
+            if sortColumn != .name || sortDirection != .ascending || grouping != .none {
+                Text("Sorted by " + sortColumn.rawValue + " " + sortDirection.rawValue)
+            }
+
+            if let extensionFilter {
+                Divider().frame(height: 12)
+                Text("Filtered to ." + extensionFilter)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .font(.system(size: 10 * appFontScale, weight: .medium))
+        .foregroundColor(.secondary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.7))
+        .overlay(alignment: .bottom) { Divider() }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(organizationSummaryAccessibilityLabel)
+    }
+
+    private var organizationSummaryAccessibilityLabel: String {
+        var parts: [String] = []
+        if grouping != .none { parts.append("Grouped by " + grouping.rawValue) }
+        if sortColumn != .name || sortDirection != .ascending || grouping != .none {
+            parts.append("Sorted by " + sortColumn.rawValue + " " + sortDirection.rawValue)
+        }
+        if let extensionFilter { parts.append("Filtered to ." + extensionFilter) }
+        return parts.joined(separator: ", ")
     }
 
     private var availableExtensions: [String] {
@@ -569,6 +608,7 @@ struct FileExplorerPane: View {
     private var listView: some View {
         AppKitFileBrowser(
             files: ungroupedFiles,
+            groups: [],
             selectedPaths: $selectedItems,
             mode: .list,
             fontScale: appFontScale,
@@ -591,6 +631,7 @@ struct FileExplorerPane: View {
     private var iconGridView: some View {
         AppKitFileBrowser(
             files: displayedFiles,
+            groups: grouping == .none ? [] : displayedGroups,
             selectedPaths: $selectedItems,
             mode: viewMode,
             fontScale: appFontScale,

@@ -123,15 +123,17 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         cleanupWatchingResources()
     }
 
-    public func reconnectIfAvailable() {
+    @discardableResult
+    public func reconnectIfAvailable() -> Bool {
         guard isWatching,
-              UserDefaults.standard.object(forKey: "autoDetectDevice") as? Bool ?? true else { return }
+              UserDefaults.standard.object(forKey: "autoDetectDevice") as? Bool ?? true else { return false }
         let identities = connectedDeviceIdentities()
         guard let identity = activeDeviceIdentity,
-              identities.contains(identity) else { return }
+              identities.contains(identity) else { return false }
         knownDeviceIdentities.formUnion(identities)
         activeDeviceIdentity = identity
         scheduleAutoConnect(isInitialScan: false)
+        return true
     }
 
     private func cleanupWatchingResources() {
