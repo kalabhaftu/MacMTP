@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import Testing
 @testable import macmtp
 
@@ -183,6 +184,11 @@ func appKitBrowserDetectsPresentationChangesWithoutReloadingUnchangedFiles() {
 
     #expect(!FileBrowserHostView.filesChanged(from: [original], to: [unchanged]))
     #expect(FileBrowserHostView.filesChanged(from: [original], to: [updated]))
+}
+
+@Test @MainActor
+func appKitBrowserHostUsesTheNativeDefaultCoordinateSystem() {
+    #expect(FileBrowserHostView().isFlipped == NSView().isFlipped)
 }
 
 @Test @MainActor

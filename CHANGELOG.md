@@ -30,6 +30,9 @@
 ### Updater hotfix
 - Fixed the API-rate-limit fallback to download the published universal DMG asset and report the HTTP status and redacted URL when an update download fails.
 
+### Crash hotfix
+- Removed the custom AppKit host-view coordinate-system override that could trigger a Swift concurrency executor crash during collection-view drag sessions.
+
 ## 1.6.8 - 2026-08-08
 
 ### MTP reliability

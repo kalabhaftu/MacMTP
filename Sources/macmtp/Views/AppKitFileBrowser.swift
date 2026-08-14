@@ -299,8 +299,6 @@ final class FileBrowserHostView: NSView {
     private var lastSelection: Set<String> = []
     private var lastFontScale: Double?
 
-    override var isFlipped: Bool { true }
-
     func update(
         files: [FileNode],
         groups: [FileGroup],
