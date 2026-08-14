@@ -137,10 +137,6 @@ struct FileExplorerPane: View {
         }
         .background(Color(NSColor.controlBackgroundColor))
         .contentShape(Rectangle())
-        .simultaneousGesture(
-            TapGesture().onEnded { onActivate?() },
-            including: .subviews
-        )
         .overlay(alignment: .top) {
             if !isLocal, !files.isEmpty, let message = nonBlockingErrorMessage {
                 HStack(spacing: 8) {

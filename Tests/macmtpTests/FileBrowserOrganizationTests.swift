@@ -162,6 +162,16 @@ func iconGridReservesStableCellsForWrappedNames() {
     #expect(FileGridLayout.columnCount(containerWidth: 640, large: true) == 6)
 }
 
+@Test @MainActor
+func appKitBrowserDetectsPresentationChangesWithoutReloadingUnchangedFiles() {
+    let original = file("photo.jpg", size: 10)
+    let unchanged = file("photo.jpg", size: 10)
+    let updated = file("photo.jpg", size: 20)
+
+    #expect(!FileBrowserHostView.filesChanged(from: [original], to: [unchanged]))
+    #expect(FileBrowserHostView.filesChanged(from: [original], to: [updated]))
+}
+
 @Test
 func directSizeSummaryNeverTraversesOrCountsFolderPlaceholders() {
     let files = [

@@ -31,3 +31,23 @@ func transferBatchProgressStaysWithinDisplayBounds() {
 
     #expect(batch.overallProgress == 1)
 }
+
+@Test @MainActor
+func concurrentTransferRequestsAreRejectedWithoutStartingAnotherBatch() {
+    let service = FileTransferService.shared
+    let batch = TransferBatch()
+    service.activeBatch = batch
+    batch.start()
+    defer {
+        service.cancelTransfer()
+        service.activeBatch = nil
+    }
+
+    let source = FileNode(name: "file.txt", path: "/tmp/file.txt")
+    #expect(!service.initiateTransfer(
+        sources: [source],
+        destinationDir: "/storage",
+        direction: .localToMTP,
+        storageId: 1
+    ))
+}

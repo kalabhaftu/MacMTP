@@ -94,16 +94,37 @@ public struct ErrorLogger {
     }
 
     public static func logMessage(_ message: String, level: SentryLevel = .error, userInfo: [String: Any]? = nil) {
-        systemLogger.log(level: level == .warning ? .default : .error, "\(sanitize(message), privacy: .private)")
+        let sanitizedMessage = sanitize(message)
+        let logLevel: OSLogType
+        switch level {
+        case .debug: logLevel = .debug
+        case .info: logLevel = .info
+        case .warning: logLevel = .default
+        case .error, .fatal: logLevel = .error
+        case .none: logLevel = .default
+        @unknown default: logLevel = .error
+        }
+        systemLogger.log(level: logLevel, "\(sanitizedMessage, privacy: .private)")
         guard ensureStarted() else { return }
 
-        let event = Event(level: level)
-        event.message = SentryMessage(formatted: sanitize(message))
         let extras = sanitizedExtras(userInfo)
+        let breadcrumb = Breadcrumb(level: level, category: "macmtp")
+        breadcrumb.message = sanitizedMessage
+        breadcrumb.data = extras
+        SentrySDK.addBreadcrumb(breadcrumb)
+
+        guard shouldCaptureMessage(level) else { return }
+
+        let event = Event(level: level)
+        event.message = SentryMessage(formatted: sanitizedMessage)
         event.extra = extras
         SentrySDK.capture(event: event) { scope in
             setContextTags(extras, on: scope)
         }
+    }
+
+    static func shouldCaptureMessage(_ level: SentryLevel) -> Bool {
+        level == .error || level == .fatal
     }
 
     public static func captureTestReport() async -> TestReportResult {

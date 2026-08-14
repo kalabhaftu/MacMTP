@@ -88,7 +88,7 @@ public final class FileTransferService: ObservableObject {
         storageId: UInt32? = nil,
         isCut: Bool = false
     ) -> Bool {
-        guard !transferInFlight else {
+        guard !transferInFlight, activeBatch?.state.isTerminal != false else {
             ErrorLogger.logMessage(
                 "Rejected transfer request while another transfer is active.",
                 level: .warning,

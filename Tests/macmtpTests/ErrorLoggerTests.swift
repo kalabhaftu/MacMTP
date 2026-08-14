@@ -1,4 +1,5 @@
 import Testing
+import Sentry
 @testable import macmtp
 
 @Test
@@ -39,6 +40,15 @@ func expectedMTPStatesAreNotReportedAsErrors() {
     #expect(ErrorLogger.shouldReport(KalamError.operationInProgress))
     #expect(!ErrorLogger.shouldReport(KalamError.operationFailed("no MTP devices found")))
     #expect(ErrorLogger.shouldReport(KalamError.operationFailed("transaction ID mismatch")))
+}
+
+@Test
+func nonErrorMessagesStayBreadcrumbsInsteadOfCreatingIssues() {
+    #expect(!ErrorLogger.shouldCaptureMessage(.debug))
+    #expect(!ErrorLogger.shouldCaptureMessage(.info))
+    #expect(!ErrorLogger.shouldCaptureMessage(.warning))
+    #expect(ErrorLogger.shouldCaptureMessage(.error))
+    #expect(ErrorLogger.shouldCaptureMessage(.fatal))
 }
 
 @Test

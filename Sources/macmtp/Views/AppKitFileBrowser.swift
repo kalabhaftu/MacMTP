@@ -294,6 +294,10 @@ final class FileBrowserHostView: NSView {
     private var scrollView: NSScrollView?
     private weak var coordinator: AppKitFileBrowser.Coordinator?
     private var isGrouped = false
+    private var lastFiles: [FileNode] = []
+    private var lastGroups: [FileGroup] = []
+    private var lastSelection: Set<String> = []
+    private var lastFontScale: Double?
 
     override var isFlipped: Bool { true }
 
@@ -309,16 +313,49 @@ final class FileBrowserHostView: NSView {
         coordinator.groups = groups
         coordinator.mode = mode
         let shouldGroup = !groups.isEmpty
-        if self.mode != mode || self.isGrouped != shouldGroup {
+        let modeChanged = self.mode != mode
+        let groupingChanged = self.isGrouped != shouldGroup
+        let contentChanged = Self.filesChanged(from: lastFiles, to: files) || lastGroups != groups
+        let fontScaleChanged = lastFontScale != fontScale
+        let selection = coordinator.selectedPaths.wrappedValue
+        let selectionChanged = lastSelection != selection
+
+        if modeChanged || groupingChanged {
             rebuild(mode: mode, isGrouped: shouldGroup, fontScale: fontScale, coordinator: coordinator)
         }
-        if mode == .list {
-            tableView?.fontScale = fontScale
-            tableView?.reloadData()
-            coordinator.applySelection(to: tableView!)
-        } else {
-            collectionView?.reloadData()
-            coordinator.applySelection(to: collectionView!)
+
+        if modeChanged || groupingChanged || contentChanged || fontScaleChanged {
+            if mode == .list {
+                tableView?.fontScale = fontScale
+                tableView?.reloadData()
+                if let tableView { coordinator.applySelection(to: tableView) }
+            } else {
+                collectionView?.reloadData()
+                if let collectionView { coordinator.applySelection(to: collectionView) }
+            }
+        } else if selectionChanged {
+            if mode == .list {
+                if let tableView { coordinator.applySelection(to: tableView) }
+            } else if let collectionView {
+                coordinator.applySelection(to: collectionView)
+            }
+        }
+
+        lastFiles = files
+        lastGroups = groups
+        lastSelection = selection
+        lastFontScale = fontScale
+    }
+
+    static func filesChanged(from previous: [FileNode], to current: [FileNode]) -> Bool {
+        guard previous.count == current.count else { return true }
+        return zip(previous, current).contains { old, new in
+            old.path != new.path
+                || old.name != new.name
+                || old.isDirectory != new.isDirectory
+                || old.size != new.size
+                || old.modificationDate != new.modificationDate
+                || old.objectId != new.objectId
         }
     }
 
@@ -513,6 +550,11 @@ final class AppKitFileCellView: NSView {
         wantsLayer = true
         layer?.cornerRadius = 6
         layer?.borderWidth = 0
+        layer?.actions = [
+            "backgroundColor": NSNull(),
+            "borderColor": NSNull(),
+            "borderWidth": NSNull()
+        ]
 
         iconView.imageScaling = .scaleProportionallyUpOrDown
         iconView.imageAlignment = .alignCenter

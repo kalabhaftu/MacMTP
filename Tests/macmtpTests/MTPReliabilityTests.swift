@@ -338,3 +338,12 @@ func usbLifecycleInvalidatesRapidReplugAndDetachTokens() {
     let third = lifecycle.attachScheduled()
     #expect(lifecycle.accepts(third))
 }
+
+@Test
+func duplicateUSBNotificationsDoNotScheduleAnotherDevice() {
+    let identity = USBDeviceIdentity(vendorID: 0x1234, productID: 0x5678, locationID: 1, serialNumber: "test")
+    let otherIdentity = USBDeviceIdentity(vendorID: 0x1234, productID: 0x5679, locationID: 2, serialNumber: "other")
+
+    #expect(newlyAttachedUSBIdentities([identity, identity], known: []) == [identity])
+    #expect(newlyAttachedUSBIdentities([identity, otherIdentity], known: [identity]) == [otherIdentity])
+}

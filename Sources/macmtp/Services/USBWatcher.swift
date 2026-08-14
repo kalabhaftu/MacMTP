@@ -27,6 +27,14 @@ struct USBConnectionLifecycle: Equatable {
     }
 }
 
+func newlyAttachedUSBIdentities(
+    _ identities: [USBDeviceIdentity],
+    known: Set<USBDeviceIdentity>
+) -> [USBDeviceIdentity] {
+    var seen = known
+    return identities.filter { seen.insert($0).inserted }
+}
+
 @MainActor
 public final class USBWatcher: ObservableObject, @unchecked Sendable {
     
@@ -172,13 +180,14 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         while case let device = IOIteratorNext(iterator), device != 0 {
             if let identity = deviceIdentity(for: device) {
                 identities.append(identity)
-                knownDeviceIdentities.insert(identity)
-                activeDeviceIdentity = activeDeviceIdentity ?? identity
             }
             IOObjectRelease(device)
         }
         
-        guard !identities.isEmpty else { return }
+        let newIdentities = newlyAttachedUSBIdentities(identities, known: knownDeviceIdentities)
+        knownDeviceIdentities.formUnion(identities)
+        guard !newIdentities.isEmpty, activeDeviceIdentity == nil else { return }
+        activeDeviceIdentity = newIdentities[0]
         guard UserDefaults.standard.object(forKey: "autoDetectDevice") as? Bool ?? true else { return }
         scheduleAutoConnect(isInitialScan: isInitialScan)
     }
@@ -195,16 +204,16 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         
         try? await Task.sleep(nanoseconds: 50_000_000)
         let remainingIdentities = connectedDeviceIdentities()
-        let removedActiveDevice = activeDeviceIdentity.map(removedIdentities.contains) ?? false
-        let activeDeviceIsGone = activeDeviceIdentity.map { !remainingIdentities.contains($0) } ?? false
-        let noTrackedDevicesRemain = remainingIdentities.isEmpty
-        guard removedActiveDevice || activeDeviceIsGone || noTrackedDevicesRemain else { return }
+        knownDeviceIdentities = remainingIdentities
+        guard let activeIdentity = activeDeviceIdentity else { return }
+        let removedActiveDevice = removedIdentities.contains(activeIdentity)
+        let activeDeviceIsGone = !remainingIdentities.contains(activeIdentity)
+        guard removedActiveDevice || activeDeviceIsGone else { return }
 
         pendingAutoConnectTask?.cancel()
         pendingAutoConnectTask = nil
         _ = connectionLifecycle.detached()
         activeDeviceIdentity = nil
-        knownDeviceIdentities = remainingIdentities
         ErrorLogger.logMessage(
             "USB device detached",
             level: .info,
