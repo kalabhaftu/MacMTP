@@ -13,6 +13,41 @@ enum UpdateDownloadState: Equatable {
     }
 }
 
+enum UpdateDownloadError: LocalizedError, Equatable {
+    case invalidResponse(url: String)
+    case httpStatus(code: Int, url: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidResponse:
+            "Update download returned an invalid HTTP response."
+        case .httpStatus(let code, _):
+            "Update download returned HTTP \(code)."
+        }
+    }
+
+    var reportingContext: [String: Any] {
+        var context: [String: Any] = [
+            "operation": "update_download",
+            "operation_phase": "download",
+        ]
+        switch self {
+        case .invalidResponse(let url):
+            context["response_contract"] = "missing_http_response"
+            context["download_url"] = url
+        case .httpStatus(let code, let url):
+            context["http_status"] = code
+            context["download_url"] = url
+        }
+        return context
+    }
+}
+
+func fallbackUpdateDMGURL(for tag: String) -> URL? {
+    let cleanTag = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
+    return URL(string: "https://github.com/kalabhaftu/MacMTP/releases/download/\(tag)/macMTP-\(cleanTag)-mac-universal.dmg")
+}
+
 @MainActor
 public final class UpdaterService: ObservableObject, @unchecked Sendable {
     public static let shared = UpdaterService()
@@ -135,11 +170,9 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
             let localVersion = normalizedVersion(AppVersion.current)
 
             if remoteVersion.compare(localVersion, options: .numeric) == .orderedDescending {
-                let cleanTag = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
-                let dmgUrlStr = "https://github.com/kalabhaftu/MacMTP/releases/download/\(tag)/macMTP-\(cleanTag)-universal.dmg"
                 let autoDownload = UserDefaults.standard.object(forKey: "autoDownloadUpdates") as? Bool ?? false
 
-                if autoDownload, let dmgUrl = URL(string: dmgUrlStr) {
+                if autoDownload, let dmgUrl = fallbackUpdateDMGURL(for: tag) {
                     downloadAndOpenDMG(url: dmgUrl, version: tag)
                 } else {
                     showUpdateAlert(version: tag, releaseNotes: "A new version (\(tag)) is available on GitHub.", url: finalURL)
@@ -222,7 +255,11 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
                     break
                 case .failure(let error):
                     self.downloadState = .failed(error.localizedDescription)
-                    ErrorLogger.log(error, message: "Download update error")
+                    let context = (error as? UpdateDownloadError)?.reportingContext ?? [
+                        "operation": "update_download",
+                        "operation_phase": "download",
+                    ]
+                    ErrorLogger.log(error, message: "Download update error", userInfo: context)
                     let errorAlert = NSAlert()
                     errorAlert.messageText = "Update Download Failed"
                     errorAlert.informativeText = error.localizedDescription
@@ -306,6 +343,7 @@ private final class UpdateDownloadCoordinator: NSObject, URLSessionDownloadDeleg
     private let completionHandler: @MainActor (Result<URL, Error>) -> Void
     private var session: URLSession?
     private var destinationFileName = "macMTP-update.dmg"
+    private var downloadURL: URL?
     private var downloadedURL: URL?
     private var terminalError: Error?
 
@@ -318,6 +356,7 @@ private final class UpdateDownloadCoordinator: NSObject, URLSessionDownloadDeleg
     }
 
     func start(url: URL, destinationFileName: String) {
+        self.downloadURL = url
         self.destinationFileName = destinationFileName
         var request = URLRequest(url: url)
         request.setValue("macMTP/\(AppVersion.current)", forHTTPHeaderField: "User-Agent")
@@ -352,9 +391,12 @@ private final class UpdateDownloadCoordinator: NSObject, URLSessionDownloadDeleg
         didFinishDownloadingTo location: URL
     ) {
         do {
-            guard let response = downloadTask.response as? HTTPURLResponse,
-                  (200..<300).contains(response.statusCode) else {
-                throw URLError(.badServerResponse)
+            let publicURL = redactedURL(downloadURL)
+            guard let response = downloadTask.response as? HTTPURLResponse else {
+                throw UpdateDownloadError.invalidResponse(url: publicURL)
+            }
+            guard (200..<300).contains(response.statusCode) else {
+                throw UpdateDownloadError.httpStatus(code: response.statusCode, url: publicURL)
             }
             let stagingDirectory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("macMTP", isDirectory: true)
@@ -375,6 +417,15 @@ private final class UpdateDownloadCoordinator: NSObject, URLSessionDownloadDeleg
         } catch {
             terminalError = error
         }
+    }
+
+    private func redactedURL(_ url: URL?) -> String {
+        guard var components = url.flatMap({ URLComponents(url: $0, resolvingAgainstBaseURL: false) }) else {
+            return "<unknown>"
+        }
+        components.query = nil
+        components.fragment = nil
+        return components.string ?? "<unknown>"
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {

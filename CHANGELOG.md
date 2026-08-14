@@ -27,6 +27,9 @@
 - Added regression coverage for strict search filtering, clipboard selection and routing, cancelled-transfer lifecycle, USB identity matching, Sentry severity filtering, AppKit reload stability, and file-cell layout.
 - Verified the native response contract, Swift test suite, shell and plist checks, x86_64 release bundle architecture/signature, and release packaging prerequisites.
 
+### Updater hotfix
+- Fixed the API-rate-limit fallback to download the published universal DMG asset and report the HTTP status and redacted URL when an update download fails.
+
 ## 1.6.8 - 2026-08-08
 
 ### MTP reliability
