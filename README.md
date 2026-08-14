@@ -101,7 +101,7 @@ This is size-based conflict handling. It is useful for skipping already-copied f
 - List and icon views.
 - Sorting by name, size, type, or modified date in every view, with folders kept first.
 - Icon-view grouping by kind, extension, size range, or modified date.
-- Filename search plus a separate extension filter, while folders remain available for navigation.
+- Direct filename search for files and folders, plus a separate extension filter.
 - Status-bar sizes total the files in the current directory without recursively scanning folders; local folder sizes are calculated on demand from Properties, while MTP folder sizes are unavailable.
 - Hidden-file toggles for local and MTP panes.
 - macOS dark mode via system colors.

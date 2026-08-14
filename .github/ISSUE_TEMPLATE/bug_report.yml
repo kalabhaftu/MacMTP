@@ -40,7 +40,7 @@ body:
       label: Environment
       description: Include macMTP version, macOS version, Mac architecture, Android model/version, and USB mode.
       placeholder: |
-        macMTP: 1.6.8
+        macMTP: 1.6.9
         macOS: 15.x
         Mac: Apple Silicon / Intel
         Device: model, Android version
