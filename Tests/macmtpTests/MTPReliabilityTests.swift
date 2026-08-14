@@ -347,3 +347,19 @@ func duplicateUSBNotificationsDoNotScheduleAnotherDevice() {
     #expect(newlyAttachedUSBIdentities([identity, identity], known: []) == [identity])
     #expect(newlyAttachedUSBIdentities([identity, otherIdentity], known: [identity]) == [otherIdentity])
 }
+
+@Test
+func nativeMTPIdentityDoesNotMatchAnUnrelatedUSBDevice() {
+    let phone = USBDeviceIdentity(vendorID: 0x1234, productID: 0x5678, locationID: 1, serialNumber: "phone")
+    let accessory = USBDeviceIdentity(vendorID: 0x1234, productID: 0x5679, locationID: 2, serialNumber: "accessory")
+
+    #expect(phone.matches(vendorID: 0x1234, productID: 0x5678, serialNumber: "phone"))
+    #expect(!accessory.matches(vendorID: 0x1234, productID: 0x5678, serialNumber: "phone"))
+}
+
+@Test
+func missingUSBSerialFallsBackToVendorAndProduct() {
+    let device = USBDeviceIdentity(vendorID: 0x1234, productID: 0x5678, locationID: 1, serialNumber: nil)
+
+    #expect(device.matches(vendorID: 0x1234, productID: 0x5678, serialNumber: "phone"))
+}

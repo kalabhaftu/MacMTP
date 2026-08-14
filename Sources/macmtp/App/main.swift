@@ -133,8 +133,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let editMenuItem = NSMenuItem()
         let editMenu = NSMenu(title: "Edit")
         editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "")
-        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "")
-        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "")
+        editMenu.addItem(withTitle: "Copy", action: #selector(menuCopy), keyEquivalent: "")
+        editMenu.addItem(withTitle: "Paste", action: #selector(menuPaste), keyEquivalent: "")
         editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "")
         editMenuItem.submenu = editMenu
         mainMenu.addItem(editMenuItem)
@@ -199,6 +199,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func menuRefresh() {
         NotificationCenter.default.post(name: .menuRefreshRequested, object: nil)
+    }
+
+    @MainActor @objc private func menuCopy() {
+        if isTextEditingActive {
+            NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: nil)
+            return
+        }
+        NotificationCenter.default.post(name: .menuCopyRequested, object: nil)
+    }
+
+    @MainActor @objc private func menuPaste() {
+        if isTextEditingActive {
+            NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: nil)
+            return
+        }
+        NotificationCenter.default.post(name: .menuPasteRequested, object: nil)
+    }
+
+    @MainActor private var isTextEditingActive: Bool {
+        guard let responder = NSApp.keyWindow?.firstResponder else { return false }
+        return responder is NSTextField || responder is NSTextView
     }
 
     @objc private func openIssueTracker() {

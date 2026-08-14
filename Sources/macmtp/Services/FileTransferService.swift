@@ -8,6 +8,8 @@ extension Notification.Name {
     static let fileTypeaheadReset = Notification.Name("fileTypeaheadReset")
     static let menuNewFolderRequested = Notification.Name("menuNewFolderRequested")
     static let menuRefreshRequested = Notification.Name("menuRefreshRequested")
+    static let menuCopyRequested = Notification.Name("menuCopyRequested")
+    static let menuPasteRequested = Notification.Name("menuPasteRequested")
 }
 
 @MainActor
@@ -39,6 +41,10 @@ public final class FileTransferService: ObservableObject {
     
     private var verifiedDirectories = Set<String>()
     private var transferInFlight = false
+
+    public var isTransferInFlight: Bool {
+        transferInFlight
+    }
     
     
     private init() {}
@@ -60,7 +66,10 @@ public final class FileTransferService: ObservableObject {
     
     public func cancelTransfer() {
         cancelRequested = true
-        activeBatch?.cancel()
+        if let batch = activeBatch {
+            batch.cancel()
+            activeBatch = nil
+        }
         
         if let continuation = conflictContinuation {
             conflictContinuation = nil
@@ -286,6 +295,8 @@ public final class FileTransferService: ObservableObject {
             }
             transferQueue.append(transItem)
         }
+
+        guard !cancelRequested else { return }
         
         let batch = TransferBatch()
         batch.items = transferQueue

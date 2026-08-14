@@ -51,3 +51,16 @@ func concurrentTransferRequestsAreRejectedWithoutStartingAnotherBatch() {
         storageId: 1
     ))
 }
+
+@Test @MainActor
+func cancellingTransferHidesThePublishedBatchImmediately() {
+    let service = FileTransferService.shared
+    let batch = TransferBatch()
+    service.activeBatch = batch
+    batch.start()
+
+    service.cancelTransfer()
+
+    #expect(batch.state == .cancelled)
+    #expect(service.activeBatch == nil)
+}

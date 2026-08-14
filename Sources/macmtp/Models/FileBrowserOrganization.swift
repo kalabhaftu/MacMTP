@@ -47,9 +47,7 @@ struct FileBrowserOrganization: Equatable {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if !query.isEmpty {
-            result = result.filter {
-                $0.isDirectory || $0.name.localizedCaseInsensitiveContains(query)
-            }
+            result = result.filter { $0.name.localizedCaseInsensitiveContains(query) }
         }
         if let extensionFilter {
             result = result.filter {

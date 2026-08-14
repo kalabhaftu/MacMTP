@@ -7,6 +7,18 @@ struct USBDeviceIdentity: Hashable, Sendable {
     let productID: UInt16
     let locationID: UInt32?
     let serialNumber: String?
+
+    func matches(vendorID: UInt16, productID: UInt16, serialNumber: String?) -> Bool {
+        guard self.vendorID == vendorID, self.productID == productID else { return false }
+
+        let nativeSerial = serialNumber?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let deviceSerial = self.serialNumber?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let nativeSerial, !nativeSerial.isEmpty,
+              let deviceSerial, !deviceSerial.isEmpty else {
+            return true
+        }
+        return nativeSerial == deviceSerial
+    }
 }
 
 struct USBConnectionLifecycle: Equatable {
@@ -49,7 +61,9 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
     private var isWatching = false
     private var connectionLifecycle = USBConnectionLifecycle()
     private var pendingAutoConnectTask: Task<Void, Never>?
-    private var activeDeviceIdentity: USBDeviceIdentity?
+    private var activeDeviceVendorID: UInt16?
+    private var activeDeviceProductID: UInt16?
+    private var activeDeviceSerialNumber: String?
     private var knownDeviceIdentities: Set<USBDeviceIdentity> = []
     
     
@@ -136,19 +150,38 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         guard isWatching,
               UserDefaults.standard.object(forKey: "autoDetectDevice") as? Bool ?? true else { return false }
         let identities = connectedDeviceIdentities()
-        guard let identity = activeDeviceIdentity,
-              identities.contains(identity) else { return false }
+        guard let vendorID = activeDeviceVendorID,
+              let productID = activeDeviceProductID,
+              identities.contains(where: {
+                  $0.matches(vendorID: vendorID, productID: productID, serialNumber: activeDeviceSerialNumber)
+              }) else { return false }
         knownDeviceIdentities.formUnion(identities)
-        activeDeviceIdentity = identity
-        scheduleAutoConnect(isInitialScan: false)
+        scheduleAutoConnect(
+            isInitialScan: false,
+            vendorID: vendorID,
+            productID: productID,
+            serialNumber: activeDeviceSerialNumber
+        )
         return true
+    }
+
+    public func registerActiveDevice(vendorID: UInt16?, productID: UInt16?, serialNumber: String?) {
+        activeDeviceVendorID = vendorID
+        activeDeviceProductID = productID
+        activeDeviceSerialNumber = serialNumber
+    }
+
+    public func clearActiveDevice() {
+        activeDeviceVendorID = nil
+        activeDeviceProductID = nil
+        activeDeviceSerialNumber = nil
     }
 
     private func cleanupWatchingResources() {
         pendingAutoConnectTask?.cancel()
         pendingAutoConnectTask = nil
         _ = connectionLifecycle.detached()
-        activeDeviceIdentity = nil
+        clearActiveDevice()
         knownDeviceIdentities.removeAll()
         
         if let source = runLoopSource {
@@ -186,8 +219,9 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         
         let newIdentities = newlyAttachedUSBIdentities(identities, known: knownDeviceIdentities)
         knownDeviceIdentities.formUnion(identities)
-        guard !newIdentities.isEmpty, activeDeviceIdentity == nil else { return }
-        activeDeviceIdentity = newIdentities[0]
+        guard !newIdentities.isEmpty,
+              activeDeviceVendorID == nil,
+              activeDeviceProductID == nil else { return }
         guard UserDefaults.standard.object(forKey: "autoDetectDevice") as? Bool ?? true else { return }
         scheduleAutoConnect(isInitialScan: isInitialScan)
     }
@@ -205,15 +239,19 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         try? await Task.sleep(nanoseconds: 50_000_000)
         let remainingIdentities = connectedDeviceIdentities()
         knownDeviceIdentities = remainingIdentities
-        guard let activeIdentity = activeDeviceIdentity else { return }
-        let removedActiveDevice = removedIdentities.contains(activeIdentity)
-        let activeDeviceIsGone = !remainingIdentities.contains(activeIdentity)
+        guard let vendorID = activeDeviceVendorID,
+              let productID = activeDeviceProductID else { return }
+        let matchesActiveDevice: (USBDeviceIdentity) -> Bool = {
+            $0.matches(vendorID: vendorID, productID: productID, serialNumber: self.activeDeviceSerialNumber)
+        }
+        let removedActiveDevice = removedIdentities.contains(where: matchesActiveDevice)
+        let activeDeviceIsGone = !remainingIdentities.contains(where: matchesActiveDevice)
         guard removedActiveDevice || activeDeviceIsGone else { return }
 
         pendingAutoConnectTask?.cancel()
         pendingAutoConnectTask = nil
         _ = connectionLifecycle.detached()
-        activeDeviceIdentity = nil
+        clearActiveDevice()
         ErrorLogger.logMessage(
             "USB device detached",
             level: .info,
@@ -227,10 +265,14 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         )
     }
 
-    private func scheduleAutoConnect(isInitialScan: Bool) {
+    private func scheduleAutoConnect(
+        isInitialScan: Bool,
+        vendorID: UInt16? = nil,
+        productID: UInt16? = nil,
+        serialNumber: String? = nil
+    ) {
         pendingAutoConnectTask?.cancel()
         let token = connectionLifecycle.attachScheduled()
-        let identity = activeDeviceIdentity
         ErrorLogger.logMessage(
             "USB device attached",
             level: .info,
@@ -245,9 +287,16 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
             try? await Task.sleep(nanoseconds: 300_000_000)
             guard !Task.isCancelled,
                   let self,
-                  self.connectionLifecycle.accepts(token),
-                  let identity,
-                  self.connectedDeviceIdentities().contains(identity) else { return }
+                  self.connectionLifecycle.accepts(token) else { return }
+
+            let identities = self.connectedDeviceIdentities()
+            if let vendorID, let productID {
+                guard identities.contains(where: {
+                    $0.matches(vendorID: vendorID, productID: productID, serialNumber: serialNumber)
+                }) else { return }
+            } else {
+                guard !identities.isEmpty else { return }
+            }
 
             self.pendingAutoConnectTask = nil
             await MTPDeviceManager.shared.connectDevice()

@@ -87,6 +87,11 @@ public final class MTPDeviceManager: ObservableObject {
 
             self.deviceInfo = mappedDevInfo
             self.storages = mappedStorages
+            USBWatcher.shared.registerActiveDevice(
+                vendorID: goDevInfo.usbDeviceInfo?.IdVendor,
+                productID: goDevInfo.usbDeviceInfo?.IdProduct,
+                serialNumber: goDevInfo.usbDeviceInfo?.SerialNumber
+            )
             self.isConnected = true
             
             if let firstStorage = mappedStorages.first {
@@ -106,7 +111,10 @@ public final class MTPDeviceManager: ObservableObject {
 
             let errLower = error.localizedDescription.lowercased()
             let isNoStorageError = errLower.contains("no storage found")
-            let isDeviceNotFound = errLower.contains("no mtp device connected") || errLower.contains("no device found") || errLower.contains("busy")
+            let isDeviceNotFound = errLower.contains("no mtp device")
+                || errLower.contains("no device found")
+                || errLower.contains("mtp detect failed")
+                || errLower.contains("busy")
 
             let isExpectedUserCondition = isNoStorageError || isDeviceNotFound
             if !isExpectedUserCondition {
@@ -124,6 +132,8 @@ public final class MTPDeviceManager: ObservableObject {
 
             if isNoStorageError {
                 self.errorMessage = "No storage found on device.\n\nPlease unlock your Android phone screen and ensure its USB connection mode is set to \"File Transfer\" (MTP), then click Retry."
+            } else if isDeviceNotFound {
+                self.errorMessage = nil
             } else {
                 self.errorMessage = "Failed to connect: \(error.localizedDescription)"
             }
@@ -162,7 +172,7 @@ public final class MTPDeviceManager: ObservableObject {
         } catch {
             ErrorLogger.log(error, message: "Failed to dispose MTP device cleanly")
         }
-        
+        USBWatcher.shared.clearActiveDevice()
         self.isConnected = false
         self.deviceInfo = nil
         self.storages = []

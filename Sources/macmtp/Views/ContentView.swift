@@ -330,6 +330,12 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .menuRefreshRequested)) { _ in
             handleRefresh()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .menuCopyRequested)) { _ in
+            handleCopy()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .menuPasteRequested)) { _ in
+            handlePaste()
+        }
         .onReceive(FileTransferService.shared.$activeBatch) { batch in
             showTransferProgress = batch != nil
             statusIsTransferring = batch?.isActive ?? false
@@ -586,11 +592,20 @@ struct ContentView: View {
             let selectedNodes = localFiles.filter { selectedLocalItems.contains($0.path) }
             guard !selectedNodes.isEmpty else { return }
             ClipboardManager.shared.copyItems(items: selectedNodes, from: currentLocalPath, isLocal: true)
+            showTransferToast(copyToastMessage(for: selectedNodes))
         case .mtp:
             let selectedNodes = mtpFiles.filter { selectedMTPItems.contains($0.path) }
             guard !selectedNodes.isEmpty else { return }
             ClipboardManager.shared.copyItems(items: selectedNodes, from: currentMTPPath, isLocal: false)
+            showTransferToast(copyToastMessage(for: selectedNodes))
         }
+    }
+
+    private func copyToastMessage(for items: [FileNode]) -> String {
+        if items.count == 1 {
+            return items[0].isDirectory ? "Folder copied" : "File copied"
+        }
+        return "\(items.count) items copied"
     }
 
     func handleCut() {
@@ -654,9 +669,7 @@ struct ContentView: View {
             ClipboardManager.shared.clear()
             handleRefresh()
         } else if !ClipboardManager.shared.sourceIsLocal && !isDestLocal {
-            if destinationPath == ClipboardManager.shared.sourcePath {
-                ClipboardManager.shared.clear()
-            }
+            showTransferToast("MTP-to-MTP copying is not supported.")
         } else {
             let direction: TransferDirection = isDestLocal ? .mtpToLocal : .localToMTP
             guard let storageId = validSelectedMTPStorageID() else { return }
@@ -670,6 +683,8 @@ struct ContentView: View {
             )
             if transferAccepted {
                 ClipboardManager.shared.clear()
+            } else if FileTransferService.shared.isTransferInFlight {
+                showTransferToast("Finishing the cancelled transfer. Try Paste again shortly.")
             } else if FileTransferService.shared.activeBatch != nil {
                 showTransferProgress = true
             }

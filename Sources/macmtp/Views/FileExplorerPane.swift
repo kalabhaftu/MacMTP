@@ -95,6 +95,7 @@ struct FileExplorerPane: View {
 
     @State private var filterText: String = ""
     @State private var isFilterVisible: Bool = false
+    @FocusState private var isFilterFocused: Bool
 
     @State private var keySearchBuffer: String = ""
     @State private var lastKeyTime: Date = Date.distantPast
@@ -137,6 +138,10 @@ struct FileExplorerPane: View {
         }
         .background(Color(NSColor.controlBackgroundColor))
         .contentShape(Rectangle())
+        .simultaneousGesture(TapGesture().onEnded {
+            guard !isDisabled else { return }
+            onActivate?()
+        })
         .overlay(alignment: .top) {
             if !isLocal, !files.isEmpty, let message = nonBlockingErrorMessage {
                 HStack(spacing: 8) {
@@ -308,9 +313,19 @@ struct FileExplorerPane: View {
             .help("View mode: \(viewMode.rawValue)")
 
             Button(action: {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    isFilterVisible.toggle()
-                    if !isFilterVisible { filterText = "" }
+                if isFilterVisible {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isFilterVisible = false
+                        filterText = ""
+                    }
+                    isFilterFocused = false
+                } else {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isFilterVisible = true
+                    }
+                    DispatchQueue.main.async {
+                        isFilterFocused = true
+                    }
                 }
             }) {
                 Image(systemName: isFilterVisible ? "magnifyingglass.circle.fill" : "magnifyingglass")
@@ -403,6 +418,7 @@ struct FileExplorerPane: View {
             TextField("Search file names", text: $filterText)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: 11 * appFontScale))
+                .focused($isFilterFocused)
 
             if !filterText.isEmpty {
                 Button(action: { filterText = "" }) {

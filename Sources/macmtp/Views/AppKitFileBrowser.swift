@@ -626,6 +626,7 @@ final class AppKitFileTableCellView: NSView {
         stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
         iconView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
         NSLayoutConstraint.activate([
             iconView.widthAnchor.constraint(equalToConstant: 18),
             iconView.heightAnchor.constraint(equalToConstant: 18),
@@ -635,7 +636,6 @@ final class AppKitFileTableCellView: NSView {
             stack.bottomAnchor.constraint(equalTo: bottomAnchor),
             detailLabel.widthAnchor.constraint(equalToConstant: 150)
         ])
-        addSubview(stack)
         nameLabel.lineBreakMode = .byTruncatingMiddle
         detailLabel.textColor = .secondaryLabelColor
     }

@@ -19,7 +19,7 @@ private func file(
 }
 
 @Test
-func searchMatchesFileNamesAndKeepsFoldersNavigable() {
+func searchMatchesFileAndFolderNames() {
     let files = [
         file("Photos", isDirectory: true),
         file("holiday-photo.jpg"),
@@ -28,6 +28,19 @@ func searchMatchesFileNamesAndKeepsFoldersNavigable() {
     let options = FileBrowserOrganization(searchText: "photo")
 
     #expect(options.organize(files, showHidden: true).flatMap(\.files).map(\.name) == ["Photos", "holiday-photo.jpg"])
+}
+
+@Test
+func searchHidesNonMatchingFoldersAndFiles() {
+    let files = [
+        file("Pictures", isDirectory: true),
+        file("Music", isDirectory: true),
+        file("notes.txt")
+    ]
+
+    let options = FileBrowserOrganization(searchText: "does-not-exist")
+
+    #expect(options.organize(files, showHidden: true).flatMap(\.files).isEmpty)
 }
 
 @Test
@@ -170,6 +183,13 @@ func appKitBrowserDetectsPresentationChangesWithoutReloadingUnchangedFiles() {
 
     #expect(!FileBrowserHostView.filesChanged(from: [original], to: [unchanged]))
     #expect(FileBrowserHostView.filesChanged(from: [original], to: [updated]))
+}
+
+@Test @MainActor
+func tableCellInstallsItsStackBeforeActivatingConstraints() {
+    let cell = AppKitFileTableCellView(frame: .zero)
+
+    #expect(cell.subviews.count == 1)
 }
 
 @Test
