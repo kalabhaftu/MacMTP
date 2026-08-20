@@ -21,7 +21,7 @@ extern const char *_GoStringPtr(_GoString_ s);
 /* Start of preamble from import "C" comments.  */
 
 
-#line 15 "kalam.go"
+#line 16 "kalam.go"
 	#include "stdint.h"
 	typedef void (* on_cb_result_t)(char*);
 
@@ -92,6 +92,8 @@ typedef struct { void *data; GoInt len; GoInt cap; } GoSlice;
 extern "C" {
 #endif
 
+extern void BeginTransfer(void);
+extern void CancelTransfer(void);
 extern void Initialize(void);
 extern void FetchDeviceInfo(void);
 extern void FetchStorages(void);

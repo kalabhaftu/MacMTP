@@ -99,7 +99,7 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
             { (refcon, iterator) in
                 let watcher = Unmanaged<USBWatcher>.fromOpaque(refcon!).takeUnretainedValue()
                 Task { @MainActor in
-                    await watcher.handleDevicesAdded(iterator: iterator)
+                    watcher.handleDevicesAdded(iterator: iterator)
                 }
             },
             selfPtr,
@@ -111,9 +111,9 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
             return
         }
         
-        Task { @MainActor in
-            await handleDevicesAdded(iterator: addedIterator, isInitialScan: true)
-        }
+        // IOKit returns already-published devices through this iterator. Drain
+        // it immediately so a phone connected before launch is not missed.
+        handleDevicesAdded(iterator: addedIterator, isInitialScan: true)
         
         let removedResult = IOServiceAddMatchingNotification(
             port,
@@ -208,7 +208,7 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
     }
     
     
-    private func handleDevicesAdded(iterator: io_iterator_t, isInitialScan: Bool = false) async {
+    private func handleDevicesAdded(iterator: io_iterator_t, isInitialScan: Bool = false) {
         var identities: [USBDeviceIdentity] = []
         while case let device = IOIteratorNext(iterator), device != 0 {
             if let identity = deviceIdentity(for: device) {
@@ -219,7 +219,10 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         
         let newIdentities = newlyAttachedUSBIdentities(identities, known: knownDeviceIdentities)
         knownDeviceIdentities.formUnion(identities)
-        guard !newIdentities.isEmpty,
+        let shouldRetryKnownCandidate = newIdentities.isEmpty
+            && pendingAutoConnectTask == nil
+            && MTPDeviceManager.shared.isConnected == false
+        guard (!newIdentities.isEmpty || shouldRetryKnownCandidate),
               activeDeviceVendorID == nil,
               activeDeviceProductID == nil else { return }
         guard UserDefaults.standard.object(forKey: "autoDetectDevice") as? Bool ?? true else { return }
@@ -284,22 +287,49 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         )
 
         pendingAutoConnectTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 300_000_000)
-            guard !Task.isCancelled,
-                  let self,
-                  self.connectionLifecycle.accepts(token) else { return }
+            let delays: [UInt64] = [300_000_000, 750_000_000, 1_500_000_000]
+            for delay in delays {
+                try? await Task.sleep(nanoseconds: delay)
+                guard !Task.isCancelled,
+                      let self,
+                      self.connectionLifecycle.accepts(token) else { return }
+                guard !MTPDeviceManager.shared.isConnected else {
+                    self.pendingAutoConnectTask = nil
+                    return
+                }
 
-            let identities = self.connectedDeviceIdentities()
-            if let vendorID, let productID {
-                guard identities.contains(where: {
-                    $0.matches(vendorID: vendorID, productID: productID, serialNumber: serialNumber)
-                }) else { return }
-            } else {
-                guard !identities.isEmpty else { return }
+                let identities = self.connectedDeviceIdentities()
+                if let vendorID, let productID {
+                    guard identities.contains(where: {
+                        $0.matches(vendorID: vendorID, productID: productID, serialNumber: serialNumber)
+                    }) else { return }
+                } else {
+                    guard !identities.isEmpty else { return }
+                }
+
+                if await MTPDeviceManager.shared.connectDevice() {
+                    guard self.connectionLifecycle.accepts(token) else { return }
+                    self.pendingAutoConnectTask = nil
+                    return
+                }
+                if MTPDeviceManager.shared.isConnected {
+                    self.pendingAutoConnectTask = nil
+                    return
+                }
             }
 
+            guard let self,
+                  self.connectionLifecycle.accepts(token) else { return }
             self.pendingAutoConnectTask = nil
-            await MTPDeviceManager.shared.connectDevice()
+            ErrorLogger.logMessage(
+                "MTP auto-connect attempts exhausted",
+                level: .warning,
+                userInfo: [
+                    "operation": "initialize",
+                    "operation_phase": "connection",
+                    "reconnect_result": "attempts_exhausted"
+                ]
+            )
         }
     }
     

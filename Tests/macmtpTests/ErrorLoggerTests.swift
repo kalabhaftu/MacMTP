@@ -60,6 +60,30 @@ func transportFailureClassificationKeepsContentionSeparateFromBrokenSessions() {
 }
 
 @Test
+func verifiedDeviceDetachStaysBreadcrumbWhileUnexpectedTimeoutsReport() {
+    let error = KalamError.nativeOperationFailed(
+        operation: "transfer",
+        errorType: "ErrorFileTransfer",
+        message: "LIBUSB_ERROR_TIMEOUT"
+    )
+
+    #expect(!shouldReportMTPTransportFailure(error, connectionIsActive: false))
+    #expect(shouldReportMTPTransportFailure(error, connectionIsActive: true))
+}
+
+@Test
+func transferCancellationIsRecognizedAsExpectedCompletion() {
+    let error = KalamError.nativeOperationFailed(
+        operation: "transfer",
+        errorType: "ErrorTransferCancelled",
+        message: "transfer cancelled"
+    )
+
+    #expect(isMTPTransferCancellation(error))
+    #expect(!shouldReportMTPTransportFailure(error, connectionIsActive: true))
+}
+
+@Test
 func transferCompletionRequiresValidJSONAndPreservesNativeErrors() {
     guard case .success = decodeMTPTransferCompletion(#"{"data":true}"#) else {
         Issue.record("Expected a valid transfer completion")

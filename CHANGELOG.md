@@ -3,12 +3,13 @@
 ## Unreleased
 - Next release.
 
-## 1.6.9 - 2026-08-14
+## 1.6.9 - 2026-08-20
 
 ### Clipboard and transfer UX
 - Added Finder-style file Copy and Paste through both keyboard shortcuts and the Edit menu, copying the exact selection from the active pane and pasting into the active pane's current directory.
 - Added local-to-local, local-to-MTP, and MTP-to-local clipboard flows while keeping MTP-to-MTP explicitly unsupported and preserving clipboard contents when a request is rejected.
-- Fixed cancelled transfers so the persistent progress panel disappears immediately while the native transfer remains serialized until it actually finishes cancelling; a retry toast explains when Paste must wait briefly.
+- Added native cancellation signaling through the vendored Kalam/go-mtpx progress callback so Cancel stops the active transfer at the next native USB chunk instead of waiting for the entire current file; native operations remain serialized until cancellation returns.
+- Added clear cancellation and retry toasts for drag/drop and Paste attempts while native cancellation is finishing, and kept confirmed cancellation out of Sentry issues.
 - Added concise copy confirmation toasts for files, folders, and multiple selected items.
 
 ### Search and file-browser behavior
@@ -21,11 +22,13 @@
 - Stopped auto-detection from selecting the first unrelated USB device; attach events now remain candidates until Kalam discovers an MTP-capable endpoint.
 - Registered the active native device identity only after successful initialization, matching vendor, product, and serial data when available so unrelated USB devices cannot suppress Android reconnects.
 - Deduplicated attach and detach handling, invalidated stale reconnect work, and preserved the active connection across unrelated device changes.
+- Restored immediate launch-time USB scanning, bounded reconnect attempts, and stale-connection cleanup for phones already attached before macMTP opens and for rapid replug sequences.
 - Routed lifecycle information and expected no-device conditions to breadcrumbs while retaining actionable native transport failures as Sentry events with redacted context.
 
 ### Verification and maintenance
 - Added regression coverage for strict search filtering, clipboard selection and routing, cancelled-transfer lifecycle, USB identity matching, Sentry severity filtering, AppKit reload stability, and file-cell layout.
 - Verified the native response contract, Swift test suite, shell and plist checks, x86_64 release bundle architecture/signature, and release packaging prerequisites.
+- Verified 60 Swift tests, vendored Go compilation, native cancellation exports, and cancellation classification coverage.
 
 ### Updater hotfix
 - Fixed the API-rate-limit fallback to download the published universal DMG asset and report the HTTP status and redacted URL when an update download fails.

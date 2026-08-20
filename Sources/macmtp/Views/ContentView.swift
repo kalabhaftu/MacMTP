@@ -201,6 +201,7 @@ struct ContentView: View {
             Button("Cancel Transfer", role: .destructive) {
                 FileTransferService.shared.cancelTransfer()
                 showTransferProgress = false
+                showTransferToast("Cancellation requested. Stopping the current file...")
             }
             Button("Keep Transferring", role: .cancel) {}
         } message: {
@@ -454,6 +455,12 @@ struct ContentView: View {
                 isActivePane: activePane == .mtp,
                 clipboardManager: ClipboardManager.shared,
                 onActivate: { activePane = .mtp },
+                onConnect: {
+                    Task {
+                        guard !screenshotMode else { return }
+                        _ = await MTPDeviceManager.shared.connectDevice()
+                    }
+                },
                 onFilesDropped: { files, destination in
                     handleFilesDropped(files: files, destination: destination, isLocal: false)
                 },
@@ -900,24 +907,36 @@ struct ContentView: View {
             if !mtpSources.isEmpty {
                 guard let storageId = validSelectedMTPStorageID() else { return }
                 let nodes = mtpSources.map { FileNode(name: $0.name, path: $0.path, isDirectory: $0.isDirectory, size: 0, modificationDate: Date()) }
-                FileTransferService.shared.initiateTransfer(
+                let accepted = FileTransferService.shared.initiateTransfer(
                     sources: nodes,
                     destinationDir: destination,
                     direction: .mtpToLocal,
                     storageId: storageId
                 )
+                if !accepted { reportTransferRejection() }
             }
         } else {
             if !localSources.isEmpty {
                 guard let storageId = validSelectedMTPStorageID() else { return }
                 let nodes = localSources.map { FileNode(name: $0.name, path: $0.path, isDirectory: $0.isDirectory, size: 0, modificationDate: Date()) }
-                FileTransferService.shared.initiateTransfer(
+                let accepted = FileTransferService.shared.initiateTransfer(
                     sources: nodes,
                     destinationDir: destination,
                     direction: .localToMTP,
                     storageId: storageId
                 )
+                if !accepted { reportTransferRejection() }
             }
+        }
+    }
+
+    private func reportTransferRejection() {
+        if FileTransferService.shared.isTransferInFlight {
+            showTransferToast("Finishing the cancelled transfer. Try again shortly.")
+        } else if FileTransferService.shared.activeBatch != nil {
+            showTransferProgress = true
+        } else {
+            showTransferToast("The transfer could not be started.")
         }
     }
 

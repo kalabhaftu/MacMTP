@@ -77,6 +77,21 @@ func isMTPTransportFailure(_ error: Error) -> Bool {
     }
 }
 
+func shouldReportMTPTransportFailure(_ error: Error, connectionIsActive: Bool) -> Bool {
+    if isMTPTransferCancellation(error) {
+        return false
+    }
+    return !isMTPTransportFailure(error) || connectionIsActive
+}
+
+func isMTPTransferCancellation(_ error: Error) -> Bool {
+    guard case .nativeOperationFailed(_, let errorType, let message) = error as? KalamError else {
+        return false
+    }
+    let normalized = "\(errorType ?? "") \(message)".lowercased()
+    return normalized.contains("errortransfercancelled") || normalized.contains("transfer cancelled")
+}
+
 func shouldRetryMTPDirectory(_ error: Error) -> Bool {
     guard let kalamError = error as? KalamError else { return false }
 
@@ -400,6 +415,14 @@ public actor KalamBridge {
         operationGate.leave()
     }
 
+    nonisolated func beginTransfer() {
+        BeginTransfer()
+    }
+
+    nonisolated func cancelTransfer() {
+        CancelTransfer()
+    }
+
     private func waitForDone(startOperation: @escaping @Sendable () -> Void) async throws -> String {
         try await withCheckedThrowingContinuation { continuation in
             KalamRegistry.shared.setDoneContinuation(continuation)
@@ -654,6 +677,8 @@ public actor KalamBridge {
                 }
             )
 
+            beginTransfer()
+
             mtpQueue.async {
                 var cInput = inputJson.utf8CString
                 cInput.withUnsafeMutableBufferPointer { buffer in
@@ -711,6 +736,8 @@ public actor KalamBridge {
                     KalamRegistry.shared.finishTransfer(with: decodeMTPTransferCompletion(json))
                 }
             )
+
+            beginTransfer()
 
             mtpQueue.async {
                 var cInput = inputJson.utf8CString

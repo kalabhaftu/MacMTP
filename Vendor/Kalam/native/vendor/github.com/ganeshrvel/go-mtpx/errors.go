@@ -1,5 +1,11 @@
 package mtpx
 
+import "errors"
+
+// ErrTransferCancelled is returned by transfer progress callbacks when the
+// host asks the current native transfer to stop.
+var ErrTransferCancelled = errors.New("transfer cancelled")
+
 type MtpDetectFailedError struct {
 	error
 }

@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -24,6 +25,22 @@ static void ignore_signal(int sig) {
 import "C"
 
 var container deviceContainer
+
+var transferCancelRequested uint32
+
+func transferCancellationRequested() bool {
+	return atomic.LoadUint32(&transferCancelRequested) == 1
+}
+
+//export BeginTransfer
+func BeginTransfer() {
+	atomic.StoreUint32(&transferCancelRequested, 0)
+}
+
+//export CancelTransfer
+func CancelTransfer() {
+	atomic.StoreUint32(&transferCancelRequested, 1)
+}
 
 func snapshotProgress(p *mtpx.ProgressInfo) *mtpx.ProgressInfo {
 	if p == nil {
@@ -389,6 +406,9 @@ func UploadFiles(uploadFilesInputJson *C.char) {
 
 	err = _uploadFiles(i.StorageId, i.Sources, i.Destination, i.PreprocessFiles,
 		func(fi *os.FileInfo, fullPath string, err error) error {
+			if transferCancellationRequested() {
+				return mtpx.ErrTransferCancelled
+			}
 			if err != nil {
 				return err
 			}
@@ -407,6 +427,9 @@ func UploadFiles(uploadFilesInputJson *C.char) {
 			return nil
 		},
 		func(p *mtpx.ProgressInfo, err error) error {
+			if transferCancellationRequested() {
+				return mtpx.ErrTransferCancelled
+			}
 			if err != nil {
 				return err
 			}
@@ -484,6 +507,9 @@ func DownloadFiles(downloadFilesInputJson *C.char) {
 
 	err = _downloadFiles(i.StorageId, i.Sources, i.Destination, i.PreprocessFiles,
 		func(fi *mtpx.FileInfo, err error) error {
+			if transferCancellationRequested() {
+				return mtpx.ErrTransferCancelled
+			}
 			if err != nil {
 				return err
 			}
@@ -501,6 +527,9 @@ func DownloadFiles(downloadFilesInputJson *C.char) {
 			return nil
 		},
 		func(p *mtpx.ProgressInfo, err error) error {
+			if transferCancellationRequested() {
+				return mtpx.ErrTransferCancelled
+			}
 			if err != nil {
 				return err
 			}

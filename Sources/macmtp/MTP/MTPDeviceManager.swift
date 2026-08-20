@@ -48,19 +48,25 @@ public final class MTPDeviceManager: ObservableObject {
     }
 
 
-    public func connectDevice() async {
-        guard !isLoading, !isConnected else { return }
+    @discardableResult
+    public func connectDevice() async -> Bool {
+        guard !isLoading, !isConnected else { return false }
         connectionGeneration &+= 1
         let generation = connectionGeneration
         isLoading = true
         errorMessage = nil
+        defer {
+            if generation == connectionGeneration {
+                isLoading = false
+            }
+        }
 
         do {
             let goDevInfo = try await bridge.initialize()
-            guard generation == connectionGeneration else { return }
+            guard generation == connectionGeneration else { return false }
             
             let goStorages = try await bridge.fetchStorages()
-            guard generation == connectionGeneration else { return }
+            guard generation == connectionGeneration else { return false }
             guard !goStorages.isEmpty else {
                 throw KalamError.operationFailed("No storage found on the connected MTP device")
             }
@@ -101,13 +107,16 @@ public final class MTPDeviceManager: ObservableObject {
                 self.forwardHistory.removeAll()
                 await refreshFiles()
             }
+            return isConnected
         } catch {
             // Initialization can succeed before storage enumeration fails. Release
             // the native handle so a retry does not inherit a stale session.
             if generation == connectionGeneration {
                 try? await bridge.dispose()
             }
-            guard generation == connectionGeneration else { return }
+            guard generation == connectionGeneration else { return false }
+
+            USBWatcher.shared.clearActiveDevice()
 
             let errLower = error.localizedDescription.lowercased()
             let isNoStorageError = errLower.contains("no storage found")
@@ -143,10 +152,7 @@ public final class MTPDeviceManager: ObservableObject {
             self.selectedStorageId = nil
             self.mtpFiles = []
             self.displayedDirectoryKey = nil
-        }
-
-        if generation == connectionGeneration {
-            isLoading = false
+            return false
         }
     }
 

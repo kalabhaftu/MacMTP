@@ -66,6 +66,7 @@ public final class FileTransferService: ObservableObject {
     
     public func cancelTransfer() {
         cancelRequested = true
+        bridge.cancelTransfer()
         if let batch = activeBatch {
             batch.cancel()
             activeBatch = nil
@@ -420,7 +421,34 @@ public final class FileTransferService: ObservableObject {
                     }
                     
                 } catch {
-                    ErrorLogger.log(error, message: "FileTransferService: File copy failed for chunk")
+                    if isMTPTransferCancellation(error) {
+                        for idx in chunkIndices {
+                            var itm = batch.items[idx]
+                            if itm.status != .completed {
+                                itm.markFailed("Transfer cancelled")
+                                batch.items[idx] = itm
+                            }
+                        }
+                        break queueLoop
+                    }
+
+                    if shouldReportMTPTransportFailure(
+                        error,
+                        connectionIsActive: MTPDeviceManager.shared.isConnected
+                    ) {
+                        ErrorLogger.log(error, message: "FileTransferService: File copy failed for chunk")
+                    } else {
+                        ErrorLogger.logMessage(
+                            "MTP transfer stopped after the Android device disconnected",
+                            level: .warning,
+                            userInfo: [
+                                "operation": "transfer",
+                                "operation_phase": "transfer",
+                                "connection_state": "disconnected",
+                                "native_error_type": nativeErrorType(for: error)
+                            ]
+                        )
+                    }
                     for idx in chunkIndices {
                         var itm = batch.items[idx]
                         if itm.status != .completed && itm.bytesTransferred < itm.fileSize {

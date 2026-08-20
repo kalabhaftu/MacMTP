@@ -97,6 +97,8 @@ extern void RenameFile(char* renameFileInputJson);
 extern void Walk(char* walkInputJson);
 extern void UploadFiles(char* uploadFilesInputJson);
 extern void DownloadFiles(char* downloadFilesInputJson);
+extern void BeginTransfer(void);
+extern void CancelTransfer(void);
 extern void Dispose(void);
 
 #ifdef __cplusplus

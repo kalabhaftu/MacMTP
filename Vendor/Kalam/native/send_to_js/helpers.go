@@ -1,6 +1,7 @@
 package send_to_js
 
 import (
+	"errors"
 	"fmt"
 	"github.com/ganeshrvel/go-mtpfs/mtp"
 	"github.com/ganeshrvel/go-mtpx"
@@ -10,6 +11,10 @@ import (
 
 // process errors
 func processError(e error) (errorType ErrorType, errorMsg string) {
+	if errors.Is(e, mtpx.ErrTransferCancelled) || strings.Contains(strings.ToLower(e.Error()), mtpx.ErrTransferCancelled.Error()) {
+		return ErrorTransferCancelled, e.Error()
+	}
+
 	switch v := e.(type) {
 	case mtp.RCError:
 		if v == 0x2009 {

@@ -24,5 +24,8 @@ require_pattern 'ObjectId  uint32' "$SEND_SOURCE"
 require_pattern 'json:"objectId"' "$SEND_SOURCE"
 require_pattern 'makeDirectoryWithResult' "$KALAM_SOURCE"
 require_pattern 'renameFileWithResult' "$KALAM_SOURCE"
+require_pattern 'func BeginTransfer' "$KALAM_SOURCE"
+require_pattern 'func CancelTransfer' "$KALAM_SOURCE"
+require_pattern 'ErrorTransferCancelled' "$ROOT_DIR/Vendor/Kalam/native/send_to_js/enums.go"
 
 echo "Verified native collection and mutation response contract."

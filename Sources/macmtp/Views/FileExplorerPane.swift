@@ -70,6 +70,7 @@ struct FileExplorerPane: View {
     let isActivePane: Bool
     let clipboardManager: ClipboardManager
     var onActivate: (() -> Void)? = nil
+    var onConnect: (() -> Void)? = nil
     var onFilesDropped: (([DroppedFile], String) -> Void)? = nil
     var onFileOperation: ((FileOperation) -> Void)? = nil
     var onRequestNewFolder: ((String, Bool) -> Void)? = nil
@@ -787,6 +788,14 @@ struct FileExplorerPane: View {
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 280)
+
+            if !isLocal {
+                Button(action: { onConnect?() }) {
+                    Label("Retry Connection", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
+            }
 
             Spacer()
         }

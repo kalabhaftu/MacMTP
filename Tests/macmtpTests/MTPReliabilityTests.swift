@@ -16,14 +16,23 @@ private actor RecordingMTPBridge: MTPBridge {
     private(set) var makeDirectoryCalls = 0
     private(set) var listDirectoryCalls = 0
     private let failListingAfterMutation: Bool
+    private let initializeDelay: UInt64
 
-    init(files: [GoFileInfo] = [], failListingAfterMutation: Bool = false) {
+    init(
+        files: [GoFileInfo] = [],
+        failListingAfterMutation: Bool = false,
+        initializeDelay: UInt64 = 0
+    ) {
         self.files = files
         self.failListingAfterMutation = failListingAfterMutation
+        self.initializeDelay = initializeDelay
     }
 
     func initialize() async throws -> GoDeviceInfoData {
-        GoDeviceInfoData(
+        if initializeDelay > 0 {
+            try await Task.sleep(nanoseconds: initializeDelay)
+        }
+        return GoDeviceInfoData(
             mtpDeviceInfo: GoMtpDeviceInfo(
                 Manufacturer: "Test",
                 Model: "Test MTP",
@@ -337,6 +346,21 @@ func usbLifecycleInvalidatesRapidReplugAndDetachTokens() {
     #expect(!lifecycle.accepts(second))
     let third = lifecycle.attachScheduled()
     #expect(lifecycle.accepts(third))
+}
+
+@Test @MainActor
+func staleConnectionCompletionCannotLeaveTheManagerLoading() async {
+    let bridge = RecordingMTPBridge(initializeDelay: 100_000_000)
+    let manager = MTPDeviceManager(bridge: bridge)
+    let connection = Task { await manager.connectDevice() }
+
+    while !manager.isLoading {
+        await Task.yield()
+    }
+    manager.invalidateConnection(message: "Disconnected during connection")
+    _ = await connection.value
+
+    #expect(!manager.isLoading)
 }
 
 @Test

@@ -20,5 +20,6 @@ const (
 	ErrorFileTransfer       ErrorType = "ErrorFileTransfer"
 	ErrorFileObjectRead     ErrorType = "ErrorFileObjectRead"
 	ErrorSendObject         ErrorType = "ErrorSendObject"
+	ErrorTransferCancelled  ErrorType = "ErrorTransferCancelled"
 	ErrorGeneral            ErrorType = "ErrorGeneral"
 )
