@@ -176,27 +176,16 @@ struct AppKitFileBrowser: NSViewRepresentable {
 
         func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {
             guard !applyingSelection else { return }
-            for indexPath in indexPaths {
-                (collectionView.item(at: indexPath) as? AppKitFileCollectionItem)?.updateSelection(true)
-            }
-            updateSelection(indexPaths: indexPaths, selected: true)
+            syncSelectionFromCollectionView(collectionView)
         }
 
         func collectionView(_ collectionView: NSCollectionView, didDeselectItemsAt indexPaths: Set<IndexPath>) {
             guard !applyingSelection else { return }
-            for indexPath in indexPaths {
-                (collectionView.item(at: indexPath) as? AppKitFileCollectionItem)?.updateSelection(false)
-            }
-            updateSelection(indexPaths: indexPaths, selected: false)
+            syncSelectionFromCollectionView(collectionView)
         }
 
-        private func updateSelection(indexPaths: Set<IndexPath>, selected: Bool) {
-            var paths = selectedPaths.wrappedValue
-            for indexPath in indexPaths {
-                guard let file = file(at: indexPath) else { continue }
-                let path = file.path
-                if selected { paths.insert(path) } else { paths.remove(path) }
-            }
+        private func syncSelectionFromCollectionView(_ collectionView: NSCollectionView) {
+            let paths = Set(collectionView.selectionIndexPaths.compactMap { file(at: $0)?.path })
             nativeSelectionPending = true
             selectedPaths.wrappedValue = paths
             onSelectionChanged()
@@ -222,9 +211,6 @@ struct AppKitFileBrowser: NSViewRepresentable {
             forItemsAt indexPaths: Set<IndexPath>
         ) {
             draggedCollectionIndexPaths = indexPaths
-            for indexPath in indexPaths {
-                collectionView.item(at: indexPath)?.view.alphaValue = 0.4
-            }
         }
 
         func collectionView(
@@ -233,9 +219,6 @@ struct AppKitFileBrowser: NSViewRepresentable {
             endedAt screenPoint: NSPoint,
             dragOperation operation: NSDragOperation
         ) {
-            for indexPath in draggedCollectionIndexPaths {
-                collectionView.item(at: indexPath)?.view.alphaValue = 1.0
-            }
             draggedCollectionIndexPaths = []
         }
 
@@ -374,15 +357,10 @@ struct AppKitFileBrowser: NSViewRepresentable {
                 }
             })
             applyingSelection = true
-            collectionView.deselectAll(nil)
-            // Clear visual highlight on all visible items since delegate
-            // callbacks are suppressed while applyingSelection is true.
+            collectionView.selectionIndexPaths = indexes
             for indexPath in collectionView.indexPathsForVisibleItems() {
-                (collectionView.item(at: indexPath) as? AppKitFileCollectionItem)?.updateSelection(false)
-            }
-            collectionView.selectItems(at: indexes, scrollPosition: [])
-            for indexPath in indexes {
-                (collectionView.item(at: indexPath) as? AppKitFileCollectionItem)?.updateSelection(true)
+                let isSel = indexes.contains(indexPath)
+                (collectionView.item(at: indexPath) as? AppKitFileCollectionItem)?.updateSelection(isSel)
             }
             applyingSelection = false
         }
@@ -605,9 +583,6 @@ final class ClearingTableView: NSTableView {
     ) {
         super.draggingSession(session, willBeginAt: screenPoint)
         draggedRows = selectedRowIndexes
-        for row in draggedRows {
-            rowView(atRow: row, makeIfNecessary: false)?.alphaValue = 0.4
-        }
     }
 
     override func draggingSession(
@@ -616,9 +591,6 @@ final class ClearingTableView: NSTableView {
         operation: NSDragOperation
     ) {
         super.draggingSession(session, endedAt: screenPoint, operation: operation)
-        for row in draggedRows {
-            rowView(atRow: row, makeIfNecessary: false)?.alphaValue = 1.0
-        }
         draggedRows = IndexSet()
     }
 
@@ -677,6 +649,13 @@ final class AppKitFileCollectionItem: NSCollectionViewItem {
 
     override func loadView() {
         view = cellView
+    }
+
+    override var isSelected: Bool {
+        didSet {
+            super.isSelected = isSelected
+            cellView.updateSelection(isSelected)
+        }
     }
 
     override var highlightState: NSCollectionViewItem.HighlightState {

@@ -1,6 +1,6 @@
 import Foundation
 import Combine
-
+import AppKit
 
 public enum ClipboardOperation: String, Sendable {
     case copy = "Copy"
@@ -16,28 +16,17 @@ public enum ClipboardOperation: String, Sendable {
     }
 }
 
-
 @MainActor
 public final class ClipboardManager: ObservableObject {
-
-
     public static let shared = ClipboardManager()
 
-
     @Published public private(set) var hasContent: Bool = false
-
-
     public private(set) var items: [FileNode] = []
-
     public private(set) var operation: ClipboardOperation = .copy
-
     public private(set) var sourceIsLocal: Bool = true
-
     public private(set) var sourcePath: String = ""
 
-
     private init() {}
-
 
     public func copyItems(items: [FileNode], from sourcePath: String, isLocal: Bool) {
         setClipboard(items: items, operation: .copy, sourcePath: sourcePath, isLocal: isLocal)
@@ -119,7 +108,6 @@ public final class ClipboardManager: ObservableObject {
         return "\(parts.joined(separator: ", ")) (\(sizeStr)) — \(verb) from \(source):\(sourcePath)"
     }
 
-
     private func setClipboard(
         items: [FileNode],
         operation: ClipboardOperation,
@@ -131,5 +119,17 @@ public final class ClipboardManager: ObservableObject {
         self.sourcePath = sourcePath
         self.sourceIsLocal = isLocal
         self.hasContent = !items.isEmpty
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        guard !items.isEmpty else { return }
+
+        let textPayload = items.map {
+            "\(isLocal ? "local" : "mtp"):\($0.isDirectory ? "dir" : "file"):\($0.path)"
+        }.joined(separator: "\n")
+        pasteboard.setString(textPayload, forType: .string)
+        if isLocal {
+            pasteboard.setPropertyList(items.map(\.path), forType: NSPasteboard.PasteboardType("NSFilenamesPboardType"))
+        }
     }
 }

@@ -553,6 +553,14 @@ struct FileExplorerPane: View {
                     }
                 }
             }
+
+            if organizationIsActive {
+                Section {
+                    Button(role: .destructive, action: resetOrganization) {
+                        Label("Reset to Defaults", systemImage: "arrow.counterclockwise")
+                    }
+                }
+            }
         } label: {
             Image(systemName: organizationIsActive ? "arrow.up.arrow.down.circle.fill" : "arrow.up.arrow.down.circle")
                 .font(.system(size: 14 * appFontScale))
@@ -561,6 +569,14 @@ struct FileExplorerPane: View {
         .menuStyle(.borderlessButton)
         .fixedSize()
         .help("Sort, group, and filter files")
+    }
+
+    private func resetOrganization() {
+        grouping = .none
+        sortColumn = .name
+        sortDirection = .ascending
+        extensionFilter = nil
+        applyFilterAndSort()
     }
 
     private var organizationSummary: some View {
@@ -586,6 +602,17 @@ struct FileExplorerPane: View {
             }
 
             Spacer(minLength: 0)
+
+            Button(action: resetOrganization) {
+                HStack(spacing: 4) {
+                    Image(systemName: "xmark.circle.fill")
+                    Text("Clear")
+                }
+                .font(.system(size: 10 * appFontScale, weight: .semibold))
+                .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Clear grouping, sorting, and filters")
         }
         .font(.system(size: 10 * appFontScale, weight: .medium))
         .foregroundColor(.secondary)

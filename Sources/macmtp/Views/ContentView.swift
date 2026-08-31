@@ -621,10 +621,12 @@ struct ContentView: View {
             let selectedNodes = localFiles.filter { selectedLocalItems.contains($0.path) }
             guard !selectedNodes.isEmpty else { return }
             ClipboardManager.shared.cutItems(items: selectedNodes, from: currentLocalPath, isLocal: true)
+            showTransferToast(selectedNodes.count == 1 ? (selectedNodes[0].isDirectory ? "Folder cut" : "File cut") : "\(selectedNodes.count) items cut")
         case .mtp:
             let selectedNodes = mtpFiles.filter { selectedMTPItems.contains($0.path) }
             guard !selectedNodes.isEmpty else { return }
             ClipboardManager.shared.cutItems(items: selectedNodes, from: currentMTPPath, isLocal: false)
+            showTransferToast(selectedNodes.count == 1 ? (selectedNodes[0].isDirectory ? "Folder cut" : "File cut") : "\(selectedNodes.count) items cut")
         }
     }
 
