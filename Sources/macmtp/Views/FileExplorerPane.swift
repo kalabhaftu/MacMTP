@@ -988,6 +988,18 @@ struct FileExplorerPane: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(NSColor.controlBackgroundColor))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onActivate?()
+        }
+        .contextMenu { emptySpaceContextMenuItems }
+        .overlay(
+            RoundedRectangle(cornerRadius: 0)
+                .stroke(isDropTargeted ? Color.accentColor : Color.clear, lineWidth: 2)
+        )
+        .onDrop(of: [.fileURL, .utf8PlainText], isTargeted: $isDropTargeted) { providers in
+            handleDrop(providers: providers)
+        }
     }
 
     private var emptyFilterMessage: String {

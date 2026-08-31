@@ -1071,40 +1071,53 @@ struct ContentView: View {
         isCut: Bool,
         conflictResolution: ConflictResolution? = nil
     ) {
-        let fileManager = FileManager.default
         let destURL = URL(fileURLWithPath: destination)
-        for item in items {
-            let sourceURL = URL(fileURLWithPath: item.path)
-            let targetURL = destURL.appendingPathComponent(item.name)
-            if sourceURL == targetURL || sourceURL.deletingLastPathComponent() == destURL {
-                continue
-            }
-            do {
-                if fileManager.fileExists(atPath: targetURL.path) {
-                    switch conflictResolution {
-                    case .skip, .skipIfSameSize:
-                        continue
-                    case .overwriteIfDifferent:
-                        let sourceSize = ((try? fileManager.attributesOfItem(atPath: sourceURL.path)[.size]) as? Int64) ?? 0
-                        let targetSize = ((try? fileManager.attributesOfItem(atPath: targetURL.path)[.size]) as? Int64) ?? 0
-                        if sourceSize == targetSize { continue }
-                        try fileManager.trashItem(at: targetURL, resultingItemURL: nil)
-                    case .overwrite:
-                        try fileManager.trashItem(at: targetURL, resultingItemURL: nil)
-                    case .cancel:
-                        return
-                    case .askEach, .none:
-                        break
+        DispatchQueue.global(qos: .userInitiated).async {
+            let fileManager = FileManager.default
+            var hadError: String?
+            var didCopy = false
+            for item in items {
+                let sourceURL = URL(fileURLWithPath: item.path)
+                let targetURL = destURL.appendingPathComponent(item.name)
+                if sourceURL == targetURL || sourceURL.deletingLastPathComponent().path == destURL.path {
+                    continue
+                }
+                do {
+                    if fileManager.fileExists(atPath: targetURL.path) {
+                        switch conflictResolution {
+                        case .skip, .skipIfSameSize:
+                            continue
+                        case .overwriteIfDifferent:
+                            let sourceSize = ((try? fileManager.attributesOfItem(atPath: sourceURL.path)[.size]) as? Int64) ?? 0
+                            let targetSize = ((try? fileManager.attributesOfItem(atPath: targetURL.path)[.size]) as? Int64) ?? 0
+                            if sourceSize == targetSize { continue }
+                            try fileManager.trashItem(at: targetURL, resultingItemURL: nil)
+                        case .overwrite:
+                            try fileManager.trashItem(at: targetURL, resultingItemURL: nil)
+                        case .cancel:
+                            return
+                        case .askEach, .none:
+                            break
+                        }
                     }
+                    if isCut {
+                        try fileManager.moveItem(at: sourceURL, to: targetURL)
+                    } else {
+                        try fileManager.copyItem(at: sourceURL, to: targetURL)
+                    }
+                    didCopy = true
+                } catch {
+                    ErrorLogger.log(error, message: "Paste operation failed")
+                    hadError = error.localizedDescription
                 }
-                if isCut {
-                    try fileManager.moveItem(at: sourceURL, to: targetURL)
-                } else {
-                    try fileManager.copyItem(at: sourceURL, to: targetURL)
+            }
+            DispatchQueue.main.async {
+                if let hadError {
+                    self.operationErrorMessage = hadError
                 }
-            } catch {
-                ErrorLogger.log(error, message: "Paste operation failed")
-                operationErrorMessage = error.localizedDescription
+                if didCopy {
+                    self.handleRefresh()
+                }
             }
         }
     }

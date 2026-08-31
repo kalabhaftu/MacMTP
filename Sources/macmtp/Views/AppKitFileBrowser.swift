@@ -184,7 +184,7 @@ struct AppKitFileBrowser: NSViewRepresentable {
             syncSelectionFromCollectionView(collectionView)
         }
 
-        private func syncSelectionFromCollectionView(_ collectionView: NSCollectionView) {
+        func syncSelectionFromCollectionView(_ collectionView: NSCollectionView) {
             let paths = Set(collectionView.selectionIndexPaths.compactMap { file(at: $0)?.path })
             nativeSelectionPending = true
             selectedPaths.wrappedValue = paths
@@ -537,17 +537,66 @@ final class FileBrowserHostView: NSView {
 
 final class ClearingCollectionView: NSCollectionView {
     weak var coordinator: AppKitFileBrowser.Coordinator?
+    private var anchorIndexPath: IndexPath?
+
+    override var acceptsFirstResponder: Bool { true }
 
     override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
         coordinator?.onActivate()
         let point = convert(event.locationInWindow, from: nil)
-        if indexPathForItem(at: point) == nil {
+        guard let clickedPath = indexPathForItem(at: point) else {
             deselectAll(nil)
+            anchorIndexPath = nil
             coordinator?.nativeSelectionPending = true
             coordinator?.selectedPaths.wrappedValue.removeAll()
             coordinator?.onSelectionChanged()
+            super.mouseDown(with: event)
+            return
         }
+
+        if event.modifierFlags.contains(.shift), let anchor = anchorIndexPath {
+            let range = indexPathsBetween(anchor, clickedPath)
+            selectionIndexPaths = range
+            coordinator?.syncSelectionFromCollectionView(self)
+            return
+        }
+
+        if event.modifierFlags.contains(.command) {
+            var current = selectionIndexPaths
+            if current.contains(clickedPath) {
+                current.remove(clickedPath)
+            } else {
+                current.insert(clickedPath)
+            }
+            selectionIndexPaths = current
+            anchorIndexPath = clickedPath
+            coordinator?.syncSelectionFromCollectionView(self)
+            return
+        }
+
+        anchorIndexPath = clickedPath
+        selectionIndexPaths = [clickedPath]
+        coordinator?.syncSelectionFromCollectionView(self)
         super.mouseDown(with: event)
+    }
+
+    private func indexPathsBetween(_ first: IndexPath, _ second: IndexPath) -> Set<IndexPath> {
+        guard let coordinator = coordinator else { return [first, second] }
+        let groups = coordinator.collectionGroups
+        var allPaths: [IndexPath] = []
+        for s in groups.indices {
+            for i in groups[s].files.indices {
+                allPaths.append(IndexPath(item: i, section: s))
+            }
+        }
+        guard let idx1 = allPaths.firstIndex(of: first),
+              let idx2 = allPaths.firstIndex(of: second) else {
+            return [first, second]
+        }
+        let lower = min(idx1, idx2)
+        let upper = max(idx1, idx2)
+        return Set(allPaths[lower...upper])
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -735,7 +784,8 @@ final class AppKitFileCellView: NSView {
         menuProvider?()
     }
 
-    func prepareForReuse() {
+    override func prepareForReuse() {
+        super.prepareForReuse()
         isSelectedState = false
         isDropTargetState = false
         menuProvider = nil

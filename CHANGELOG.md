@@ -7,15 +7,17 @@
 
 ### File browser and drag-and-drop
 - Added native drop-target registration and folder highlighting for both collection and table views, allowing files to be dragged and dropped directly into subdirectories.
+- Added full interactive support on empty folders: right-click context menus, pane click activation, and drag-and-drop file receiving now work seamlessly on empty directories.
 - Preserved native item opacity during drag sessions without leaving dimmed visual ghosts behind in the source grid.
 - Overrode `isSelected` in collection item views to bind directly with AppKit's native selection pipeline.
-- Restored standard Shift-Click range/interval selection across multiple files from anchor to target, matching Finder and Windows Explorer conventions.
+- Restored standard Shift-Click range/interval selection across multiple files from anchor to target across all view modes (List, Icons, Large Icons), matching Finder and Windows Explorer conventions.
 - Fixed `Cmd+A` (Select All) to render visual selection highlights on all visible grid items immediately on the first keystroke.
 - Implemented `prepareForReuse` on collection items and cell views to eliminate recycled border and selection flicker during fast scrolling.
 - Fixed repeated typeahead keypress cycling so only the newly matching item is highlighted instead of stacking selections.
 
-### Clipboard lifecycle and state consistency
+### Clipboard lifecycle and transfer performance
 - Fixed clipboard clearing behavior: standard Copy (`Cmd+C`) now keeps items on the clipboard indefinitely for multi-paste across folders; only Cut (`Cmd+X`) consumes and clears the clipboard on paste.
+- Offloaded local file copy and move operations to a background thread to prevent UI thread hangs during large file pastes.
 - Synchronized the internal clipboard with `NSPasteboard.general`, clearing old system pasteboard contents on every new copy or cut.
 - Added automatic clipboard updates on file deletion and file rename to prevent stale references to non-existent paths.
 - Automatically cleared device selections and MTP clipboard items on Android device disconnection.
