@@ -3,6 +3,28 @@
 ## Unreleased
 - Next release.
 
+## 1.7.0 - 2026-08-31
+
+### File browser and drag-and-drop
+- Added native drop-target registration and folder highlighting for both collection and table views, allowing files to be dragged and dropped directly into subdirectories.
+- Preserved native item opacity during drag sessions without leaving dimmed visual ghosts behind in the source grid.
+- Overrode `isSelected` in collection item views to bind directly with AppKit's native selection pipeline.
+- Restored standard Shift-Click range/interval selection across multiple files from anchor to target, matching Finder and Windows Explorer conventions.
+- Fixed `Cmd+A` (Select All) to render visual selection highlights on all visible grid items immediately on the first keystroke.
+- Implemented `prepareForReuse` on collection items and cell views to eliminate recycled border and selection flicker during fast scrolling.
+- Fixed repeated typeahead keypress cycling so only the newly matching item is highlighted instead of stacking selections.
+
+### Clipboard lifecycle and state consistency
+- Fixed clipboard clearing behavior: standard Copy (`Cmd+C`) now keeps items on the clipboard indefinitely for multi-paste across folders; only Cut (`Cmd+X`) consumes and clears the clipboard on paste.
+- Synchronized the internal clipboard with `NSPasteboard.general`, clearing old system pasteboard contents on every new copy or cut.
+- Added automatic clipboard updates on file deletion and file rename to prevent stale references to non-existent paths.
+- Automatically cleared device selections and MTP clipboard items on Android device disconnection.
+
+### Navigation and organization controls
+- Synchronized pane loading states directly with MTP background scanning to eliminate false "This folder is empty" flashes when entering directories with many files.
+- Added an inline Clear button on the active organization banner and a Reset to Defaults action in the organization menu to quickly reset grouping, sorting column/direction, and extension filters.
+- Automatically reset active filename search filters and search bar visibility when navigating into subfolders.
+
 ## 1.6.9 - 2026-08-20
 
 ### Clipboard and transfer UX
