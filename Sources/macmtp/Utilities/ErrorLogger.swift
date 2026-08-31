@@ -110,9 +110,7 @@ public struct ErrorLogger {
         let extras = sanitizedExtras(userInfo)
         let breadcrumb = Breadcrumb(level: level, category: "macmtp")
         breadcrumb.message = sanitizedMessage
-        for (key, value) in extras {
-            breadcrumb.setData(value: value, key: key)
-        }
+        breadcrumb.data = extras
         SentrySDK.addBreadcrumb(breadcrumb)
 
         guard shouldCaptureMessage(level) else { return }

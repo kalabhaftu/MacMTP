@@ -115,7 +115,7 @@ struct AppKitFileBrowser: NSViewRepresentable {
             self.isLocal = isLocal
         }
 
-        private var collectionGroups: [FileGroup] {
+        var collectionGroups: [FileGroup] {
             groups.isEmpty ? [FileGroup(title: "", files: files)] : groups
         }
 
