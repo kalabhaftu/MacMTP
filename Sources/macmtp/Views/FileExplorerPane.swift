@@ -198,7 +198,7 @@ struct FileExplorerPane: View {
             if newFiles.isEmpty {
                 if let err = MTPDeviceManager.shared.errorMessage {
                     loadingState = .error(err)
-                } else {
+                } else if loadingState != .loading {
                     loadingState = .empty
                 }
             } else {
@@ -1073,7 +1073,10 @@ struct FileExplorerPane: View {
         if displayedFiles.isEmpty && !files.isEmpty && (!filterText.isEmpty || extensionFilter != nil) {
             loadingState = .empty
         } else if displayedFiles.isEmpty && files.isEmpty {
-            loadingState = .empty
+            // Don't flash "This folder is empty" while we're still loading.
+            if loadingState != .loading {
+                loadingState = .empty
+            }
         } else {
             loadingState = .loaded
         }

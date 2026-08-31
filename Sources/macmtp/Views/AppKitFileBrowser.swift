@@ -207,6 +207,32 @@ struct AppKitFileBrowser: NSViewRepresentable {
             return pasteboardWriter(for: file)
         }
 
+        func collectionView(
+            _ collectionView: NSCollectionView,
+            draggingSession session: NSDraggingSession,
+            willBeginAt screenPoint: NSPoint,
+            forItemsAt indexPaths: Set<IndexPath>
+        ) {
+            draggedCollectionIndexPaths = indexPaths
+            for indexPath in indexPaths {
+                collectionView.item(at: indexPath)?.view.alphaValue = 0.4
+            }
+        }
+
+        func collectionView(
+            _ collectionView: NSCollectionView,
+            draggingSession session: NSDraggingSession,
+            endedAt screenPoint: NSPoint,
+            dragOperation operation: NSDragOperation
+        ) {
+            for indexPath in draggedCollectionIndexPaths {
+                collectionView.item(at: indexPath)?.view.alphaValue = 1.0
+            }
+            draggedCollectionIndexPaths = []
+        }
+
+        private var draggedCollectionIndexPaths: Set<IndexPath> = []
+
         func numberOfRows(in tableView: NSTableView) -> Int { files.count }
 
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
@@ -468,6 +494,7 @@ final class ClearingCollectionView: NSCollectionView {
 final class ClearingTableView: NSTableView {
     weak var coordinator: AppKitFileBrowser.Coordinator?
     var fontScale: Double = 1
+    private var draggedRows = IndexSet()
 
     override func mouseDown(with event: NSEvent) {
         coordinator?.onActivate()
@@ -479,6 +506,29 @@ final class ClearingTableView: NSTableView {
             coordinator?.onSelectionChanged()
         }
         super.mouseDown(with: event)
+    }
+
+    override func draggingSession(
+        _ session: NSDraggingSession,
+        willBeginAt screenPoint: NSPoint
+    ) {
+        super.draggingSession(session, willBeginAt: screenPoint)
+        draggedRows = selectedRowIndexes
+        for row in draggedRows {
+            rowView(atRow: row, makeIfNecessary: false)?.alphaValue = 0.4
+        }
+    }
+
+    override func draggingSession(
+        _ session: NSDraggingSession,
+        endedAt screenPoint: NSPoint,
+        operation: NSDragOperation
+    ) {
+        super.draggingSession(session, endedAt: screenPoint, operation: operation)
+        for row in draggedRows {
+            rowView(atRow: row, makeIfNecessary: false)?.alphaValue = 1.0
+        }
+        draggedRows = IndexSet()
     }
 
     @objc func doubleClick(_ sender: Any?) {
