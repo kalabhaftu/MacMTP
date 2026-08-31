@@ -187,7 +187,9 @@ public final class MTPDeviceManager: ObservableObject {
         self.displayedDirectoryKey = nil
         self.currentMTPPath = "/"
         self.backHistory.removeAll()
-        self.forwardHistory.removeAll()
+        if !ClipboardManager.shared.sourceIsLocal {
+            ClipboardManager.shared.clear()
+        }
         self.isLoading = false
     }
 
@@ -215,6 +217,9 @@ public final class MTPDeviceManager: ObservableObject {
         currentMTPPath = "/"
         backHistory.removeAll()
         forwardHistory.removeAll()
+        if !ClipboardManager.shared.sourceIsLocal {
+            ClipboardManager.shared.clear()
+        }
         isLoading = false
         errorMessage = message
 

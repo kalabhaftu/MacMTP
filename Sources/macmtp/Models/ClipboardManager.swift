@@ -42,6 +42,40 @@ public final class ClipboardManager: ObservableObject {
         sourceIsLocal = true
         sourcePath = ""
         hasContent = false
+        NSPasteboard.general.clearContents()
+    }
+
+    public func removeItems(matchingPaths paths: Set<String>) {
+        guard hasContent else { return }
+        items.removeAll { paths.contains($0.path) }
+        if items.isEmpty {
+            clear()
+        } else {
+            setClipboard(items: items, operation: operation, sourcePath: sourcePath, isLocal: sourceIsLocal)
+        }
+    }
+
+    public func updateItemPath(oldPath: String, newPath: String, newName: String) {
+        guard hasContent else { return }
+        var updated = false
+        items = items.map { item in
+            if item.path == oldPath {
+                updated = true
+                return FileNode(
+                    name: newName,
+                    path: newPath,
+                    parentPath: item.parentPath,
+                    isDirectory: item.isDirectory,
+                    size: item.size,
+                    modificationDate: Date(),
+                    objectId: item.objectId
+                )
+            }
+            return item
+        }
+        if updated {
+            setClipboard(items: items, operation: operation, sourcePath: sourcePath, isLocal: sourceIsLocal)
+        }
     }
 
     public var pasteDescription: String {

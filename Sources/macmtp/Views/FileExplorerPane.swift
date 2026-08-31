@@ -1003,6 +1003,8 @@ struct FileExplorerPane: View {
 
     private func navigateTo(path: String) {
         resetTypeahead()
+        filterText = ""
+        isFilterVisible = false
         let cleanPath = path.isEmpty ? "/" : path
         if usesProvidedFiles {
             if pathHistoryIndex < pathHistory.count - 1 {
@@ -1050,6 +1052,8 @@ struct FileExplorerPane: View {
 
     private func navigateBack() {
         resetTypeahead()
+        filterText = ""
+        isFilterVisible = false
         if isLocal {
             guard pathHistoryIndex > 0 else { return }
             pathHistoryIndex -= 1
@@ -1065,6 +1069,8 @@ struct FileExplorerPane: View {
 
     private func navigateForward() {
         resetTypeahead()
+        filterText = ""
+        isFilterVisible = false
         if isLocal {
             guard pathHistoryIndex >= 0 && pathHistoryIndex < pathHistory.count - 1 else { return }
             pathHistoryIndex += 1
@@ -1080,6 +1086,8 @@ struct FileExplorerPane: View {
 
     private func navigateUp() {
         resetTypeahead()
+        filterText = ""
+        isFilterVisible = false
         if isLocal {
             let url  = URL(fileURLWithPath: currentPath)
             let parentPath = url.deletingLastPathComponent().path

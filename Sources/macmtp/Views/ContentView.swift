@@ -282,7 +282,9 @@ struct ContentView: View {
                             isCut: pendingLocalPasteIsCut,
                             conflictResolution: resolution
                         )
-                        ClipboardManager.shared.clear()
+                        if pendingLocalPasteIsCut {
+                            ClipboardManager.shared.clear()
+                        }
                         handleRefresh()
                     }
                     pendingLocalPasteItems = []
@@ -300,6 +302,12 @@ struct ContentView: View {
             guard !screenshotMode else { return }
             isMTPConnected = connected
             connectedDeviceName = MTPDeviceManager.shared.deviceInfo?.displayName ?? "No Device Connected"
+            if !connected {
+                selectedMTPItems.removeAll()
+                if !ClipboardManager.shared.sourceIsLocal {
+                    ClipboardManager.shared.clear()
+                }
+            }
         }
         .onReceive(MTPDeviceManager.shared.$mtpFiles) { newFiles in
             guard !screenshotMode else { return }
@@ -674,8 +682,11 @@ struct ContentView: View {
         }
 
         if ClipboardManager.shared.sourceIsLocal && isDestLocal {
-            performLocalPaste(items: ClipboardManager.shared.items, destination: destinationPath, isCut: ClipboardManager.shared.isCutOperation)
-            ClipboardManager.shared.clear()
+            let isCut = ClipboardManager.shared.isCutOperation
+            performLocalPaste(items: ClipboardManager.shared.items, destination: destinationPath, isCut: isCut)
+            if isCut {
+                ClipboardManager.shared.clear()
+            }
             handleRefresh()
         } else if !ClipboardManager.shared.sourceIsLocal && !isDestLocal {
             showTransferToast("MTP-to-MTP copying is not supported.")
@@ -683,15 +694,18 @@ struct ContentView: View {
             let direction: TransferDirection = isDestLocal ? .mtpToLocal : .localToMTP
             guard let storageId = validSelectedMTPStorageID() else { return }
             let sources = ClipboardManager.shared.items
+            let isCut = ClipboardManager.shared.isCutOperation
             let transferAccepted = FileTransferService.shared.initiateTransfer(
                 sources: sources,
                 destinationDir: destinationPath,
                 direction: direction,
                 storageId: storageId,
-                isCut: ClipboardManager.shared.isCutOperation
+                isCut: isCut
             )
             if transferAccepted {
-                ClipboardManager.shared.clear()
+                if isCut {
+                    ClipboardManager.shared.clear()
+                }
             } else {
                 reportTransferRejection()
             }
@@ -762,6 +776,11 @@ struct ContentView: View {
             let destinationURL = sourceURL.deletingLastPathComponent().appendingPathComponent(trimmed)
             do {
                 try FileManager.default.moveItem(at: sourceURL, to: destinationURL)
+                if selectedLocalItems.contains(file.path) {
+                    selectedLocalItems.remove(file.path)
+                    selectedLocalItems.insert(destinationURL.path)
+                }
+                ClipboardManager.shared.updateItemPath(oldPath: file.path, newPath: destinationURL.path, newName: trimmed)
                 NotificationCenter.default.post(name: .localDirectoryNeedsRefresh, object: nil)
                 renameRequest = nil
             } catch {
@@ -774,6 +793,13 @@ struct ContentView: View {
                 defer { isSubmittingFileOperation = false }
                 do {
                     try await MTPDeviceManager.shared.renameFile(path: file.path, newName: trimmed)
+                    let parent = (file.path as NSString).deletingLastPathComponent
+                    let newPath = parent == "/" ? "/\(trimmed)" : "\(parent)/\(trimmed)"
+                    if selectedMTPItems.contains(file.path) {
+                        selectedMTPItems.remove(file.path)
+                        selectedMTPItems.insert(newPath)
+                    }
+                    ClipboardManager.shared.updateItemPath(oldPath: file.path, newPath: newPath, newName: trimmed)
                     renameRequest = nil
                 } catch {
                     ErrorLogger.log(
@@ -996,9 +1022,9 @@ struct ContentView: View {
         return conflicts
     }
 
-
     private func performDelete(paths: [String]) {
         let fileManager = FileManager.default
+        ClipboardManager.shared.removeItems(matchingPaths: Set(paths))
 
         if activePane == .local {
             for path in paths {
@@ -1008,7 +1034,7 @@ struct ContentView: View {
                     ErrorLogger.log(error, message: "Delete failed")
                 }
             }
-            selectedLocalItems.removeAll()
+            selectedLocalItems.subtract(paths)
             pendingDeletePaths.removeAll()
             handleRefresh()
         } else {
@@ -1016,7 +1042,7 @@ struct ContentView: View {
                 do {
                     try await MTPDeviceManager.shared.deleteFiles(paths: paths)
                     await MainActor.run {
-                        selectedMTPItems.removeAll()
+                        selectedMTPItems.subtract(paths)
                         pendingDeletePaths.removeAll()
                     }
                 } catch {

@@ -664,6 +664,11 @@ final class AppKitFileCollectionItem: NSCollectionViewItem {
         }
     }
 
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        cellView.prepareForReuse()
+    }
+
     func configure(
         file: FileNode,
         large: Bool,
@@ -728,6 +733,13 @@ final class AppKitFileCellView: NSView {
 
     override func menu(for event: NSEvent) -> NSMenu? {
         menuProvider?()
+    }
+
+    func prepareForReuse() {
+        isSelectedState = false
+        isDropTargetState = false
+        menuProvider = nil
+        applyStyles()
     }
 
     func configure(
