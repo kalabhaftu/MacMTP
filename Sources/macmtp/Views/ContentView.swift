@@ -690,10 +690,8 @@ struct ContentView: View {
             )
             if transferAccepted {
                 ClipboardManager.shared.clear()
-            } else if FileTransferService.shared.isTransferInFlight {
-                showTransferToast("Finishing the cancelled transfer. Try Paste again shortly.")
-            } else if FileTransferService.shared.activeBatch != nil {
-                showTransferProgress = true
+            } else {
+                reportTransferRejection()
             }
         }
     }
@@ -931,10 +929,10 @@ struct ContentView: View {
     }
 
     private func reportTransferRejection() {
-        if FileTransferService.shared.isTransferInFlight {
-            showTransferToast("Finishing the cancelled transfer. Try again shortly.")
-        } else if FileTransferService.shared.activeBatch != nil {
+        if let batch = FileTransferService.shared.activeBatch, !batch.state.isTerminal {
             showTransferProgress = true
+        } else if FileTransferService.shared.isTransferInFlight {
+            showTransferToast("Preparing a transfer\u{2026} Please wait for it to finish before starting another.")
         } else {
             showTransferToast("The transfer could not be started.")
         }

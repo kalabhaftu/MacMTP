@@ -69,6 +69,7 @@ struct AppKitFileBrowser: NSViewRepresentable {
         var onContextMenu: (FileNode) -> NSMenu?
         var isLocal: Bool
         var applyingSelection = false
+        var nativeSelectionPending = false
 
         init(
             selectedPaths: Binding<Set<String>>,
@@ -188,6 +189,7 @@ struct AppKitFileBrowser: NSViewRepresentable {
                 let path = file.path
                 if selected { paths.insert(path) } else { paths.remove(path) }
             }
+            nativeSelectionPending = true
             selectedPaths.wrappedValue = paths
             onSelectionChanged()
         }
@@ -230,6 +232,7 @@ struct AppKitFileBrowser: NSViewRepresentable {
             guard !applyingSelection,
                   let tableView = notification.object as? NSTableView else { return }
             let paths = Set(tableView.selectedRowIndexes.compactMap { files.indices.contains($0) ? files[$0].path : nil })
+            nativeSelectionPending = true
             selectedPaths.wrappedValue = paths
             onSelectionChanged()
         }
@@ -271,6 +274,11 @@ struct AppKitFileBrowser: NSViewRepresentable {
             })
             applyingSelection = true
             collectionView.deselectAll(nil)
+            // Clear visual highlight on all visible items since delegate
+            // callbacks are suppressed while applyingSelection is true.
+            for indexPath in collectionView.indexPathsForVisibleItems() {
+                (collectionView.item(at: indexPath) as? AppKitFileCollectionItem)?.updateSelection(false)
+            }
             collectionView.selectItems(at: indexes, scrollPosition: [])
             for indexPath in indexes {
                 (collectionView.item(at: indexPath) as? AppKitFileCollectionItem)?.updateSelection(true)
@@ -332,10 +340,14 @@ final class FileBrowserHostView: NSView {
                 if let collectionView { coordinator.applySelection(to: collectionView) }
             }
         } else if selectionChanged {
-            if mode == .list {
-                if let tableView { coordinator.applySelection(to: tableView) }
-            } else if let collectionView {
-                coordinator.applySelection(to: collectionView)
+            if coordinator.nativeSelectionPending {
+                coordinator.nativeSelectionPending = false
+            } else {
+                if mode == .list {
+                    if let tableView { coordinator.applySelection(to: tableView) }
+                } else if let collectionView {
+                    coordinator.applySelection(to: collectionView)
+                }
             }
         }
 
@@ -436,6 +448,7 @@ final class ClearingCollectionView: NSCollectionView {
         let point = convert(event.locationInWindow, from: nil)
         if indexPathForItem(at: point) == nil {
             deselectAll(nil)
+            coordinator?.nativeSelectionPending = true
             coordinator?.selectedPaths.wrappedValue.removeAll()
             coordinator?.onSelectionChanged()
         }
@@ -461,6 +474,7 @@ final class ClearingTableView: NSTableView {
         let row = row(at: convert(event.locationInWindow, from: nil))
         if row < 0 {
             deselectAll(nil)
+            coordinator?.nativeSelectionPending = true
             coordinator?.selectedPaths.wrappedValue.removeAll()
             coordinator?.onSelectionChanged()
         }

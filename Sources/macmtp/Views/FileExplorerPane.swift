@@ -1120,6 +1120,7 @@ struct FileExplorerPane: View {
 
 
     private func handleDrop(providers: [NSItemProvider], targetDirectory: String? = nil) -> Bool {
+        onActivate?()
         let collectedFiles = ThreadSafeArray<DroppedFile>()
         let group = DispatchGroup()
         let dropDestination = targetDirectory ?? currentPath

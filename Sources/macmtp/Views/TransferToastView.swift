@@ -9,8 +9,7 @@ struct TransferToastView: View {
                 .font(.caption)
                 .fixedSize(horizontal: false, vertical: true)
         } icon: {
-            Image(systemName: "pause.circle.fill")
-                .foregroundStyle(.yellow)
+            icon
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -22,5 +21,23 @@ struct TransferToastView: View {
         }
         .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
         .accessibilityAddTraits(.isStaticText)
+    }
+
+    @ViewBuilder
+    private var icon: some View {
+        if message.contains("Preparing") {
+            ProgressView()
+                .controlSize(.small)
+                .scaleEffect(0.7)
+        } else if message.contains("could not") {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
+        } else if message.contains("not supported") {
+            Image(systemName: "xmark.circle.fill")
+                .foregroundStyle(.secondary)
+        } else {
+            Image(systemName: "info.circle.fill")
+                .foregroundStyle(.blue)
+        }
     }
 }
