@@ -7,6 +7,68 @@ struct DroppedFile {
     let isLocal: Bool
     let name: String
     let isDirectory: Bool
+
+    static func extract(from pasteboard: NSPasteboard) -> [DroppedFile] {
+        var collected: [DroppedFile] = []
+        var seenPaths = Set<String>()
+
+        // 1. Check internal string format: "local:file:/path" or "mtp:dir:/path"
+        if let text = pasteboard.string(forType: NSPasteboard.PasteboardType(UTType.utf8PlainText.identifier)) ?? pasteboard.string(forType: .string) {
+            let lines = text.split(separator: "\n", omittingEmptySubsequences: true)
+            var foundInternal = false
+            for line in lines {
+                let parts = line.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
+                guard parts.count == 3 else { continue }
+                let prefix = String(parts[0])
+                guard prefix == "local" || prefix == "mtp" else { continue }
+                let isMTP = prefix == "mtp"
+                let isDirectory = parts[1] == "dir"
+                let path = String(parts[2])
+                let name = (path as NSString).lastPathComponent
+                if !seenPaths.contains(path) {
+                    seenPaths.insert(path)
+                    collected.append(DroppedFile(path: path, isLocal: !isMTP, name: name, isDirectory: isDirectory))
+                }
+                foundInternal = true
+            }
+            if foundInternal {
+                return collected
+            }
+        }
+
+        // 2. Check NSFilenamesPboardType
+        if let filenames = pasteboard.propertyList(forType: NSPasteboard.PasteboardType("NSFilenamesPboardType")) as? [String] {
+            for path in filenames {
+                guard !seenPaths.contains(path) else { continue }
+                seenPaths.insert(path)
+                var isDir: ObjCBool = false
+                let exists = FileManager.default.fileExists(atPath: path, isDirectory: &isDir)
+                guard exists else { continue }
+                let name = (path as NSString).lastPathComponent
+                collected.append(DroppedFile(path: path, isLocal: true, name: name, isDirectory: isDir.boolValue))
+            }
+            if !collected.isEmpty {
+                return collected
+            }
+        }
+
+        // 3. Check file URLs
+        if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [
+            .urlReadingFileURLsOnly: true
+        ]) as? [URL] {
+            for url in urls {
+                let path = url.path
+                guard !seenPaths.contains(path) else { continue }
+                seenPaths.insert(path)
+                var isDir: ObjCBool = false
+                let exists = FileManager.default.fileExists(atPath: path, isDirectory: &isDir)
+                guard exists else { continue }
+                collected.append(DroppedFile(path: path, isLocal: true, name: url.lastPathComponent, isDirectory: isDir.boolValue))
+            }
+        }
+
+        return collected
+    }
 }
 
 final class ThreadSafeArray<T>: @unchecked Sendable {
@@ -190,15 +252,30 @@ struct FileExplorerPane: View {
                 loadDirectory()
             }
         }
-        .onReceive(MTPDeviceManager.shared.$mtpFiles) { newFiles in
-            guard !usesProvidedFiles else { return }
-            guard !isLocal else { return }
-            resetTypeahead()
-            applyFilterAndSort(using: newFiles)
-            if newFiles.isEmpty {
+        .onReceive(MTPDeviceManager.shared.$isLoading) { loading in
+            guard !usesProvidedFiles, !isLocal else { return }
+            if loading {
+                loadingState = .loading
+            } else {
                 if let err = MTPDeviceManager.shared.errorMessage {
                     loadingState = .error(err)
-                } else if loadingState != .loading {
+                } else if files.isEmpty && displayedFiles.isEmpty {
+                    loadingState = .empty
+                } else {
+                    loadingState = .loaded
+                }
+            }
+        }
+        .onReceive(MTPDeviceManager.shared.$mtpFiles) { newFiles in
+            guard !usesProvidedFiles, !isLocal else { return }
+            resetTypeahead()
+            applyFilterAndSort(using: newFiles)
+            if MTPDeviceManager.shared.isLoading {
+                loadingState = .loading
+            } else if newFiles.isEmpty {
+                if let err = MTPDeviceManager.shared.errorMessage {
+                    loadingState = .error(err)
+                } else {
                     loadingState = .empty
                 }
             } else {
@@ -629,7 +706,10 @@ struct FileExplorerPane: View {
             onOpen: handleDoubleClick,
             onActivate: { onActivate?() },
             onSelectionChanged: resetTypeahead,
-            onContextMenu: { file in appKitContextMenu(for: file) }
+            onContextMenu: { file in appKitContextMenu(for: file) },
+            onFilesDropped: { droppedFiles, targetDir in
+                onFilesDropped?(droppedFiles, targetDir ?? currentPath)
+            }
         )
         .contextMenu { emptySpaceContextMenuItems }
         .overlay(
@@ -652,7 +732,10 @@ struct FileExplorerPane: View {
             onOpen: handleDoubleClick,
             onActivate: { onActivate?() },
             onSelectionChanged: resetTypeahead,
-            onContextMenu: { file in appKitContextMenu(for: file) }
+            onContextMenu: { file in appKitContextMenu(for: file) },
+            onFilesDropped: { droppedFiles, targetDir in
+                onFilesDropped?(droppedFiles, targetDir ?? currentPath)
+            }
         )
         .contextMenu { emptySpaceContextMenuItems }
         .overlay(
@@ -925,18 +1008,10 @@ struct FileExplorerPane: View {
         selectedItems.removeAll()
         
         let manager = MTPDeviceManager.shared
-        if cleanPath == manager.currentMTPPath && !manager.isLoading {
+        if cleanPath == manager.currentMTPPath && !manager.isLoading && !manager.mtpFiles.isEmpty {
             let currentFiles = manager.mtpFiles
             applyFilterAndSort(using: currentFiles)
-            if currentFiles.isEmpty {
-                if let err = manager.errorMessage {
-                    loadingState = .error(err)
-                } else {
-                    loadingState = .empty
-                }
-            } else {
-                loadingState = .loaded
-            }
+            loadingState = .loaded
         } else {
             loadingState = .loading
             Task {
@@ -1010,8 +1085,14 @@ struct FileExplorerPane: View {
                         self.loadingState = .error(error.localizedDescription)
                     } else if case .success(let items) = result {
                         self.files = items
-                        self.applyFilterAndSort()
-                        self.loadingState = self.files.isEmpty ? .empty : .loaded
+                        self.applyFilterAndSort(using: items)
+                        if items.isEmpty {
+                            self.loadingState = .empty
+                        } else if self.displayedFiles.isEmpty && (!self.filterText.isEmpty || self.extensionFilter != nil) {
+                            self.loadingState = .empty
+                        } else {
+                            self.loadingState = .loaded
+                        }
                     }
                 }
             }
@@ -1025,17 +1106,19 @@ struct FileExplorerPane: View {
         var items: [FileNode] = []
 
         do {
+            let resourceKeys: Set<URLResourceKey> = [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey]
             let contents = try FileManager.default.contentsOfDirectory(
                 at: url,
-                includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey],
-                options: []
+                includingPropertiesForKeys: Array(resourceKeys),
+                options: [.skipsPackageDescendants]
             )
 
+            items.reserveCapacity(contents.count)
             for itemUrl in contents {
-                let resourceValues = try itemUrl.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey])
-                let isDir = resourceValues.isDirectory ?? false
-                let size = Int64(resourceValues.fileSize ?? 0)
-                let date = resourceValues.contentModificationDate ?? Date()
+                let resourceValues = try? itemUrl.resourceValues(forKeys: resourceKeys)
+                let isDir = resourceValues?.isDirectory ?? false
+                let size = Int64(resourceValues?.fileSize ?? 0)
+                let date = resourceValues?.contentModificationDate ?? Date()
 
                 items.append(
                     FileNode(
@@ -1059,22 +1142,24 @@ struct FileExplorerPane: View {
 
     private func applyFilterAndSort(using input: [FileNode]? = nil) {
         resetTypeahead()
+        let sourceFiles = input ?? files
         let showHidden = isLocal ? showHiddenFilesLocal : showHiddenFilesMTP
         let organization = browserOrganization
-        displayedGroups = organization.organize(input ?? files, showHidden: showHidden)
+        displayedGroups = organization.organize(sourceFiles, showHidden: showHidden)
         var ungroupedOrganization = organization
         ungroupedOrganization.grouping = .none
-        ungroupedFiles = ungroupedOrganization.organize(input ?? files, showHidden: showHidden).flatMap(\.files)
+        ungroupedFiles = ungroupedOrganization.organize(sourceFiles, showHidden: showHidden).flatMap(\.files)
         displayedFiles = viewMode == .list ? ungroupedFiles : displayedGroups.flatMap(\.files)
 
         let visiblePaths = Set(displayedFiles.map(\.path))
         selectedItems.formIntersection(visiblePaths)
 
-        if displayedFiles.isEmpty && !files.isEmpty && (!filterText.isEmpty || extensionFilter != nil) {
+        if displayedFiles.isEmpty && !sourceFiles.isEmpty && (!filterText.isEmpty || extensionFilter != nil) {
             loadingState = .empty
-        } else if displayedFiles.isEmpty && files.isEmpty {
-            // Don't flash "This folder is empty" while we're still loading.
-            if loadingState != .loading {
+        } else if displayedFiles.isEmpty && sourceFiles.isEmpty {
+            if !isLocal && MTPDeviceManager.shared.isLoading {
+                loadingState = .loading
+            } else if loadingState != .loading {
                 loadingState = .empty
             }
         } else {

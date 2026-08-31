@@ -421,7 +421,10 @@ public final class MTPDeviceManager: ObservableObject {
 
     public func navigateTo(path: String) async {
         guard isConnected else { return }
-        if path == currentMTPPath { return }
+        if path == currentMTPPath {
+            await refreshFiles()
+            return
+        }
         
         backHistory.append(currentMTPPath)
         forwardHistory.removeAll()

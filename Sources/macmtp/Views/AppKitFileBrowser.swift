@@ -13,6 +13,7 @@ struct AppKitFileBrowser: NSViewRepresentable {
     let onActivate: () -> Void
     let onSelectionChanged: () -> Void
     let onContextMenu: (FileNode) -> NSMenu?
+    var onFilesDropped: (([DroppedFile], String?) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -22,6 +23,7 @@ struct AppKitFileBrowser: NSViewRepresentable {
             onActivate: onActivate,
             onSelectionChanged: onSelectionChanged,
             onContextMenu: onContextMenu,
+            onFilesDropped: onFilesDropped,
             isLocal: isLocal
         )
     }
@@ -46,6 +48,7 @@ struct AppKitFileBrowser: NSViewRepresentable {
             onActivate: onActivate,
             onSelectionChanged: onSelectionChanged,
             onContextMenu: onContextMenu,
+            onFilesDropped: onFilesDropped,
             isLocal: isLocal
         )
         nsView.update(
@@ -67,6 +70,7 @@ struct AppKitFileBrowser: NSViewRepresentable {
         var onActivate: () -> Void
         var onSelectionChanged: () -> Void
         var onContextMenu: (FileNode) -> NSMenu?
+        var onFilesDropped: (([DroppedFile], String?) -> Void)?
         var isLocal: Bool
         var applyingSelection = false
         var nativeSelectionPending = false
@@ -78,6 +82,7 @@ struct AppKitFileBrowser: NSViewRepresentable {
             onActivate: @escaping () -> Void,
             onSelectionChanged: @escaping () -> Void,
             onContextMenu: @escaping (FileNode) -> NSMenu?,
+            onFilesDropped: (([DroppedFile], String?) -> Void)? = nil,
             isLocal: Bool
         ) {
             self.selectedPaths = selectedPaths
@@ -86,6 +91,7 @@ struct AppKitFileBrowser: NSViewRepresentable {
             self.onActivate = onActivate
             self.onSelectionChanged = onSelectionChanged
             self.onContextMenu = onContextMenu
+            self.onFilesDropped = onFilesDropped
             self.isLocal = isLocal
         }
 
@@ -96,6 +102,7 @@ struct AppKitFileBrowser: NSViewRepresentable {
             onActivate: @escaping () -> Void,
             onSelectionChanged: @escaping () -> Void,
             onContextMenu: @escaping (FileNode) -> NSMenu?,
+            onFilesDropped: (([DroppedFile], String?) -> Void)? = nil,
             isLocal: Bool
         ) {
             self.selectedPaths = selectedPaths
@@ -104,6 +111,7 @@ struct AppKitFileBrowser: NSViewRepresentable {
             self.onActivate = onActivate
             self.onSelectionChanged = onSelectionChanged
             self.onContextMenu = onContextMenu
+            self.onFilesDropped = onFilesDropped
             self.isLocal = isLocal
         }
 
@@ -231,6 +239,40 @@ struct AppKitFileBrowser: NSViewRepresentable {
             draggedCollectionIndexPaths = []
         }
 
+        func collectionView(
+            _ collectionView: NSCollectionView,
+            validateDrop draggingInfo: NSDraggingInfo,
+            proposedIndexPath proposedDropIndexPath: AutoreleasingUnsafeMutablePointer<NSIndexPath>,
+            dropOperation proposedDropOperation: UnsafeMutablePointer<NSCollectionView.DropOperation>
+        ) -> NSDragOperation {
+            let targetIndexPath = proposedDropIndexPath.pointee as IndexPath
+            if let file = file(at: targetIndexPath), file.isDirectory {
+                proposedDropOperation.pointee = .on
+                return .copy
+            }
+            proposedDropOperation.pointee = .before
+            return .copy
+        }
+
+        func collectionView(
+            _ collectionView: NSCollectionView,
+            acceptDrop draggingInfo: NSDraggingInfo,
+            indexPath: IndexPath,
+            dropOperation: NSCollectionView.DropOperation
+        ) -> Bool {
+            onActivate()
+            let droppedFiles = DroppedFile.extract(from: draggingInfo.draggingPasteboard)
+            guard !droppedFiles.isEmpty else { return false }
+            let targetDir: String?
+            if dropOperation == .on, let file = file(at: indexPath), file.isDirectory {
+                targetDir = file.path
+            } else {
+                targetDir = nil
+            }
+            onFilesDropped?(droppedFiles, targetDir)
+            return true
+        }
+
         private var draggedCollectionIndexPaths: Set<IndexPath> = []
 
         func numberOfRows(in tableView: NSTableView) -> Int { files.count }
@@ -270,6 +312,39 @@ struct AppKitFileBrowser: NSViewRepresentable {
 
         func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
             pasteboardWriter(at: row)
+        }
+
+        func tableView(
+            _ tableView: NSTableView,
+            validateDrop info: NSDraggingInfo,
+            proposedRow row: Int,
+            proposedDropOperation dropOperation: NSTableView.DropOperation
+        ) -> NSDragOperation {
+            if row >= 0 && row < files.count && files[row].isDirectory {
+                tableView.setDropRow(row, dropOperation: .on)
+                return .copy
+            }
+            tableView.setDropRow(-1, dropOperation: .on)
+            return .copy
+        }
+
+        func tableView(
+            _ tableView: NSTableView,
+            acceptDrop info: NSDraggingInfo,
+            row: Int,
+            dropOperation: NSTableView.DropOperation
+        ) -> Bool {
+            onActivate()
+            let droppedFiles = DroppedFile.extract(from: info.draggingPasteboard)
+            guard !droppedFiles.isEmpty else { return false }
+            let targetDir: String?
+            if row >= 0 && row < self.files.count && dropOperation == .on && self.files[row].isDirectory {
+                targetDir = self.files[row].path
+            } else {
+                targetDir = nil
+            }
+            onFilesDropped?(droppedFiles, targetDir)
+            return true
         }
 
         private func pasteboardWriter(at index: Int) -> NSPasteboardWriting? {
@@ -424,6 +499,14 @@ final class FileBrowserHostView: NSView {
             let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("File"))
             column.resizingMask = .autoresizingMask
             table.addTableColumn(column)
+            table.registerForDraggedTypes([
+                .fileURL,
+                .string,
+                NSPasteboard.PasteboardType(UTType.utf8PlainText.identifier),
+                NSPasteboard.PasteboardType("NSFilenamesPboardType")
+            ])
+            table.setDraggingSourceOperationMask(.copy, forLocal: false)
+            table.setDraggingSourceOperationMask(.copy, forLocal: true)
             table.delegate = coordinator
             table.dataSource = coordinator
             table.coordinator = coordinator
@@ -457,6 +540,14 @@ final class FileBrowserHostView: NSView {
                     withIdentifier: AppKitFileGroupHeaderView.identifier
                 )
             }
+            collection.registerForDraggedTypes([
+                .fileURL,
+                .string,
+                NSPasteboard.PasteboardType(UTType.utf8PlainText.identifier),
+                NSPasteboard.PasteboardType("NSFilenamesPboardType")
+            ])
+            collection.setDraggingSourceOperationMask(.copy, forLocal: false)
+            collection.setDraggingSourceOperationMask(.copy, forLocal: true)
             collection.dataSource = coordinator
             collection.delegate = coordinator
             collection.coordinator = coordinator
@@ -588,6 +679,12 @@ final class AppKitFileCollectionItem: NSCollectionViewItem {
         view = cellView
     }
 
+    override var highlightState: NSCollectionViewItem.HighlightState {
+        didSet {
+            cellView.updateDropHighlight(highlightState == .asDropTarget)
+        }
+    }
+
     func configure(
         file: FileNode,
         large: Bool,
@@ -606,6 +703,8 @@ final class AppKitFileCellView: NSView {
     private let nameLabel = NSTextField(labelWithString: "")
     private let sizeLabel = NSTextField(labelWithString: "")
     var menuProvider: (() -> NSMenu?)?
+    private var isSelectedState = false
+    private var isDropTargetState = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -665,12 +764,33 @@ final class AppKitFileCellView: NSView {
         nameLabel.font = .systemFont(ofSize: (large ? 12 : 11) * fontScale)
         sizeLabel.stringValue = large && !file.isDirectory ? file.formattedSize : ""
         sizeLabel.isHidden = !large
+        applyStyles()
     }
 
     func updateSelection(_ selected: Bool) {
-        layer?.backgroundColor = selected ? NSColor.controlAccentColor.withAlphaComponent(0.16).cgColor : NSColor.clear.cgColor
-        layer?.borderWidth = selected ? 1 : 0
-        layer?.borderColor = selected ? NSColor.controlAccentColor.withAlphaComponent(0.7).cgColor : nil
+        isSelectedState = selected
+        applyStyles()
+    }
+
+    func updateDropHighlight(_ isDropTarget: Bool) {
+        isDropTargetState = isDropTarget
+        applyStyles()
+    }
+
+    private func applyStyles() {
+        if isDropTargetState {
+            layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.28).cgColor
+            layer?.borderWidth = 2
+            layer?.borderColor = NSColor.controlAccentColor.cgColor
+        } else if isSelectedState {
+            layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.16).cgColor
+            layer?.borderWidth = 1
+            layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.7).cgColor
+        } else {
+            layer?.backgroundColor = NSColor.clear.cgColor
+            layer?.borderWidth = 0
+            layer?.borderColor = nil
+        }
     }
 }
 
