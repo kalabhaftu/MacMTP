@@ -8,7 +8,6 @@ import (
 	"log"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/ganeshrvel/usb"
 )
@@ -115,6 +114,7 @@ func (d *Device) Close() error {
 		if d.USBDebug {
 			log.Printf("USB: ReleaseInterface 0x%x, err: %v", d.ifaceDescr.InterfaceNumber, err)
 		}
+		d.claimed = false
 	}
 	err := d.h.Close()
 	d.h = nil
@@ -674,20 +674,8 @@ func (d *Device) Configure() error {
 	}
 
 	if err != nil {
-		log.Printf("OpenSession failed: %v; attempting reset", err)
-		if d.h != nil {
-			d.h.Reset()
-		}
 		d.Close()
-
-		// Give the device some rest.
-		time.Sleep(1000 * time.Millisecond)
-		if err := d.Open(); err != nil {
-			return fmt.Errorf("opening after reset: %v", err)
-		}
-		if err := d.OpenSession(); err != nil {
-			return fmt.Errorf("OpenSession after reset: %v", err)
-		}
+		return fmt.Errorf("OpenSession failed: %w", err)
 	}
 	return nil
 }

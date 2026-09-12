@@ -123,3 +123,39 @@ func transferCompletionRejectsMissingNativeData() {
         return
     }
 }
+
+@Test
+func systemAndUserErrorsAreFilteredFromSentry() {
+    // Notification authorization denied (UNErrorDomain: 1)
+    let notifError = NSError(domain: "UNErrorDomain", code: 1, userInfo: nil)
+    #expect(!ErrorLogger.shouldReport(notifError))
+
+    // Network drops / connection lost (NSURLErrorDomain: -1005, -1009, -1011)
+    let netLost = NSError(domain: NSURLErrorDomain, code: NSURLErrorNetworkConnectionLost, userInfo: nil)
+    let notConnected = NSError(domain: NSURLErrorDomain, code: NSURLErrorNotConnectedToInternet, userInfo: nil)
+    let badResponse = NSError(domain: NSURLErrorDomain, code: NSURLErrorBadServerResponse, userInfo: nil)
+    #expect(!ErrorLogger.shouldReport(netLost))
+    #expect(!ErrorLogger.shouldReport(notConnected))
+    #expect(!ErrorLogger.shouldReport(badResponse))
+
+    // File permissions / cancellations (NSCocoaErrorDomain: 513, 257, 3072)
+    let writeNoPerm = CocoaError(.fileWriteNoPermission)
+    let readNoPerm = CocoaError(.fileReadNoPermission)
+    let userCancelled = CocoaError(.userCancelled)
+    #expect(!ErrorLogger.shouldReport(writeNoPerm))
+    #expect(!ErrorLogger.shouldReport(readNoPerm))
+    #expect(!ErrorLogger.shouldReport(userCancelled))
+
+    // Multiple device error
+    let multiDevice = KalamError.nativeOperationFailed(
+        operation: "initialize",
+        errorType: "ErrorMultipleDevice",
+        message: "mtp: more than 1 device: Phone A, Phone B"
+    )
+    #expect(!ErrorLogger.shouldReport(multiDevice))
+
+    // Real unexpected error should still report
+    let unexpectedError = NSError(domain: NSCocoaErrorDomain, code: CocoaError.coderValueNotFound.rawValue, userInfo: nil)
+    #expect(ErrorLogger.shouldReport(unexpectedError))
+}
+

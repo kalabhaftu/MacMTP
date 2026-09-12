@@ -1,6 +1,7 @@
 import Foundation
 import OSLog
 import Sentry
+import UserNotifications
 
 public enum ErrorReportingStatus: Equatable {
     case disabled
@@ -192,6 +193,49 @@ public struct ErrorLogger {
     }
 
     static func shouldReport(_ error: Error) -> Bool {
+        if isMTPTransferCancellation(error) {
+            return false
+        }
+
+        let nsError = error as NSError
+        if nsError.domain == UNErrorDomain {
+            if nsError.code == UNError.notificationsNotAllowed.rawValue {
+                return false
+            }
+        }
+
+        if nsError.domain == NSURLErrorDomain {
+            switch nsError.code {
+            case NSURLErrorNetworkConnectionLost,
+                 NSURLErrorNotConnectedToInternet,
+                 NSURLErrorTimedOut,
+                 NSURLErrorCannotConnectToHost,
+                 NSURLErrorCannotFindHost,
+                 NSURLErrorDNSLookupFailed,
+                 NSURLErrorBadServerResponse,
+                 NSURLErrorCancelled:
+                return false
+            default:
+                break
+            }
+        }
+
+        if nsError.domain == NSCocoaErrorDomain {
+            switch nsError.code {
+            case CocoaError.fileWriteNoPermission.rawValue,
+                 CocoaError.fileReadNoPermission.rawValue,
+                 CocoaError.userCancelled.rawValue,
+                 CocoaError.fileWriteFileExists.rawValue:
+                return false
+            default:
+                break
+            }
+        }
+
+        if error is UpdateDownloadError {
+            return false
+        }
+
         guard let kalamError = error as? KalamError else { return true }
 
         switch kalamError {
@@ -206,6 +250,9 @@ public struct ErrorLogger {
             let normalized = "\(errorType ?? "") \(message)".lowercased()
             return !normalized.contains("no mtp devices found")
                 && !normalized.contains("errormtpdetectfailed")
+                && !normalized.contains("errormultipledevice")
+                && !normalized.contains("more than 1 device")
+                && !normalized.contains("errorcancel")
         default:
             return true
         }

@@ -19,7 +19,11 @@ public enum TransferState: Equatable {
 
 
 public class TransferBatch: ObservableObject {
-    @Published public var items: [TransferItem] = []
+    @Published public var items: [TransferItem] = [] {
+        didSet {
+            recalculateTotals()
+        }
+    }
     @Published public var currentItemIndex: Int = 0
     @Published public var state: TransferState = .idle
     @Published public var startTime: Date? = nil
@@ -28,19 +32,43 @@ public class TransferBatch: ObservableObject {
     private var speedSamples: [(time: Date, bytes: Int64)] = []
     private let maxSpeedSamples = 10
 
+    private var cachedCompletedCount: Int = 0
+    private var cachedFailedCount: Int = 0
+    private var cachedTotalBytes: Int64 = 0
+    private var cachedTotalBytesTransferred: Int64 = 0
+
     public var totalFileCount: Int { items.count }
 
-    public var completedFileCount: Int { items.filter { $0.status == .completed }.count }
+    public var completedFileCount: Int { cachedCompletedCount }
 
-    public var failedFileCount: Int { items.filter { $0.status == .failed }.count }
+    public var failedFileCount: Int { cachedFailedCount }
 
-    public var totalBytes: Int64 { items.reduce(0) { $0 + $1.fileSize } }
+    public var totalBytes: Int64 { cachedTotalBytes }
 
-    public var totalBytesTransferred: Int64 { items.reduce(0) { $0 + $1.bytesTransferred } }
+    public var totalBytesTransferred: Int64 { cachedTotalBytesTransferred }
 
     public var overallProgress: Double {
-        guard totalBytes > 0 else { return 0 }
-        return max(0, min(Double(totalBytesTransferred) / Double(totalBytes), 1.0))
+        guard cachedTotalBytes > 0 else { return 0 }
+        return max(0, min(Double(cachedTotalBytesTransferred) / Double(cachedTotalBytes), 1.0))
+    }
+
+    private func recalculateTotals() {
+        var completed = 0
+        var failed = 0
+        var total: Int64 = 0
+        var transferred: Int64 = 0
+
+        for item in items {
+            if item.status == .completed { completed += 1 }
+            else if item.status == .failed { failed += 1 }
+            total += item.fileSize
+            transferred += item.bytesTransferred
+        }
+
+        cachedCompletedCount = completed
+        cachedFailedCount = failed
+        cachedTotalBytes = total
+        cachedTotalBytesTransferred = transferred
     }
 
     public var currentItem: TransferItem? {
@@ -392,7 +420,6 @@ public struct TransferProgressView: View {
                     RoundedRectangle(cornerRadius: 4)
                         .fill(overallProgressColor)
                         .frame(width: max(0, geometry.size.width * CGFloat(batch.overallProgress)))
-                        .animation(.easeInOut(duration: 0.3), value: batch.overallProgress)
                 }
             }
             .frame(height: 8)
@@ -463,7 +490,6 @@ public struct TransferProgressView: View {
                     RoundedRectangle(cornerRadius: 3)
                         .fill(Color.accentColor.opacity(0.6))
                         .frame(width: max(0, geometry.size.width * CGFloat(item.progress)))
-                        .animation(.easeInOut(duration: 0.2), value: item.progress)
                 }
             }
             .frame(height: 4)

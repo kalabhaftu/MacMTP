@@ -80,6 +80,7 @@ func selectDevice(cands []*Device, pattern string) (*Device, error) {
 	var found []*Device
 	for _, cand := range cands {
 		if err := cand.Open(); err != nil {
+			cand.Done()
 			continue
 		}
 
@@ -96,7 +97,10 @@ func selectDevice(cands []*Device, pattern string) (*Device, error) {
 	for i, cand := range cands {
 		id, err := cand.ID()
 		if err != nil {
-			// TODO - close cands
+			for _, c := range cands {
+				c.Close()
+				c.Done()
+			}
 			return nil, fmt.Errorf("Id dev %d: %v", i, err)
 		}
 
@@ -114,18 +118,25 @@ func selectDevice(cands []*Device, pattern string) (*Device, error) {
 	}
 
 	if len(found) > 1 {
+		for _, cand := range found {
+			cand.Close()
+			cand.Done()
+		}
 		return nil, fmt.Errorf("mtp: more than 1 device: %s", strings.Join(ids, ","))
 	}
 
 	cand := found[0]
 	config, err := cand.h.GetConfiguration()
 	if err != nil {
+		cand.Close()
+		cand.Done()
 		return nil, fmt.Errorf("could not get configuration of %v: %v",
 			ids[0], err)
 	}
 	if config != cand.configValue {
-
 		if err := cand.h.SetConfiguration(cand.configValue); err != nil {
+			cand.Close()
+			cand.Done()
 			return nil, fmt.Errorf("could not set configuration of %v: %v",
 				ids[0], err)
 		}

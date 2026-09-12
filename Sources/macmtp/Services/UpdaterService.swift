@@ -96,7 +96,7 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
                 
                 guard httpResp.statusCode == 200 else {
                     let rateLimitRemaining = httpResp.value(forHTTPHeaderField: "X-RateLimit-Remaining") ?? "N/A"
-                    ErrorLogger.logMessage("Failed to fetch update info. HTTP Status: \(httpResp.statusCode) (RateLimit-Remaining: \(rateLimitRemaining))")
+                    ErrorLogger.logMessage("Failed to fetch update info. HTTP Status: \(httpResp.statusCode) (RateLimit-Remaining: \(rateLimitRemaining))", level: .warning)
                     if !silent {
                         showNoUpdateAlert(message: "Failed to fetch update information from GitHub (HTTP \(httpResp.statusCode)).")
                     }
@@ -259,7 +259,7 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
                         "operation": "update_download",
                         "operation_phase": "download",
                     ]
-                    ErrorLogger.log(error, message: "Download update error", userInfo: context)
+                    ErrorLogger.logMessage("Download update error: \(error.localizedDescription)", level: .info, userInfo: context)
                     let errorAlert = NSAlert()
                     errorAlert.messageText = "Update Download Failed"
                     errorAlert.informativeText = error.localizedDescription

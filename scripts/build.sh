@@ -157,6 +157,7 @@ build_kalam_arch() {
     ldflags="$(PKG_CONFIG_PATH="$pc_dir" pkg-config --libs libusb-1.0) -arch $arch -mmacosx-version-min=14.0 -isysroot $sysroot"
 
     echo "  Building libkalam.a for $arch using $pc_dir"
+    rm -f "$output"
     staging_dir="$(mktemp -d "${TMPDIR:-/tmp}/macmtp-kalam.XXXXXX")"
     cp -R "$KALAM_DIR"/. "$staging_dir"/
 

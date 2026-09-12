@@ -765,16 +765,20 @@ final class AppKitFileCellView: NSView {
         stack.alignment = .centerX
         stack.spacing = 3
         stack.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(stack)
+        let bottomConstraint = stack.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -4)
+        bottomConstraint.priority = .defaultHigh
+        let sizeHeightConstraint = sizeLabel.heightAnchor.constraint(equalToConstant: 10)
+        sizeHeightConstraint.priority = .defaultHigh
+
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
             stack.topAnchor.constraint(equalTo: topAnchor, constant: 4),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -4),
+            bottomConstraint,
             iconView.widthAnchor.constraint(equalToConstant: 42),
             iconView.heightAnchor.constraint(equalTo: iconView.widthAnchor),
             nameLabel.heightAnchor.constraint(equalToConstant: 30),
-            sizeLabel.heightAnchor.constraint(equalToConstant: 10)
+            sizeHeightConstraint
         ])
     }
 
@@ -849,7 +853,12 @@ final class AppKitFileTableCellView: NSView {
         stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
         iconView.translatesAutoresizingMaskIntoConstraints = false
+        let detailWidth = detailLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 150)
+        detailWidth.priority = .defaultHigh
+        detailLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
         addSubview(stack)
+
         NSLayoutConstraint.activate([
             iconView.widthAnchor.constraint(equalToConstant: 18),
             iconView.heightAnchor.constraint(equalToConstant: 18),
@@ -857,7 +866,7 @@ final class AppKitFileTableCellView: NSView {
             stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
             stack.topAnchor.constraint(equalTo: topAnchor),
             stack.bottomAnchor.constraint(equalTo: bottomAnchor),
-            detailLabel.widthAnchor.constraint(equalToConstant: 150)
+            detailWidth
         ])
         nameLabel.lineBreakMode = .byTruncatingMiddle
         detailLabel.textColor = .secondaryLabelColor

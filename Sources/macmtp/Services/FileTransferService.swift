@@ -1,6 +1,6 @@
 import Foundation
 import SwiftUI
-import UserNotifications
+@preconcurrency import UserNotifications
 
 extension Notification.Name {
     static let localDirectoryNeedsRefresh = Notification.Name("localDirectoryNeedsRefresh")
@@ -150,22 +150,30 @@ public final class FileTransferService: ObservableObject {
     
     public func postTransferNotification(title: String, body: String, isError: Bool = false) {
         Task { @MainActor in
-            do {
-                let center = UNUserNotificationCenter.current()
-                let granted = try await center.requestAuthorization(options: [.alert, .sound])
+            let center = UNUserNotificationCenter.current()
+            let settings = await center.notificationSettings()
+            guard settings.authorizationStatus != .denied else { return }
+
+            if settings.authorizationStatus == .notDetermined {
+                let granted = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
                 guard granted else { return }
-                let content = UNMutableNotificationContent()
-                content.title = title
-                content.body = body
-                content.sound = isError ? .default : nil
-                let request = UNNotificationRequest(
-                    identifier: "transfer-\(UUID().uuidString)",
-                    content: content,
-                    trigger: nil
-                )
+            }
+
+            let content = UNMutableNotificationContent()
+            content.title = title
+            content.body = body
+            content.sound = isError ? .default : nil
+            let request = UNNotificationRequest(
+                identifier: "transfer-\(UUID().uuidString)",
+                content: content,
+                trigger: nil
+            )
+            do {
                 try await center.add(request)
+            } catch let error as NSError where error.domain == UNErrorDomain && error.code == UNError.notificationsNotAllowed.rawValue {
+                return
             } catch {
-                ErrorLogger.log(error, message: "Failed to post notification")
+                ErrorLogger.logMessage("Notification posting failed: \(error.localizedDescription)", level: .info)
             }
         }
     }
@@ -375,6 +383,36 @@ public final class FileTransferService: ObservableObject {
                 }
                 
                 do {
+                    final class ProgressThrottler: @unchecked Sendable {
+                        private let lock = NSLock()
+                        private var lastNano: UInt64 = 0
+                        func shouldDispatch(isFinal: Bool) -> Bool {
+                            lock.lock()
+                            defer { lock.unlock() }
+                            let now = DispatchTime.now().uptimeNanoseconds
+                            if isFinal || (now &- lastNano) >= 66_000_000 {
+                                lastNano = now
+                                return true
+                            }
+                            return false
+                        }
+                    }
+                    let throttler = ProgressThrottler()
+                    let handleProgress: @Sendable (GoTransferProgressInfo) -> Void = { [weak self] progressInfo in
+                        guard let self = self else { return }
+                        guard let index = chunkIndices.first else { return }
+                        let sent = progressInfo.activeFileSize.sent
+                        let total = progressInfo.activeFileSize.total
+                        let speedMB = progressInfo.speed
+                        let isFinal = total > 0 && sent >= total
+
+                        guard throttler.shouldDispatch(isFinal: isFinal) else { return }
+
+                        Task { @MainActor in
+                            self.updateActiveItemProgress(index: index, sent: sent, total: total, speedMB: speedMB)
+                        }
+                    }
+
                     switch direction {
                     case .localToMTP:
                         try await bridge.uploadFiles(
@@ -382,16 +420,7 @@ public final class FileTransferService: ObservableObject {
                             sources: sources,
                             destination: destParent,
                             onPreprocess: { _ in },
-                            onProgress: { [weak self] progressInfo in
-                                guard let self = self else { return }
-                                guard let index = chunkIndices.first else { return }
-                                let sent = progressInfo.activeFileSize.sent
-                                let total = progressInfo.activeFileSize.total
-                                let speedMB = progressInfo.speed
-                                Task { @MainActor in
-                                    self.updateActiveItemProgress(index: index, sent: sent, total: total, speedMB: speedMB)
-                                }
-                            }
+                            onProgress: handleProgress
                         )
                     case .mtpToLocal:
                         try await bridge.downloadFiles(
@@ -399,16 +428,7 @@ public final class FileTransferService: ObservableObject {
                             sources: sources,
                             destination: destParent,
                             onPreprocess: { _ in },
-                            onProgress: { [weak self] progressInfo in
-                                guard let self = self else { return }
-                                guard let index = chunkIndices.first else { return }
-                                let sent = progressInfo.activeFileSize.sent
-                                let total = progressInfo.activeFileSize.total
-                                let speedMB = progressInfo.speed
-                                Task { @MainActor in
-                                    self.updateActiveItemProgress(index: index, sent: sent, total: total, speedMB: speedMB)
-                                }
-                            }
+                            onProgress: handleProgress
                         )
                     }
                     
@@ -580,16 +600,15 @@ public final class FileTransferService: ObservableObject {
     }
     
     
-    private struct ScannedItem {
+    private struct ScannedItem: Sendable {
         let absolutePath: String
         let relativePath: String
         let isDirectory: Bool
         let size: Int64
         let modificationDate: Date
     }
-    
-    
-    private func getRelativePath(path: String, baseParent: String) -> String {
+
+    nonisolated private static func getRelativePath(path: String, baseParent: String) -> String {
         let prefix = baseParent.hasSuffix("/") ? baseParent : baseParent + "/"
         if path.hasPrefix(prefix) {
             return String(path.dropFirst(prefix.count))
@@ -599,21 +618,20 @@ public final class FileTransferService: ObservableObject {
             return path
         }
     }
-    
+
     private func expandSources(sources: [FileNode], direction: TransferDirection, storageId: UInt32) async throws -> [ScannedItem] {
         var expanded: [ScannedItem] = []
-        
+
         for source in sources {
             let parentDir = source.parentPath.isEmpty
                 ? (source.path as NSString).deletingLastPathComponent
                 : source.parentPath
-            
+
             if direction == .localToMTP {
-                try expandLocalPath(
-                    path: source.path,
-                    baseParent: parentDir,
-                    into: &expanded
-                )
+                let localItems = try await Task.detached(priority: .userInitiated) {
+                    try Self.collectLocalItems(path: source.path, baseParent: parentDir)
+                }.value
+                expanded.append(contentsOf: localItems)
             } else {
                 try await expandMTPPath(
                     path: source.path,
@@ -623,41 +641,55 @@ public final class FileTransferService: ObservableObject {
                 )
             }
         }
-        
+
         return expanded
     }
-    
-    private func expandLocalPath(path: String, baseParent: String, depth: Int = 0, into list: inout [ScannedItem]) throws {
-        guard depth < 100 else {
-            throw KalamError.operationFailed("Directory structure is too deep")
-        }
-        
+
+    nonisolated private static func collectLocalItems(path: String, baseParent: String) throws -> [ScannedItem] {
         let fileManager = FileManager.default
         var isDir: ObjCBool = false
-        
-        guard fileManager.fileExists(atPath: path, isDirectory: &isDir) else { return }
-        
+        guard fileManager.fileExists(atPath: path, isDirectory: &isDir) else { return [] }
+
         let relativePath = getRelativePath(path: path, baseParent: baseParent)
-        
-        let attributes = try fileManager.attributesOfItem(atPath: path)
-        let size = (attributes[.size] as? Int64) ?? 0
-        let date = (attributes[.modificationDate] as? Date) ?? Date()
-        
+        let rootURL = URL(fileURLWithPath: path)
+        let keys: [URLResourceKey] = [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey]
+        let values = try? rootURL.resourceValues(forKeys: Set(keys))
+        let modDate = values?.contentModificationDate ?? Date()
+
         if isDir.boolValue {
-            list.append(ScannedItem(absolutePath: path, relativePath: relativePath, isDirectory: true, size: 0, modificationDate: date))
-            
-            let contents = try fileManager.contentsOfDirectory(atPath: path)
-            for child in contents {
-                let childPath = (path as NSString).appendingPathComponent(child)
-                try expandLocalPath(path: childPath, baseParent: baseParent, depth: depth + 1, into: &list)
+            var items = [ScannedItem(absolutePath: path, relativePath: relativePath, isDirectory: true, size: 0, modificationDate: modDate)]
+
+            if let enumerator = fileManager.enumerator(
+                at: rootURL,
+                includingPropertiesForKeys: keys,
+                options: [.skipsPackageDescendants],
+                errorHandler: { _, _ in true }
+            ) {
+                for case let fileURL as URL in enumerator {
+                    guard let res = try? fileURL.resourceValues(forKeys: Set(keys)) else { continue }
+                    let isDirectory = res.isDirectory ?? false
+                    let size = Int64(res.fileSize ?? 0)
+                    let fileDate = res.contentModificationDate ?? Date()
+                    let subRel = getRelativePath(path: fileURL.path, baseParent: baseParent)
+
+                    items.append(ScannedItem(
+                        absolutePath: fileURL.path,
+                        relativePath: subRel,
+                        isDirectory: isDirectory,
+                        size: isDirectory ? 0 : size,
+                        modificationDate: fileDate
+                    ))
+                }
             }
+            return items
         } else {
-            list.append(ScannedItem(absolutePath: path, relativePath: relativePath, isDirectory: false, size: size, modificationDate: date))
+            let size = Int64(values?.fileSize ?? 0)
+            return [ScannedItem(absolutePath: path, relativePath: relativePath, isDirectory: false, size: size, modificationDate: modDate)]
         }
     }
     
     private func expandMTPPath(path: String, baseParent: String, storageId: UInt32, into list: inout [ScannedItem]) async throws {
-        let relativePath = getRelativePath(path: path, baseParent: baseParent)
+        let relativePath = Self.getRelativePath(path: path, baseParent: baseParent)
         let parentDir = (path as NSString).deletingLastPathComponent
         
         let parentContents: [GoFileInfo]
@@ -680,7 +712,7 @@ public final class FileTransferService: ObservableObject {
             do {
                 let children = try await bridge.walk(storageId: storageId, path: path, recursive: true, skipHidden: false)
                 for child in children {
-                    let childRel = getRelativePath(path: child.path, baseParent: baseParent)
+                    let childRel = Self.getRelativePath(path: child.path, baseParent: baseParent)
                     let childDate = parseGoDate(child.dateAdded)
                     list.append(ScannedItem(absolutePath: child.path, relativePath: childRel, isDirectory: child.isFolder, size: child.size, modificationDate: childDate))
                 }
@@ -754,29 +786,35 @@ public final class FileTransferService: ObservableObject {
                 )
             }
         } else {
-            let fileManager = FileManager.default
-            for (index, destPath) in destinationPaths.enumerated() {
-                var isDir: ObjCBool = false
-                if fileManager.fileExists(atPath: destPath, isDirectory: &isDir) {
-                    let srcItem = items[index]
-                    
-                    let attributes = (try? fileManager.attributesOfItem(atPath: destPath)) ?? [:]
-                    let destSize = (attributes[.size] as? Int64) ?? 0
-                    let destDate = (attributes[.modificationDate] as? Date) ?? Date()
-                    
-                    conflicts.append(
-                        ConflictingFilePair(
-                            fileName: (destPath as NSString).lastPathComponent,
-                            sourcePath: srcItem.absolutePath,
-                            sourceSize: srcItem.size,
-                            sourceDate: srcItem.modificationDate,
-                            destinationPath: destPath,
-                            destinationSize: destSize,
-                            destinationDate: destDate
+            let conflictPairs = await Task.detached(priority: .userInitiated) {
+                var localConflicts: [ConflictingFilePair] = []
+                let fileManager = FileManager.default
+                let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey]
+                for (index, destPath) in destinationPaths.enumerated() {
+                    var isDir: ObjCBool = false
+                    if fileManager.fileExists(atPath: destPath, isDirectory: &isDir) {
+                        let srcItem = items[index]
+                        let url = URL(fileURLWithPath: destPath)
+                        let values = try? url.resourceValues(forKeys: Set(keys))
+                        let destSize = Int64(values?.fileSize ?? 0)
+                        let destDate = values?.contentModificationDate ?? Date()
+
+                        localConflicts.append(
+                            ConflictingFilePair(
+                                fileName: (destPath as NSString).lastPathComponent,
+                                sourcePath: srcItem.absolutePath,
+                                sourceSize: srcItem.size,
+                                sourceDate: srcItem.modificationDate,
+                                destinationPath: destPath,
+                                destinationSize: destSize,
+                                destinationDate: destDate
+                            )
                         )
-                    )
+                    }
                 }
-            }
+                return localConflicts
+            }.value
+            conflicts.append(contentsOf: conflictPairs)
         }
         
         return conflicts

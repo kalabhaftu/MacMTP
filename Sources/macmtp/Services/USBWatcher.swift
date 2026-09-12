@@ -243,7 +243,17 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         let remainingIdentities = connectedDeviceIdentities()
         knownDeviceIdentities = remainingIdentities
         guard let vendorID = activeDeviceVendorID,
-              let productID = activeDeviceProductID else { return }
+              let productID = activeDeviceProductID else {
+            if pendingAutoConnectTask != nil {
+                pendingAutoConnectTask?.cancel()
+                pendingAutoConnectTask = nil
+                _ = connectionLifecycle.detached()
+            }
+            if remainingIdentities.count == 1 && !MTPDeviceManager.shared.isConnected {
+                scheduleAutoConnect(isInitialScan: false)
+            }
+            return
+        }
         let matchesActiveDevice: (USBDeviceIdentity) -> Bool = {
             $0.matches(vendorID: vendorID, productID: productID, serialNumber: self.activeDeviceSerialNumber)
         }

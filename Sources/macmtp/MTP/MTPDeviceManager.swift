@@ -120,12 +120,14 @@ public final class MTPDeviceManager: ObservableObject {
 
             let errLower = error.localizedDescription.lowercased()
             let isNoStorageError = errLower.contains("no storage found")
+            let isMultipleDeviceError = errLower.contains("errormultipledevice")
+                || errLower.contains("more than 1 device")
             let isDeviceNotFound = errLower.contains("no mtp device")
                 || errLower.contains("no device found")
                 || errLower.contains("mtp detect failed")
                 || errLower.contains("busy")
 
-            let isExpectedUserCondition = isNoStorageError || isDeviceNotFound
+            let isExpectedUserCondition = isNoStorageError || isDeviceNotFound || isMultipleDeviceError
             if !isExpectedUserCondition {
                 ErrorLogger.log(
                     error,
@@ -139,7 +141,9 @@ public final class MTPDeviceManager: ObservableObject {
                 )
             }
 
-            if isNoStorageError {
+            if isMultipleDeviceError {
+                self.errorMessage = "Multiple Android devices detected.\n\nPlease disconnect all but one device, then click Retry."
+            } else if isNoStorageError {
                 self.errorMessage = "No storage found on device.\n\nPlease unlock your Android phone screen and ensure its USB connection mode is set to \"File Transfer\" (MTP), then click Retry."
             } else if isDeviceNotFound {
                 self.errorMessage = nil

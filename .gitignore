@@ -33,3 +33,7 @@ tmp/
 
 # Kalam 
 Sources/CKalam/libkalam.a
+
+# Env
+.env.*
+.env*

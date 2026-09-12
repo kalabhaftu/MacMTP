@@ -1,7 +1,7 @@
 import SwiftUI
 
 
-public struct ConflictingFilePair: Identifiable, Hashable {
+public struct ConflictingFilePair: Identifiable, Hashable, Sendable {
     public let id = UUID()
     public let fileName: String
     public let sourcePath: String
