@@ -80,3 +80,36 @@ func universalDMGAssetMatchesPublishedReleaseArtifacts() {
     #expect(dmgAsset?["browser_download_url"] as? String == "https://example.com/universal.dmg")
 }
 
+@Test
+func dynamicSemanticVersionComparisonWorksForArbitraryVersions() {
+    let testCases: [(local: String, remote: String, shouldUpgrade: Bool)] = [
+        ("1.0.0", "1.0.1", true),
+        ("1.0.0", "1.1.0", true),
+        ("1.0.0", "2.0.0", true),
+        ("1.7.0", "1.7.1", true),
+        ("1.7.1", "1.7.1", false),
+        ("1.7.1", "1.7.0", false),
+        ("1.7.1", "1.8.0", true),
+        ("1.7.1", "2.0.0", true),
+        ("2.0.0", "2.0.1", true),
+        ("2.0.1", "2.1.0", true),
+        ("2.9.9", "2.10.0", true),
+        ("10.0.0", "10.0.1", true)
+    ]
+
+    for (local, remote, shouldUpgrade) in testCases {
+        let isNewer = normalizedVersion(remote).compare(normalizedVersion(local), options: .numeric) == .orderedDescending
+        #expect(isNewer == shouldUpgrade, "Failed for local \(local) vs remote \(remote)")
+    }
+}
+
+@Test
+func fallbackUpdateURLFormatsDynamicallyForAnyVersion() {
+    let versions = ["1.8.0", "v2.0.0", "v10.1.2", "macMTP-3.0.0"]
+    for v in versions {
+        let clean = normalizedVersion(v)
+        let expected = "https://github.com/kalabhaftu/MacMTP/releases/download/\(v)/macMTP-\(clean)-mac-universal.dmg"
+        #expect(fallbackUpdateDMGURL(for: v)?.absoluteString == expected)
+    }
+}
+
