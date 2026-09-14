@@ -73,8 +73,9 @@ jobs:
     - name: Verify release artifacts
       run: |
         test -s release/latest-mac.yml
+        test -s release/SHA256SUMS.txt
         shopt -s nullglob
-        artifacts=(release/*.dmg release/*.zip release/*.sha256)
+        artifacts=(release/*.dmg)
         if (( ${#artifacts[@]} == 0 )); then
           echo "No release artifacts were generated." >&2
           exit 1
@@ -104,9 +105,8 @@ jobs:
       with:
         files: |
           release/*.dmg
-          release/*.zip
-          release/*.sha256
           release/latest-mac.yml
+          release/SHA256SUMS.txt
         draft: false
         prerelease: false
         generate_release_notes: false

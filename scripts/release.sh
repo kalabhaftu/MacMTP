@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 APP_NAME="macMTP"
-VERSION="1.0.0"
+VERSION="1.7.1"
 RELEASE_DIR="$PROJECT_ROOT/release"
 APP_BUNDLE="$PROJECT_ROOT/$APP_NAME.app"
 APP_DSYM="$PROJECT_ROOT/$APP_NAME.app.dSYM"
@@ -123,17 +123,8 @@ build_target() {
 package_target() {
     local target="$1"
     local dmg_name="$APP_NAME-$VERSION-mac-$target.dmg"
-    local zip_name="$APP_NAME-$VERSION-mac-$target.zip"
-    local dsym_name="$APP_NAME-$VERSION-mac-$target.dSYM.zip"
 
     set_version
-
-    echo "Packaging $target ZIP..."
-    (
-        cd "$PROJECT_ROOT"
-        ditto -c -k --sequesterRsrc --keepParent "$APP_BUNDLE" "$RELEASE_DIR/$zip_name"
-        ditto -c -k --keepParent "$APP_DSYM" "$RELEASE_DIR/$dsym_name"
-    )
 
     echo "Uploading $target debug symbols to Sentry..."
     sentry-cli debug-files upload \
@@ -160,19 +151,10 @@ package_target() {
         hdiutil create -volname "macMTP" -srcfolder "$APP_BUNDLE" -ov -format UDZO "$RELEASE_DIR/$dmg_name"
     fi
 
-    (
-        cd "$RELEASE_DIR"
-        shasum -a 256 "$dmg_name" > "$dmg_name.sha256"
-        shasum -a 256 "$zip_name" > "$zip_name.sha256"
-        shasum -a 256 "$dsym_name" > "$dsym_name.sha256"
-    )
-
-    for artifact in "$RELEASE_DIR/$dmg_name" "$RELEASE_DIR/$zip_name" "$RELEASE_DIR/$dsym_name" "$RELEASE_DIR/$dmg_name.sha256" "$RELEASE_DIR/$zip_name.sha256" "$RELEASE_DIR/$dsym_name.sha256"; do
-        if [[ ! -s "$artifact" ]]; then
-            echo "ERROR: Release artifact is missing or empty: $artifact" >&2
-            exit 1
-        fi
-    done
+    if [[ ! -s "$RELEASE_DIR/$dmg_name" ]]; then
+        echo "ERROR: Release artifact is missing or empty: $RELEASE_DIR/$dmg_name" >&2
+        exit 1
+    fi
 }
 
 for target in "${TARGETS[@]}"; do
@@ -182,20 +164,25 @@ for target in "${TARGETS[@]}"; do
     package_target "$target"
 done
 
+echo "Generating SHA256SUMS.txt..."
+(
+    cd "$RELEASE_DIR"
+    shasum -a 256 *.dmg > SHA256SUMS.txt
+)
+
 echo "Writing latest-mac.yml..."
 {
     echo "version: $VERSION"
     echo "files:"
-    for file in "$RELEASE_DIR"/*.zip "$RELEASE_DIR"/*.dmg; do
-        [[ "$file" == *.dSYM.zip ]] && continue
+    for file in "$RELEASE_DIR"/*.dmg; do
         name="$(basename "$file")"
         echo "  - url: $name"
         echo "    sha256: $(shasum -a 256 "$file" | awk '{print $1}')"
         echo "    size: $(stat -f%z "$file")"
     done
-    preferred="$APP_NAME-$VERSION-mac-universal.zip"
+    preferred="$APP_NAME-$VERSION-mac-universal.dmg"
     if [[ ! -f "$RELEASE_DIR/$preferred" ]]; then
-        preferred="$(basename "$(find "$RELEASE_DIR" -name '*.zip' ! -name '*.dSYM.zip' | sort | head -1)")"
+        preferred="$(basename "$(find "$RELEASE_DIR" -name '*.dmg' | sort | head -1)")"
     fi
     echo "path: $preferred"
     echo "releaseDate: '$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")'"

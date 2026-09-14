@@ -1,7 +1,29 @@
 # Changelog
 
-## Unreleased
-- Next release.
+## 1.7.1 - 2026-09-14
+
+### MTP Storage and Device Navigation
+- Fixed duplicate internal storage reporting on Android devices (e.g., TECNO KI7 and MediaTek chipsets) where duplicate storage endpoints sharing the same underlying volume are now deduplicated.
+- Added automatic label disambiguation for distinct storage volumes that report identical descriptions.
+- Streamlined sidebar navigation by promoting the connected Android device name directly to the section header and eliminating redundant non-interactive device list items.
+
+### Update Service and Offline Resilience
+- Added in-flight request guarding to the updater service to prevent concurrent update checks and button spamming.
+- Added disabled button state and an inline progress indicator in Preferences while an update check is active.
+- Prevented stacked modal alert dialogs during repeated update check requests.
+- Improved update error messaging during offline and timeout conditions with user-friendly guidance.
+
+### Stability and Sentry Error Filtering
+- Resolved all production Sentry issues across native USB lifecycles, main-thread performance, and concurrency.
+- Offloaded local directory enumeration and conflict detection to background tasks to prevent UI thread hangs during large file transfers.
+- Throttled transfer progress updates to 15 Hz to eliminate CoreAnimation / RenderBox render stalls.
+- Hardened USB detachment handling and filtered non-actionable disconnects, permission revokes, and user notification denials from error reporting.
+- Corrected view hierarchy initialization in AppKit file browser cell views.
+
+### Release Packaging
+- Streamlined release packaging to Universal, Intel (x86_64), and Apple Silicon (arm64) DMG bundles.
+- Consolidated SHA-256 verification hashes into `latest-mac.yml` and `SHA256SUMS.txt`, eliminating individual `.sha256` file clutter.
+- Sentry debug symbols are uploaded directly via `sentry-cli` during CI without publishing debug archives to GitHub Releases.
 
 ## 1.7.0 - 2026-08-31
 
