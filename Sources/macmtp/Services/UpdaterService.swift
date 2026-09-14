@@ -43,8 +43,15 @@ enum UpdateDownloadError: LocalizedError, Equatable {
     }
 }
 
+func normalizedVersion(_ version: String) -> String {
+    if let match = version.range(of: #"[0-9]+(\.[0-9]+)+"#, options: .regularExpression) {
+        return String(version[match])
+    }
+    return version.hasPrefix("v") ? String(version.dropFirst()) : version
+}
+
 func fallbackUpdateDMGURL(for tag: String) -> URL? {
-    let cleanTag = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
+    let cleanTag = normalizedVersion(tag)
     return URL(string: "https://github.com/kalabhaftu/MacMTP/releases/download/\(tag)/macMTP-\(cleanTag)-mac-universal.dmg")
 }
 
@@ -391,10 +398,6 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
                 || nsError.code == NSURLErrorResourceUnavailable
         }
         return false
-    }
-
-    private func normalizedVersion(_ version: String) -> String {
-        version.hasPrefix("v") ? String(version.dropFirst()) : version
     }
 }
 

@@ -28,3 +28,13 @@ func updaterServiceInitialStateIsNotChecking() {
     #expect(!updater.isChecking)
 }
 
+@Test
+func normalizedVersionExtractsSemanticVersionRegardlessOfTagPrefix() {
+    #expect(normalizedVersion("v1.7.1") == "1.7.1")
+    #expect(normalizedVersion("1.7.1") == "1.7.1")
+    #expect(normalizedVersion("macmtp-1.7.1") == "1.7.1")
+    #expect(normalizedVersion("macMTP-v1.7.1") == "1.7.1")
+    #expect(normalizedVersion("macMTP 1.6.6") == "1.6.6")
+    #expect(normalizedVersion("macMTP v1.6.7") == "1.6.7")
+}
+
