@@ -126,6 +126,8 @@ public final class MTPDeviceManager: ObservableObject {
                 || errLower.contains("no device found")
                 || errLower.contains("mtp detect failed")
                 || errLower.contains("busy")
+                || errLower.contains("libusb_error_no_device")
+                || errLower.contains("libusb_error_not_found")
 
             let isExpectedUserCondition = isNoStorageError || isDeviceNotFound || isMultipleDeviceError
             if !isExpectedUserCondition {

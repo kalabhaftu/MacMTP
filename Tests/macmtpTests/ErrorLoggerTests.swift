@@ -154,6 +154,14 @@ func systemAndUserErrorsAreFilteredFromSentry() {
     )
     #expect(!ErrorLogger.shouldReport(multiDevice))
 
+    // Disconnection / LIBUSB_ERROR_NO_DEVICE during initialize
+    let noDeviceError = KalamError.nativeOperationFailed(
+        operation: "initialize",
+        errorType: "ErrorDeviceSetup",
+        message: "opening after reset: LIBUSB_ERROR_NO_DEVICE"
+    )
+    #expect(!ErrorLogger.shouldReport(noDeviceError))
+
     // Real unexpected error should still report
     let unexpectedError = NSError(domain: NSCocoaErrorDomain, code: CocoaError.coderValueNotFound.rawValue, userInfo: nil)
     #expect(ErrorLogger.shouldReport(unexpectedError))

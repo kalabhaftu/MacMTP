@@ -253,6 +253,8 @@ public struct ErrorLogger {
                 && !normalized.contains("errormultipledevice")
                 && !normalized.contains("more than 1 device")
                 && !normalized.contains("errorcancel")
+                && !normalized.contains("libusb_error_no_device")
+                && !normalized.contains("libusb_error_not_found")
         default:
             return true
         }
