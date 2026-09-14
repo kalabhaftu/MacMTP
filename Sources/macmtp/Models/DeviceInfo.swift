@@ -69,6 +69,48 @@ public struct MTPStorageInfo: Identifiable, Codable, Hashable, Sendable {
         let pct = (usagePercent * 100.0)
         return "\(formattedUsed) / \(formattedTotal) used (\(String(format: "%.1f", pct))%)"
     }
+
+    public static func processRawStorages(_ raw: [MTPStorageInfo]) -> [MTPStorageInfo] {
+        guard !raw.isEmpty else { return [] }
+
+        var uniqueStorages: [MTPStorageInfo] = []
+        for storage in raw {
+            let isDuplicate = uniqueStorages.contains { existing in
+                existing.storageType == storage.storageType
+                    && existing.totalCapacity == storage.totalCapacity
+                    && existing.freeSpace == storage.freeSpace
+                    && (existing.totalCapacity > 0 || existing.storageId == storage.storageId)
+                    && existing.description.trimmingCharacters(in: .whitespacesAndNewlines)
+                        .caseInsensitiveCompare(storage.description.trimmingCharacters(in: .whitespacesAndNewlines)) == .orderedSame
+            }
+            if !isDuplicate {
+                uniqueStorages.append(storage)
+            }
+        }
+
+        var descriptionCounts: [String: Int] = [:]
+        for storage in uniqueStorages {
+            let key = storage.description.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            descriptionCounts[key, default: 0] += 1
+        }
+
+        var seenCounts: [String: Int] = [:]
+        return uniqueStorages.map { storage in
+            let key = storage.description.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if (descriptionCounts[key] ?? 0) > 1 {
+                let index = (seenCounts[key] ?? 0) + 1
+                seenCounts[key] = index
+                return MTPStorageInfo(
+                    storageId: storage.storageId,
+                    description: "\(storage.description) (\(index))",
+                    totalCapacity: storage.totalCapacity,
+                    freeSpace: storage.freeSpace,
+                    storageType: storage.storageType
+                )
+            }
+            return storage
+        }
+    }
 }
 
 

@@ -387,3 +387,80 @@ func missingUSBSerialFallsBackToVendorAndProduct() {
 
     #expect(device.matches(vendorID: 0x1234, productID: 0x5678, serialNumber: "phone"))
 }
+
+@Test
+func duplicateMTPStoragesWithIdenticalCapacityAndFreeSpaceAreDeduplicated() {
+    let raw = [
+        MTPStorageInfo(
+            storageId: 0x00010001,
+            description: "Internal shared storage",
+            totalCapacity: 255_848_574_976,
+            freeSpace: 181_467_475_968,
+            storageType: .internal
+        ),
+        MTPStorageInfo(
+            storageId: 0x00020001,
+            description: "Internal shared storage",
+            totalCapacity: 255_848_574_976,
+            freeSpace: 181_467_475_968,
+            storageType: .internal
+        ),
+    ]
+
+    let processed = MTPStorageInfo.processRawStorages(raw)
+    #expect(processed.count == 1)
+    #expect(processed.first?.storageId == 0x00010001)
+    #expect(processed.first?.description == "Internal shared storage")
+}
+
+@Test
+func distinctStoragesWithDifferentTypesOrCapacitiesArePreserved() {
+    let raw = [
+        MTPStorageInfo(
+            storageId: 0x00010001,
+            description: "Internal shared storage",
+            totalCapacity: 255_848_574_976,
+            freeSpace: 181_467_475_968,
+            storageType: .internal
+        ),
+        MTPStorageInfo(
+            storageId: 0x00020001,
+            description: "SD Card",
+            totalCapacity: 64_000_000_000,
+            freeSpace: 32_000_000_000,
+            storageType: .sdCard
+        ),
+    ]
+
+    let processed = MTPStorageInfo.processRawStorages(raw)
+    #expect(processed.count == 2)
+    #expect(processed[0].storageId == 0x00010001)
+    #expect(processed[1].storageId == 0x00020001)
+    #expect(processed[1].storageType == .sdCard)
+}
+
+@Test
+func nonDuplicateStoragesSharingSameDescriptionAreDisambiguated() {
+    let raw = [
+        MTPStorageInfo(
+            storageId: 0x00010001,
+            description: "Internal Storage",
+            totalCapacity: 128_000_000_000,
+            freeSpace: 80_000_000_000,
+            storageType: .internal
+        ),
+        MTPStorageInfo(
+            storageId: 0x00020001,
+            description: "Internal Storage",
+            totalCapacity: 128_000_000_000,
+            freeSpace: 20_000_000_000,
+            storageType: .internal
+        ),
+    ]
+
+    let processed = MTPStorageInfo.processRawStorages(raw)
+    #expect(processed.count == 2)
+    #expect(processed[0].description == "Internal Storage (1)")
+    #expect(processed[1].description == "Internal Storage (2)")
+}
+

@@ -56,16 +56,22 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
     private let webReleaseURL = "https://github.com/kalabhaftu/MacMTP/releases/latest"
     private var activeDownload: UpdateDownloadCoordinator?
     @Published private(set) var downloadState: UpdateDownloadState = .idle
+    @Published public private(set) var isChecking: Bool = false
+    private var isShowingAlert = false
     
     private init() {}
     
     public func checkForUpdates(silent: Bool = false) {
-        Task {
-            if silent, let lastCheck = UserDefaults.standard.object(forKey: "lastUpdateCheckDate") as? Date {
-                if Date().timeIntervalSince(lastCheck) < 6 * 3600 {
-                    return
-                }
+        guard !isChecking else { return }
+        if silent, let lastCheck = UserDefaults.standard.object(forKey: "lastUpdateCheckDate") as? Date {
+            if Date().timeIntervalSince(lastCheck) < 6 * 3600 {
+                return
             }
+        }
+
+        isChecking = true
+        Task { @MainActor in
+            defer { isChecking = false }
 
             do {
                 guard let url = URL(string: repoURL) else { return }
@@ -141,6 +147,12 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
                     if !silent { showNoUpdateAlert(message: "Failed to parse update information.") }
                 }
             } catch {
+                if isOfflineError(error) {
+                    if !silent {
+                        showNoUpdateAlert(message: "Unable to check for updates. Please check your internet connection and try again.")
+                    }
+                    return
+                }
                 await checkViaWebRedirect(silent: silent)
             }
         }
@@ -181,7 +193,13 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
                 if !silent { showNoUpdateAlert(message: "You are running the latest version of macMTP (\(AppVersion.current)).") }
             }
         } catch {
-            if !silent { showNoUpdateAlert(message: "Error checking for updates: \(error.localizedDescription)") }
+            if !silent {
+                if isNetworkError(error) {
+                    showNoUpdateAlert(message: "Unable to check for updates. Please check your internet connection and try again.")
+                } else {
+                    showNoUpdateAlert(message: "Unable to check for updates (\(error.localizedDescription)). Please try again later.")
+                }
+            }
         }
     }
     
@@ -283,6 +301,8 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
     }
     
     private func showUpdateAlert(version: String, releaseNotes: String, url: URL) {
+        guard !isShowingAlert else { return }
+        isShowingAlert = true
         let alert = NSAlert()
         alert.messageText = "A new version of macMTP is available!"
         alert.informativeText = "Version \(version) is now available. You are running version \(AppVersion.current)."
@@ -302,7 +322,8 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
         alert.accessoryView = scroll
         
         if let parentWindow = NSApp.keyWindow ?? NSApp.mainWindow {
-            alert.beginSheetModal(for: parentWindow) { response in
+            alert.beginSheetModal(for: parentWindow) { [weak self] response in
+                self?.isShowingAlert = false
                 if response == .alertFirstButtonReturn {
                     NSWorkspace.shared.open(url)
                 }
@@ -311,6 +332,7 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
             let response = ErrorLogger.withAppHangTrackingPaused {
                 alert.runModal()
             }
+            self.isShowingAlert = false
             if response == .alertFirstButtonReturn {
                 NSWorkspace.shared.open(url)
             }
@@ -318,6 +340,8 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
     }
     
     private func showNoUpdateAlert(message: String) {
+        guard !isShowingAlert else { return }
+        isShowingAlert = true
         let alert = NSAlert()
         alert.messageText = "Check for Updates"
         alert.informativeText = message
@@ -325,12 +349,48 @@ public final class UpdaterService: ObservableObject, @unchecked Sendable {
         alert.addButton(withTitle: "OK")
         
         if let parentWindow = NSApp.keyWindow ?? NSApp.mainWindow {
-            alert.beginSheetModal(for: parentWindow)
+            alert.beginSheetModal(for: parentWindow) { [weak self] _ in
+                self?.isShowingAlert = false
+            }
         } else {
             _ = ErrorLogger.withAppHangTrackingPaused {
                 alert.runModal()
             }
+            self.isShowingAlert = false
         }
+    }
+
+    private func isOfflineError(_ error: Error) -> Bool {
+        if let urlError = error as? URLError {
+            return urlError.code == .notConnectedToInternet
+                || urlError.code == .networkConnectionLost
+                || urlError.code == .dnsLookupFailed
+                || urlError.code == .cannotFindHost
+        }
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain {
+            return nsError.code == NSURLErrorNotConnectedToInternet
+                || nsError.code == NSURLErrorNetworkConnectionLost
+                || nsError.code == NSURLErrorDNSLookupFailed
+                || nsError.code == NSURLErrorCannotFindHost
+        }
+        return false
+    }
+
+    private func isNetworkError(_ error: Error) -> Bool {
+        if isOfflineError(error) { return true }
+        if let urlError = error as? URLError {
+            return urlError.code == .timedOut
+                || urlError.code == .cannotConnectToHost
+                || urlError.code == .resourceUnavailable
+        }
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain {
+            return nsError.code == NSURLErrorTimedOut
+                || nsError.code == NSURLErrorCannotConnectToHost
+                || nsError.code == NSURLErrorResourceUnavailable
+        }
+        return false
     }
 
     private func normalizedVersion(_ version: String) -> String {

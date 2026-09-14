@@ -20,3 +20,11 @@ func updateDownloadErrorPreservesHTTPStatusAndSafeURL() {
     #expect(error.reportingContext["http_status"] as? Int == 404)
     #expect(error.reportingContext["download_url"] as? String == "https://github.com/kalabhaftu/MacMTP/releases/download/v1.6.9/macMTP-1.6.9-mac-universal.dmg")
 }
+
+@Test
+@MainActor
+func updaterServiceInitialStateIsNotChecking() {
+    let updater = UpdaterService.shared
+    #expect(!updater.isChecking)
+}
+

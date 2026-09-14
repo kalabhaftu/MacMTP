@@ -190,6 +190,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @MainActor @objc private func checkForUpdates() {
+        guard !UpdaterService.shared.isChecking else { return }
         UpdaterService.shared.checkForUpdates(silent: false)
     }
     

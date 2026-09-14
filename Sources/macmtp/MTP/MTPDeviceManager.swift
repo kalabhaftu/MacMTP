@@ -71,17 +71,7 @@ public final class MTPDeviceManager: ObservableObject {
                 throw KalamError.operationFailed("No storage found on the connected MTP device")
             }
             
-            let mappedStorages = goStorages.map { item -> MTPStorageInfo in
-                let desc = item.Info.StorageDescription
-                let type = MTPStorageType.fromMTPCode(item.Info.StorageType)
-                return MTPStorageInfo(
-                    storageId: item.Sid,
-                    description: desc.isEmpty ? "Internal Storage" : desc,
-                    totalCapacity: item.Info.MaxCapability,
-                    freeSpace: item.Info.FreeSpaceInBytes,
-                    storageType: type
-                )
-            }
+            let mappedStorages = parseStorages(from: goStorages)
 
             let mappedDevInfo = MTPDeviceInfo(
                 manufacturer: goDevInfo.mtpDeviceInfo?.Manufacturer ?? goDevInfo.usbDeviceInfo?.Manufacturer ?? "Unknown",
@@ -254,17 +244,7 @@ public final class MTPDeviceManager: ObservableObject {
             guard !goStorages.isEmpty else {
                 throw KalamError.operationFailed("No storage found on the connected MTP device")
             }
-            let mappedStorages = goStorages.map { item -> MTPStorageInfo in
-                let desc = item.Info.StorageDescription
-                let type = MTPStorageType.fromMTPCode(item.Info.StorageType)
-                return MTPStorageInfo(
-                    storageId: item.Sid,
-                    description: desc.isEmpty ? "Internal Storage" : desc,
-                    totalCapacity: item.Info.MaxCapability,
-                    freeSpace: item.Info.FreeSpaceInBytes,
-                    storageType: type
-                )
-            }
+            let mappedStorages = parseStorages(from: goStorages)
             self.storages = mappedStorages
             if let selectedStorageId,
                !mappedStorages.contains(where: { $0.storageId == selectedStorageId }) {
@@ -288,6 +268,23 @@ public final class MTPDeviceManager: ObservableObject {
                 invalidateConnection(message: "The MTP connection was lost. Reconnect your Android device and try again.")
             }
         }
+    }
+
+    private func parseStorages(from goStorages: [GoStorageData]) -> [MTPStorageInfo] {
+        let rawStorages = goStorages.map { item -> MTPStorageInfo in
+            let rawDesc = !item.Info.StorageDescription.isEmpty
+                ? item.Info.StorageDescription
+                : (!item.Info.VolumeLabel.isEmpty ? item.Info.VolumeLabel : "Internal Storage")
+            let type = MTPStorageType.fromMTPCode(item.Info.StorageType)
+            return MTPStorageInfo(
+                storageId: item.Sid,
+                description: rawDesc,
+                totalCapacity: item.Info.MaxCapability,
+                freeSpace: item.Info.FreeSpaceInBytes,
+                storageType: type
+            )
+        }
+        return MTPStorageInfo.processRawStorages(rawStorages)
     }
 
 

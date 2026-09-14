@@ -12,6 +12,7 @@ struct PreferencesView: View {
     @AppStorage("swapPanels") private var swapPanels: Bool = false
     @AppStorage("sidebarOnRight") private var sidebarOnRight: Bool = false
     @AppStorage("appFontScale") private var appFontScale: Double = 1.0
+    @ObservedObject private var updater = UpdaterService.shared
 
     var body: some View {
         ScrollView {
@@ -48,8 +49,19 @@ struct PreferencesView: View {
                     Toggle("Automatically check for updates", isOn: $autoCheckUpdates)
                     Toggle("Automatically download new updates", isOn: $autoDownloadUpdates)
                         .disabled(!autoCheckUpdates)
-                    Button("Check for Updates…") {
-                        UpdaterService.shared.checkForUpdates(silent: false)
+                    HStack(spacing: 8) {
+                        Button("Check for Updates…") {
+                            updater.checkForUpdates(silent: false)
+                        }
+                        .disabled(updater.isChecking)
+
+                        if updater.isChecking {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Checking…")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                     }
                 }
                 .padding(.bottom, 10)

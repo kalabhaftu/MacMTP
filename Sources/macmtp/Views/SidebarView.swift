@@ -106,17 +106,8 @@ struct SidebarView: View {
             }
             
             if isMTPConnected {
-                Section(header: sectionHeader("Android Device", icon: "ipad.and.iphone")) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "ipad.and.iphone")
-                            .foregroundColor(.green)
-                            .font(.system(size: 14 * appFontScale))
-                        Text(mtpDeviceName)
-                            .font(.system(size: 12 * appFontScale, weight: .semibold))
-                            .foregroundColor(.primary)
-                    }
-                    .padding(.vertical, 2)
-                    
+                let deviceSectionTitle = mtpDeviceName.isEmpty ? "Android Device" : mtpDeviceName
+                Section(header: sectionHeader(deviceSectionTitle, icon: "ipad.and.iphone")) {
                     ForEach(mtpStorages) { storage in
                         Button(action: {
                             onMTPStorageSelected?(storage.storageId)
