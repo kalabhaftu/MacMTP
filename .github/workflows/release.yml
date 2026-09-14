@@ -35,11 +35,10 @@ jobs:
       run: |
         brew untap aws/tap 2>/dev/null || true
         brew install pkg-config libusb create-dmg sentry-cli
-        softwareupdate --install-rosetta --agree-to-license || true
-        if [ ! -x /usr/local/bin/brew ]; then
-          NONINTERACTIVE=1 arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-        fi
-        arch -x86_64 /usr/local/bin/brew install pkg-config libusb
+
+    - name: Install x86_64 libusb for cross-compilation
+      run: |
+        bash scripts/install-x86_64-libusb.sh
 
     - name: Validate release metadata
       run: |

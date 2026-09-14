@@ -38,3 +38,45 @@ func normalizedVersionExtractsSemanticVersionRegardlessOfTagPrefix() {
     #expect(normalizedVersion("macMTP v1.6.7") == "1.6.7")
 }
 
+@Test
+func fallbackUpdateURLMatchesPublished171UniversalAssetName() {
+    #expect(
+        fallbackUpdateDMGURL(for: "v1.7.1")?.absoluteString
+            == "https://github.com/kalabhaftu/MacMTP/releases/download/v1.7.1/macMTP-1.7.1-mac-universal.dmg"
+    )
+    #expect(
+        fallbackUpdateDMGURL(for: "1.7.1")?.absoluteString
+            == "https://github.com/kalabhaftu/MacMTP/releases/download/1.7.1/macMTP-1.7.1-mac-universal.dmg"
+    )
+}
+
+@Test
+func versionComparisonCorrectlyDetectsUpgradeFrom170To171() {
+    let local170 = normalizedVersion("1.7.0")
+    let remote171 = normalizedVersion("v1.7.1")
+    #expect(remote171.compare(local170, options: .numeric) == .orderedDescending)
+
+    let local171 = normalizedVersion("1.7.1")
+    #expect(remote171.compare(local171, options: .numeric) == .orderedSame)
+
+    let remote172 = normalizedVersion("v1.7.2")
+    #expect(remote172.compare(local171, options: .numeric) == .orderedDescending)
+}
+
+@Test
+func universalDMGAssetMatchesPublishedReleaseArtifacts() {
+    let assets: [[String: Any]] = [
+        ["name": "macMTP-1.7.1-mac-arm64.dmg", "browser_download_url": "https://example.com/arm64.dmg"],
+        ["name": "macMTP-1.7.1-mac-universal.dmg", "browser_download_url": "https://example.com/universal.dmg"],
+        ["name": "macMTP-1.7.1-mac-x86_64.dmg", "browser_download_url": "https://example.com/x86_64.dmg"],
+        ["name": "SHA256SUMS.txt", "browser_download_url": "https://example.com/sums.txt"],
+        ["name": "latest-mac.yml", "browser_download_url": "https://example.com/latest.yml"]
+    ]
+
+    let dmgAsset = assets.first { ($0["name"] as? String ?? "").hasSuffix("-universal.dmg") } ??
+                   assets.first { ($0["name"] as? String ?? "").hasSuffix(".dmg") }
+
+    #expect(dmgAsset?["name"] as? String == "macMTP-1.7.1-mac-universal.dmg")
+    #expect(dmgAsset?["browser_download_url"] as? String == "https://example.com/universal.dmg")
+}
+
