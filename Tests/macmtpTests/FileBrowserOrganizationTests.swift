@@ -198,6 +198,14 @@ func tableCellInstallsItsStackBeforeActivatingConstraints() {
     #expect(cell.subviews.count == 1)
 }
 
+@Test @MainActor
+func iconCellInstallsItsStackBeforeActivatingConstraints() {
+    let cell = AppKitFileCellView(frame: .zero)
+
+    #expect(cell.subviews.count == 1)
+}
+
+
 @Test
 func directSizeSummaryNeverTraversesOrCountsFolderPlaceholders() {
     let files = [

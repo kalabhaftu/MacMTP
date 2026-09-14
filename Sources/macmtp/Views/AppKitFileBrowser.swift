@@ -770,6 +770,8 @@ final class AppKitFileCellView: NSView {
         let sizeHeightConstraint = sizeLabel.heightAnchor.constraint(equalToConstant: 10)
         sizeHeightConstraint.priority = .defaultHigh
 
+        addSubview(stack)
+
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
