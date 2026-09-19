@@ -911,11 +911,17 @@ struct ContentView: View {
                 DispatchQueue.global(qos: .userInitiated).async {
                     var didCopy = false
                     for file in localSources {
-                        let url = URL(fileURLWithPath: file.path)
-                        let destURL = URL(fileURLWithPath: destination).appendingPathComponent(file.name)
-                        if url == destURL || url.deletingLastPathComponent().path == URL(fileURLWithPath: destination).path {
+                        let validation = PathValidation.isSafeToTransfer(sourcePath: file.path, destinationDir: destination)
+                        guard validation.isSafe else {
+                            if let reason = validation.reason, reason != "Item is already located in the destination folder." {
+                                DispatchQueue.main.async {
+                                    self.showTransferToast(reason)
+                                }
+                            }
                             continue
                         }
+                        let url = URL(fileURLWithPath: file.path)
+                        let destURL = URL(fileURLWithPath: destination).appendingPathComponent(file.name)
                         do {
                             try FileManager.default.copyItem(at: url, to: destURL)
                             didCopy = true
@@ -1077,11 +1083,15 @@ struct ContentView: View {
             var hadError: String?
             var didCopy = false
             for item in items {
-                let sourceURL = URL(fileURLWithPath: item.path)
-                let targetURL = destURL.appendingPathComponent(item.name)
-                if sourceURL == targetURL || sourceURL.deletingLastPathComponent().path == destURL.path {
+                let validation = PathValidation.isSafeToTransfer(sourcePath: item.path, destinationDir: destination)
+                guard validation.isSafe else {
+                    if let reason = validation.reason, reason != "Item is already located in the destination folder." {
+                        hadError = reason
+                    }
                     continue
                 }
+                let sourceURL = URL(fileURLWithPath: item.path)
+                let targetURL = destURL.appendingPathComponent(item.name)
                 do {
                     if fileManager.fileExists(atPath: targetURL.path) {
                         switch conflictResolution {

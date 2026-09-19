@@ -246,8 +246,7 @@ public final class MTPDeviceManager: ObservableObject {
             }
             let mappedStorages = parseStorages(from: goStorages)
             self.storages = mappedStorages
-            if let selectedStorageId,
-               !mappedStorages.contains(where: { $0.storageId == selectedStorageId }) {
+            if selectedStorageId == nil || !mappedStorages.contains(where: { $0.storageId == selectedStorageId }) {
                 self.selectedStorageId = mappedStorages.first?.storageId
                 self.currentMTPPath = "/"
                 self.backHistory.removeAll()

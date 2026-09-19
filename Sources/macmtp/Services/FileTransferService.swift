@@ -666,11 +666,23 @@ public final class FileTransferService: ObservableObject {
                 errorHandler: { _, _ in true }
             ) {
                 for case let fileURL as URL in enumerator {
+                    if enumerator.level > PathValidation.maxDirectoryDepth {
+                        enumerator.skipDescendants()
+                        continue
+                    }
+                    if fileURL.path.count > PathValidation.maxPathLength {
+                        continue
+                    }
+                    let subRel = getRelativePath(path: fileURL.path, baseParent: baseParent)
+                    if PathValidation.hasPathCycleOrExcessiveDepth(relativePath: subRel) {
+                        enumerator.skipDescendants()
+                        continue
+                    }
+
                     guard let res = try? fileURL.resourceValues(forKeys: Set(keys)) else { continue }
                     let isDirectory = res.isDirectory ?? false
                     let size = Int64(res.fileSize ?? 0)
                     let fileDate = res.contentModificationDate ?? Date()
-                    let subRel = getRelativePath(path: fileURL.path, baseParent: baseParent)
 
                     items.append(ScannedItem(
                         absolutePath: fileURL.path,
@@ -713,6 +725,9 @@ public final class FileTransferService: ObservableObject {
                 let children = try await bridge.walk(storageId: storageId, path: path, recursive: true, skipHidden: false)
                 for child in children {
                     let childRel = Self.getRelativePath(path: child.path, baseParent: baseParent)
+                    if child.path.count > PathValidation.maxPathLength || PathValidation.hasPathCycleOrExcessiveDepth(relativePath: childRel) {
+                        continue
+                    }
                     let childDate = parseGoDate(child.dateAdded)
                     list.append(ScannedItem(absolutePath: child.path, relativePath: childRel, isDirectory: child.isFolder, size: child.size, modificationDate: childDate))
                 }
@@ -821,7 +836,13 @@ public final class FileTransferService: ObservableObject {
     }
     
     
-    private func ensureDirectoryExists(path: String, direction: TransferDirection, storageId: UInt32) async throws {
+    private func ensureDirectoryExists(path: String, direction: TransferDirection, storageId: UInt32, depth: Int = 0) async throws {
+        if depth > PathValidation.maxDirectoryDepth {
+            throw KalamError.invalidPath("Directory nesting exceeds maximum allowed depth: \(path)")
+        }
+        if path.count > PathValidation.maxPathLength {
+            throw KalamError.invalidPath("Directory path exceeds maximum allowed length: \(path)")
+        }
         if verifiedDirectories.contains(path) { return }
         
         if direction == .localToMTP {
@@ -832,8 +853,8 @@ public final class FileTransferService: ObservableObject {
             }
             
             let parent = (path as NSString).deletingLastPathComponent
-            if parent != "/" && !parent.isEmpty {
-                try await ensureDirectoryExists(path: parent, direction: direction, storageId: storageId)
+            if parent != "/" && !parent.isEmpty && parent != path {
+                try await ensureDirectoryExists(path: parent, direction: direction, storageId: storageId, depth: depth + 1)
             }
             
             _ = try await bridge.makeDirectory(storageId: storageId, path: path)

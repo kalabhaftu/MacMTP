@@ -297,7 +297,7 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         )
 
         pendingAutoConnectTask = Task { @MainActor [weak self] in
-            let delays: [UInt64] = [300_000_000, 750_000_000, 1_500_000_000]
+            let delays: [UInt64] = [300_000_000, 750_000_000, 1_500_000_000, 3_000_000_000]
             for delay in delays {
                 try? await Task.sleep(nanoseconds: delay)
                 guard !Task.isCancelled,

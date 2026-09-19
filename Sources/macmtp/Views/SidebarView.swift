@@ -1,16 +1,38 @@
 import SwiftUI
 
 
-struct SidebarItem: Identifiable, Hashable {
-    var id: String
-    var name: String
-    var iconName: String
-    var path: String
-    var isVolume: Bool
-    var isRemovable: Bool = false
-    var isEjectable: Bool = false
-    var totalCapacity: Int64 = 0
-    var freeSpace: Int64 = 0
+public struct SidebarItem: Identifiable, Hashable {
+    public var id: String
+    public var name: String
+    public var iconName: String
+    public var path: String
+    public var isVolume: Bool
+    public var isRemovable: Bool = false
+    public var isEjectable: Bool = false
+    public var totalCapacity: Int64 = 0
+    public var freeSpace: Int64 = 0
+
+    public init(
+        id: String,
+        name: String,
+        iconName: String,
+        path: String,
+        isVolume: Bool,
+        isRemovable: Bool = false,
+        isEjectable: Bool = false,
+        totalCapacity: Int64 = 0,
+        freeSpace: Int64 = 0
+    ) {
+        self.id = id
+        self.name = name
+        self.iconName = iconName
+        self.path = path
+        self.isVolume = isVolume
+        self.isRemovable = isRemovable
+        self.isEjectable = isEjectable
+        self.totalCapacity = totalCapacity
+        self.freeSpace = freeSpace
+    }
 }
 
 
@@ -31,64 +53,9 @@ struct SidebarView: View {
     var mtpStorages: [MTPStorageInfo] = []
     var onMTPStorageSelected: ((UInt32) -> Void)? = nil
     
+    @State private var quickLinks: [SidebarItem] = FinderFavoritesResolver.resolveFavorites()
     @State private var volumes: [SidebarItem] = []
     @State private var refreshTimer: Timer? = nil
-    
-    
-    private var quickLinks: [SidebarItem] {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        return [
-            SidebarItem(
-                id: "home",
-                name: "Home",
-                iconName: "house.fill",
-                path: home.path,
-                isVolume: false
-            ),
-            SidebarItem(
-                id: "desktop",
-                name: "Desktop",
-                iconName: "menubar.dock.rectangle",
-                path: home.appendingPathComponent("Desktop").path,
-                isVolume: false
-            ),
-            SidebarItem(
-                id: "downloads",
-                name: "Downloads",
-                iconName: "arrow.down.circle.fill",
-                path: home.appendingPathComponent("Downloads").path,
-                isVolume: false
-            ),
-            SidebarItem(
-                id: "documents",
-                name: "Documents",
-                iconName: "doc.text.fill",
-                path: home.appendingPathComponent("Documents").path,
-                isVolume: false
-            ),
-            SidebarItem(
-                id: "movies",
-                name: "Movies",
-                iconName: "film.fill",
-                path: home.appendingPathComponent("Movies").path,
-                isVolume: false
-            ),
-            SidebarItem(
-                id: "music",
-                name: "Music",
-                iconName: "music.note.list",
-                path: home.appendingPathComponent("Music").path,
-                isVolume: false
-            ),
-            SidebarItem(
-                id: "pictures",
-                name: "Pictures",
-                iconName: "photo.fill.on.rectangle.fill",
-                path: home.appendingPathComponent("Pictures").path,
-                isVolume: false
-            ),
-        ]
-    }
     
     
     var body: some View {
@@ -149,6 +116,7 @@ struct SidebarView: View {
         }
         .listStyle(.sidebar)
         .onAppear {
+            refreshFavorites()
             refreshVolumes()
             startVolumeRefreshTimer()
         }
@@ -298,10 +266,18 @@ struct SidebarView: View {
     }
     
     
+    private func refreshFavorites() {
+        let updated = FinderFavoritesResolver.resolveFavorites()
+        if updated != quickLinks {
+            quickLinks = updated
+        }
+    }
+
     private func startVolumeRefreshTimer() {
         guard refreshTimer == nil else { return }
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
             Task { @MainActor in
+                refreshFavorites()
                 refreshVolumes()
             }
         }
