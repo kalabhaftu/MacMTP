@@ -3,6 +3,16 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+for env_file in "$PROJECT_ROOT/.env" "$PROJECT_ROOT/.env.sentry"; do
+    if [[ -f "$env_file" ]]; then
+        set -a
+        # shellcheck disable=SC1090
+        source "$env_file"
+        set +a
+    fi
+done
+
 APP_NAME="macMTP"
 VERSION="1.7.1"
 RELEASE_DIR="$PROJECT_ROOT/release"
