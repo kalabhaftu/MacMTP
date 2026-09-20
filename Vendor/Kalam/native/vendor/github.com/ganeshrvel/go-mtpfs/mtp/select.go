@@ -33,10 +33,6 @@ func candidateFromDeviceDescriptor(d *usb.Device) *Device {
 		}
 		for _, iface := range cdecs.Interfaces {
 			for _, a := range iface.AltSetting {
-				if a.InterfaceClass != usb.CLASS_IMAGE &&
-					!(a.InterfaceClass == usb.CLASS_PER_INTERFACE && a.InterfaceSubClass == 1 && a.InterfaceProtocol == 1) {
-					continue
-				}
 				if len(a.EndPoints) != 3 {
 					continue
 				}

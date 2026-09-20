@@ -37,23 +37,47 @@ final class MTPConnectionCoordinator: ObservableObject {
     private var availableDevices: Set<USBDeviceIdentity> = []
     private var generation: UInt64 = 0
     private var connectionTask: Task<Void, Never>?
+    private var pendingEmptyAvailabilityTask: Task<Void, Never>?
 
     private init() {}
 
     func updateAvailableDevices(_ devices: Set<USBDeviceIdentity>, startAutomatically: Bool = true) {
-        availableDevices = devices
-        guard !devices.isEmpty else {
-            generation &+= 1
-            connectionTask?.cancel()
-            connectionTask = nil
-            state = .usbAbsent
-            if MTPDeviceManager.shared.isConnected || MTPDeviceManager.shared.isLoading {
-                MTPDeviceManager.shared.invalidateConnection(
-                    message: "The Android device was disconnected."
+        if devices.isEmpty {
+            pendingEmptyAvailabilityTask?.cancel()
+            pendingEmptyAvailabilityTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                guard let self, self.availableDevices.isEmpty == false else { return }
+                self.availableDevices.removeAll()
+                self.generation &+= 1
+                self.connectionTask?.cancel()
+                self.connectionTask = nil
+                self.state = .usbAbsent
+                ErrorLogger.logMessage(
+                    "USB device lost",
+                    level: .warning,
+                    userInfo: [
+                        "event": "usb_lost",
+                        "state": "usb_absent",
+                        "generation": Int64(self.generation)
+                    ]
                 )
+                if MTPDeviceManager.shared.isConnected || MTPDeviceManager.shared.isLoading {
+                    MTPDeviceManager.shared.invalidateConnection(
+                        message: "The Android device was disconnected."
+                    )
+                }
+                self.pendingEmptyAvailabilityTask = nil
             }
             return
         }
+
+        pendingEmptyAvailabilityTask?.cancel()
+        pendingEmptyAvailabilityTask = nil
+        if availableDevices == devices,
+           connectionTask == nil || state != .usbAbsent {
+            return
+        }
+        availableDevices = devices
 
         guard !MTPDeviceManager.shared.isConnected else {
             state = .connected

@@ -123,8 +123,11 @@ public final class MTPDeviceManager: ObservableObject {
             let isMultipleDeviceError = errLower.contains("errormultipledevice")
                 || errLower.contains("more than 1 device")
             let isDeviceNotFound = errLower.contains("no mtp device")
+                || errLower.contains("no mtp devices found")
+                || errLower.contains("no mtp device matched")
                 || errLower.contains("no device found")
                 || errLower.contains("mtp detect failed")
+                || errLower.contains("errormtpdetectfailed")
                 || errLower.contains("busy")
                 || errLower.contains("libusb_error_no_device")
                 || errLower.contains("libusb_error_not_found")
@@ -140,6 +143,18 @@ public final class MTPDeviceManager: ObservableObject {
                         "operation_phase": "connection",
                         "native_error_type": nativeErrorType(for: error),
                         "session_generation": Int64(generation)
+                    ]
+                )
+            } else {
+                ErrorLogger.logMessage(
+                    "MTP connection rejected",
+                    level: .warning,
+                    userInfo: [
+                        "event": "connection_rejected",
+                        "state": "failed",
+                        "reason": isDeviceNotFound ? "mtp_unavailable" : "user_condition",
+                        "native_error_type": nativeErrorType(for: error),
+                        "details": error.localizedDescription
                     ]
                 )
             }

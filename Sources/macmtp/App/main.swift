@@ -11,6 +11,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         ErrorLogger.startIfEnabled()
+        ErrorLogger.logMessage(
+            "macMTP started",
+            level: .info,
+            userInfo: [
+                "event": "app_start",
+                "version": AppVersion.current,
+                "release": AppVersion.sentryRelease
+            ]
+        )
 
         let contentView = ContentView(screenshotMode: ScreenshotDemo.isEnabled)
         

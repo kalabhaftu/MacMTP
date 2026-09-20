@@ -246,6 +246,12 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         let productID = (IORegistryEntryCreateCFProperty(device, "idProduct" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? NSNumber)?.uint16Value
         let locationID = (IORegistryEntryCreateCFProperty(device, "locationID" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? NSNumber)?.uint32Value
         let serial = IORegistryEntryCreateCFProperty(device, "USB Serial Number" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? String
+        let productName = IORegistryEntryCreateCFProperty(device, "USB Product Name" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? String
+        let nonPhoneProductWords = ["mouse", "keyboard", "camera", "hub", "bluetooth", "audio"]
+        if let productName,
+           nonPhoneProductWords.contains(where: { productName.localizedCaseInsensitiveContains($0) }) {
+            return nil
+        }
         guard let vendorID, let productID else { return nil }
         return USBDeviceIdentity(
             vendorID: vendorID,
