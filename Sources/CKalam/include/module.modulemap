@@ -1,5 +1,6 @@
 module CKalam {
     header "kalam.h"
+    header "macmtp_usb.h"
     link "kalam"
     link "usb-1.0"
     link "resolv"

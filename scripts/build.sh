@@ -199,6 +199,11 @@ build_swift_arch() {
     lib_dir="$(libusb_lib_dir_for "$pc_dir")"
     triple="$(triple_for "$arch")"
 
+    # SwiftPM does not track the externally rebuilt Go archive as a linker
+    # input; clean its incremental products or it can ship the previous native
+    # transport implementation.
+    swift package clean >/dev/null
+
     echo "  Building Swift target for $arch using libusb from $lib_dir" >&2
     if [[ "$config" == "release" ]]; then
         MACMTP_LIBUSB_LIB_DIR="$lib_dir" swift build -c release --triple "$triple" \

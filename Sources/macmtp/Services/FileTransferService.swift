@@ -66,10 +66,11 @@ public final class FileTransferService: ObservableObject {
     
     public func cancelTransfer() {
         cancelRequested = true
-        bridge.cancelTransfer()
+        if transferInFlight {
+            bridge.cancelTransfer()
+        }
         if let batch = activeBatch {
-            batch.cancel()
-            activeBatch = nil
+            batch.beginCancellation()
         }
         
         if let continuation = conflictContinuation {
@@ -130,6 +131,10 @@ public final class FileTransferService: ObservableObject {
 
         self.isCutOperation = isCut
         self.cutSourcePaths = isCut ? sources.map { $0.path } : []
+        cancelRequested = false
+        let pendingBatch = TransferBatch()
+        pendingBatch.start()
+        activeBatch = pendingBatch
         transferInFlight = true
         Task {
             defer { self.transferInFlight = false }
@@ -141,13 +146,43 @@ public final class FileTransferService: ObservableObject {
                     storageId: storageId
                 )
             } catch {
-                ErrorLogger.log(error, message: "File transfer failed")
-                activeBatch?.cancel()
-                postTransferNotification(
-                    title: "Transfer Failed",
-                    body: error.localizedDescription,
-                    isError: true
-                )
+                if cancelRequested || isMTPTransferCancellation(error) {
+                    activeBatch?.finishCancellation()
+                    postTransferNotification(
+                        title: "Transfer Cancelled",
+                        body: "The transfer stopped before the native session was reused.",
+                        isError: false
+                    )
+                    // Auto-dismiss cancelled transfer progress bar after 1.5 seconds.
+                    let cancelledBatch = self.activeBatch
+                    Task {
+                        try? await Task.sleep(nanoseconds: 1_500_000_000)
+                        if self.activeBatch === cancelledBatch {
+                            self.activeBatch = nil
+                        }
+                    }
+                } else {
+                    ErrorLogger.log(error, message: "File transfer failed")
+                    activeBatch?.state = .failed(error.localizedDescription)
+                    if isMTPTransportFailure(error) {
+                        MTPDeviceManager.shared.invalidateConnection(
+                            message: "The MTP connection stopped responding. Reconnect your Android device and try again."
+                        )
+                    }
+                    postTransferNotification(
+                        title: "Transfer Failed",
+                        body: error.localizedDescription,
+                        isError: true
+                    )
+                    // Auto-dismiss failed transfer progress bar after 3 seconds.
+                    let failedBatch = self.activeBatch
+                    Task {
+                        try? await Task.sleep(nanoseconds: 3_000_000_000)
+                        if self.activeBatch === failedBatch {
+                            self.activeBatch = nil
+                        }
+                    }
+                }
                 isCutOperation = false
                 cutSourcePaths = []
             }
@@ -193,14 +228,11 @@ public final class FileTransferService: ObservableObject {
         direction: TransferDirection,
         storageId: UInt32?
     ) async throws {
-        if let batch = activeBatch, !batch.state.isTerminal {
-            throw KalamError.operationInProgress
-        }
+        guard let batch = activeBatch else { throw KalamError.operationInProgress }
 
         let shouldDeleteSourcesAfterTransfer = isCutOperation
         let sourcePathsToDeleteAfterTransfer = cutSourcePaths
 
-        cancelRequested = false
         pauseRequested = false
         verifiedDirectories.removeAll()
         showConflictDialog = false
@@ -220,8 +252,12 @@ public final class FileTransferService: ObservableObject {
         
         let expandedItems = try await expandSources(sources: sources, direction: direction, storageId: mStorageId)
         
-        if cancelRequested { return }
+        if cancelRequested {
+            batch.finishCancellation()
+            return
+        }
         guard !expandedItems.isEmpty else {
+            batch.complete()
             return
         }
         
@@ -234,7 +270,10 @@ public final class FileTransferService: ObservableObject {
             direction: direction,
             storageId: mStorageId
         )
-        if cancelRequested { return }
+        if cancelRequested {
+            batch.finishCancellation()
+            return
+        }
         
         var chosenResolution: ConflictResolution = .askEach
         var rememberForBatch = true
@@ -251,7 +290,11 @@ public final class FileTransferService: ObservableObject {
                 }
                 
                 if chosenResolution == .cancel {
-                    self.activeBatch = nil
+                    if cancelRequested {
+                        batch.finishCancellation()
+                    } else {
+                        self.activeBatch = nil
+                    }
                     return
                 }
                 
@@ -316,13 +359,16 @@ public final class FileTransferService: ObservableObject {
             transferQueue.append(transItem)
         }
 
-        guard !cancelRequested else { return }
+        guard !cancelRequested else {
+            batch.finishCancellation()
+            return
+        }
         
-        let batch = TransferBatch()
         batch.items = transferQueue
-        self.activeBatch = batch
-        
-        batch.start()
+        guard !batch.isCancelling, !cancelRequested else {
+            batch.finishCancellation()
+            return
+        }
         
         await runQueue(
             storageId: mStorageId,
@@ -516,27 +562,21 @@ public final class FileTransferService: ObservableObject {
 
         if let terminalTransferError {
             let message = formatTransferError(terminalTransferError)
+            let reconnectAutomatically = isMTPCancellationRecoveryFailure(terminalTransferError)
             for index in batch.items.indices where !batch.items[index].status.isTerminal {
                 var item = batch.items[index]
                 item.markFailed(message)
                 batch.items[index] = item
             }
             MTPDeviceManager.shared.invalidateConnection(
-                message: "The MTP connection stopped responding. Reconnect your Android device and try again."
+                message: reconnectAutomatically
+                    ? "Transfer cancellation interrupted the MTP session. Reconnecting…"
+                    : "The MTP connection stopped responding. Reconnect your Android device and try again.",
+                reconnectAutomatically: reconnectAutomatically
             )
         }
         
-        if cancelRequested {
-            batch.cancel()
-            let completed = batch.totalBytesTransferred > 0
-                ? " (\(FormatUtils.formatBytes(batch.totalBytesTransferred)) transferred)"
-                : ""
-            postTransferNotification(
-                title: "Transfer Cancelled",
-                body: "\(batch.completedFileCount) of \(batch.totalFileCount) files copied\(completed)",
-                isError: false
-            )
-        } else if let terminalTransferError {
+        if let terminalTransferError {
             batch.complete()
             let title = batch.completedFileCount == 0 ? "Transfer Failed" : "Transfer Aborted"
             let errorDetail = formatTransferError(terminalTransferError)
@@ -544,6 +584,16 @@ public final class FileTransferService: ObservableObject {
                 title: title,
                 body: "\(batch.completedFileCount) of \(batch.totalFileCount) files copied. \(errorDetail)",
                 isError: true
+            )
+        } else if cancelRequested {
+            batch.finishCancellation()
+            let completed = batch.totalBytesTransferred > 0
+                ? " (\(FormatUtils.formatBytes(batch.totalBytesTransferred)) transferred)"
+                : ""
+            postTransferNotification(
+                title: "Transfer Cancelled",
+                body: "\(batch.completedFileCount) of \(batch.totalFileCount) files copied\(completed)",
+                isError: false
             )
         } else {
             let failedCount = batch.failedFileCount

@@ -80,8 +80,9 @@ func SendMTPDevices(selectors []mtp.DeviceSelector) {
 	data := make([]DeviceSelector, 0, len(selectors))
 	for _, selector := range selectors {
 		data = append(data, DeviceSelector{
-			VendorID:  selector.VendorID,
-			ProductID: selector.ProductID,
+			VendorID:     selector.VendorID,
+			ProductID:    selector.ProductID,
+			SerialNumber: selector.SerialNumber,
 		})
 	}
 	C.call_done(C.CString(toJson(MTPDevicesResult{Data: data})))

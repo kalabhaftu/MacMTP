@@ -19,25 +19,19 @@ func verifyMtpSession(c verifyMtpSessionMode) error {
 	if container.dev == nil {
 		return fmt.Errorf("ErrorMtpDetectFailed")
 	}
-
-	if !c.skipDeviceChangeCheck && container.deviceInfo != nil {
-		dInfo, err := mtpx.FetchDeviceInfo(container.dev)
-		if err != nil {
-			container.deviceInfo = nil
-
-			_ = _dispose()
-
-			return err
-		}
-
-		if container.deviceInfo.SerialNumber != dInfo.SerialNumber {
-			container.deviceInfo = dInfo
-
-			return fmt.Errorf("ErrorDeviceChanged")
-		}
-	}
-
+	// Device information is a connection-time check. Repeating it before every
+	// operation corrupts Android sessions after cancellation and adds traffic.
 	return nil
+}
+
+func abortIfTransferCancelled() error {
+	if !transferCancellationRequested() {
+		return nil
+	}
+	// Only signal cancellation. Do NOT call _abort() here — that would
+	// nil out container.dev and break any subsequent operation (refresh,
+	// directory listing) on the still-live USB connection.
+	return mtpx.ErrTransferCancelled
 }
 
 func _initialize(i mtpx.Init) (*mtp.Device, error) {
@@ -88,6 +82,9 @@ func _fetchStorages() ([]mtpx.StorageData, error) {
 }
 
 func _makeDirectory(storageId uint32, fullPath string) error {
+	if err := abortIfTransferCancelled(); err != nil {
+		return err
+	}
 	if err := verifyMtpSession(verifyMtpSessionMode{}); err != nil {
 		return err
 	}
@@ -101,6 +98,9 @@ func _makeDirectory(storageId uint32, fullPath string) error {
 }
 
 func _fileExists(storageId uint32, fileProps []mtpx.FileProp) (exists []mtpx.FileExistsContainer, error error) {
+	if err := abortIfTransferCancelled(); err != nil {
+		return []mtpx.FileExistsContainer{}, err
+	}
 	if err := verifyMtpSession(verifyMtpSessionMode{}); err != nil {
 		return []mtpx.FileExistsContainer{}, err
 	}
@@ -140,11 +140,17 @@ func _renameFile(storageId uint32, fileProp mtpx.FileProp, newFileName string) (
 }
 
 func _walk(storageId uint32, fullPath string, recursive, skipDisallowedFiles, skipHiddenFiles bool) (files []*mtpx.FileInfo, err error) {
+	if err := abortIfTransferCancelled(); err != nil {
+		return []*mtpx.FileInfo{}, err
+	}
 	if err := verifyMtpSession(verifyMtpSessionMode{}); err != nil {
 		return []*mtpx.FileInfo{}, err
 	}
 
 	_, _, _, err = mtpx.Walk(container.dev, storageId, fullPath, recursive, skipDisallowedFiles, skipHiddenFiles, func(objectId uint32, fi *mtpx.FileInfo, err error) error {
+		if transferCancellationRequested() {
+			return mtpx.ErrTransferCancelled
+		}
 		if err != nil {
 			return err
 		}
@@ -161,6 +167,9 @@ func _walk(storageId uint32, fullPath string, recursive, skipDisallowedFiles, sk
 }
 
 func _uploadFiles(storageId uint32, sources []string, destination string, preprocessFiles bool, preprocessCb mtpx.LocalPreprocessCb, progressCb mtpx.ProgressCb) (err error) {
+	if err := abortIfTransferCancelled(); err != nil {
+		return err
+	}
 	if err := verifyMtpSession(verifyMtpSessionMode{}); err != nil {
 		return err
 	}
@@ -174,6 +183,9 @@ func _uploadFiles(storageId uint32, sources []string, destination string, prepro
 }
 
 func _downloadFiles(storageId uint32, sources []string, destination string, preprocessFiles bool, preprocessCb mtpx.MtpPreprocessCb, progressCb mtpx.ProgressCb) (err error) {
+	if err := abortIfTransferCancelled(); err != nil {
+		return err
+	}
 	if err := verifyMtpSession(verifyMtpSessionMode{}); err != nil {
 		return err
 	}
@@ -195,6 +207,16 @@ func _dispose() error {
 	}
 
 	return mtpx.Dispose(dev)
+}
+
+func _abort() error {
+	dev := container.dev
+	container.dev = nil
+	container.deviceInfo = nil
+	if dev == nil {
+		return nil
+	}
+	return mtpx.Abort(dev)
 }
 
 func lockMtp() {

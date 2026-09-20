@@ -225,9 +225,10 @@ public final class MTPDeviceManager: ObservableObject {
         self.isLoading = false
     }
 
-    func invalidateConnection(message: String) {
+    func invalidateConnection(message: String, reconnectAutomatically: Bool = false) {
         connectionGeneration &+= 1
         refreshGeneration &+= 1
+        MTPConnectionCoordinator.shared.markSessionLost(message: message)
         let invalidatedGeneration = connectionGeneration
         directoryCoordinator.invalidateSnapshot()
 
@@ -260,13 +261,21 @@ public final class MTPDeviceManager: ObservableObject {
             guard let self else { return }
             try? await bridge.dispose()
             guard self.connectionGeneration == invalidatedGeneration else { return }
+            if reconnectAutomatically {
+                // The native layer already reset and drained the stale handle.
+                // Retry the existing bounded coordinator path without forcing a
+                // USB re-enumeration, which can make Android drop MTP entirely.
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                guard self.connectionGeneration == invalidatedGeneration else { return }
+                MTPConnectionCoordinator.shared.retry()
+            }
             ErrorLogger.logMessage(
                 "MTP connection invalidated",
                 level: .warning,
                 userInfo: [
                     "operation": "connection",
                     "operation_phase": "connection",
-                    "reconnect_result": "manual_retry_required",
+                    "reconnect_result": reconnectAutomatically ? "automatic_retry_started" : "manual_retry_required",
                     "session_generation": Int64(invalidatedGeneration),
                 ]
             )
@@ -324,7 +333,21 @@ public final class MTPDeviceManager: ObservableObject {
 
 
     public func refreshFiles() async {
+        while FileTransferService.shared.isTransferInFlight {
+            do {
+                try await Task.sleep(nanoseconds: 50_000_000)
+            } catch {
+                return
+            }
+        }
         await directoryCoordinator.waitForMutation()
+        while FileTransferService.shared.isTransferInFlight {
+            do {
+                try await Task.sleep(nanoseconds: 50_000_000)
+            } catch {
+                return
+            }
+        }
         await refreshFilesWithoutWaitingForMutation()
     }
 
@@ -425,6 +448,10 @@ public final class MTPDeviceManager: ObservableObject {
         } catch {
             guard generation == refreshGeneration,
                   currentDirectoryRefreshRequest() == request else { return false }
+            if isMTPTransferCancellation(error) {
+                errorMessage = nil
+                return false
+            }
             directoryCoordinator.recordFailedRefresh(for: request)
             ErrorLogger.log(
                 error,

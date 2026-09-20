@@ -15,6 +15,15 @@ func TestUSBClaimErrorClassification(t *testing.T) {
 	}
 }
 
+func TestMTPDeviceDescriptorRejectsCameraClass(t *testing.T) {
+	if isMTPDeviceDescriptor(usb.DeviceDescriptor{DeviceClass: 0xef}) {
+		t.Fatal("composite camera device must not qualify as an MTP device")
+	}
+	if !isMTPDeviceDescriptor(usb.DeviceDescriptor{DeviceClass: usb.CLASS_PER_INTERFACE}) {
+		t.Fatal("per-interface MTP device should qualify")
+	}
+}
+
 func TestHasMTPDataEndpointsRejectsMouseShape(t *testing.T) {
 	endpoints := []usb.EndpointDescriptor{{
 		EndpointAddress: 0x81,

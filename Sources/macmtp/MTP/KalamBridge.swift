@@ -47,6 +47,9 @@ public enum KalamError: Error, LocalizedError {
 }
 
 func isMTPTransportFailure(_ error: Error) -> Bool {
+    if isMTPCancellationRecoveryFailure(error) {
+        return true
+    }
     guard let kalamError = error as? KalamError else { return false }
 
     switch kalamError {
@@ -60,6 +63,12 @@ func isMTPTransportFailure(_ error: Error) -> Bool {
             || normalized.contains("no mtp device")
             || normalized.contains("errormtpdetectfailed")
             || normalized.contains("timed out")
+            || normalized.contains("eof")
+            || normalized.contains("end of file")
+            || normalized.contains("got type")
+            || normalized.contains("malformed")
+            || normalized.contains("sessionalreadyopened")
+            || normalized.contains("session already open")
             || normalized.contains("broken pipe")
             || normalized.contains("device disconnected")
     case .nativeOperationFailed(_, let errorType, let message):
@@ -70,11 +79,29 @@ func isMTPTransportFailure(_ error: Error) -> Bool {
             || normalized.contains("no mtp device")
             || normalized.contains("errormtpdetectfailed")
             || normalized.contains("timed out")
+            || normalized.contains("eof")
+            || normalized.contains("end of file")
+            || normalized.contains("got type")
+            || normalized.contains("malformed")
+            || normalized.contains("sessionalreadyopened")
+            || normalized.contains("session already open")
             || normalized.contains("broken pipe")
             || normalized.contains("device disconnected")
     default:
         return false
     }
+}
+
+func isMTPCancellationRecoveryFailure(_ error: Error) -> Bool {
+    let message = error.localizedDescription.lowercased()
+    return message.contains("cancellation recovery failed")
+        || message.contains("cancellation requires reconnect")
+}
+
+func shouldSignalNativeCancellation(after error: Error) -> Bool {
+    guard let kalamError = error as? KalamError else { return false }
+    if case .timedOut = kalamError { return true }
+    return false
 }
 
 func shouldReportMTPTransportFailure(_ error: Error, connectionIsActive: Bool) -> Bool {
@@ -628,7 +655,11 @@ public actor KalamBridge {
             DiscoverMTPDevices()
         }
         return result.data.map {
-            MTPDeviceSelector(vendorId: $0.vendorId, productId: $0.productId, serialNumber: "")
+            MTPDeviceSelector(
+                vendorId: $0.vendorId,
+                productId: $0.productId,
+                serialNumber: $0.serialNumber
+            )
         }
     }
 
@@ -834,7 +865,9 @@ public actor KalamBridge {
                 _ = try await group.next()!
             } catch {
                 KalamRegistry.shared.failTransfer(with: error)
-                cancelTransfer()
+                if shouldSignalNativeCancellation(after: error) {
+                    cancelTransfer()
+                }
                 throw error
             }
         }
@@ -922,7 +955,9 @@ public actor KalamBridge {
                 _ = try await group.next()!
             } catch {
                 KalamRegistry.shared.failTransfer(with: error)
-                cancelTransfer()
+                if shouldSignalNativeCancellation(after: error) {
+                    cancelTransfer()
+                }
                 throw error
             }
         }

@@ -90,6 +90,7 @@ func snapshotProgress(p *mtpx.ProgressInfo) *mtpx.ProgressInfo {
 func Initialize(inputJSON *C.char) {
 	lockMtp()
 	defer unlockMtp()
+	defer atomic.StoreUint32(&transferCancelRequested, 0)
 
 	var input InitializeInput
 	if err := decodeInputJSON(inputJSON, &input); err != nil {
@@ -208,6 +209,7 @@ func _sendFetchStorages(retry bool) {
 func MakeDirectory(makeDirectoryInputJson *C.char) {
 	lockMtp()
 	defer unlockMtp()
+	defer atomic.StoreUint32(&transferCancelRequested, 0)
 
 	i := MakeDirectoryInput{}
 
@@ -223,6 +225,9 @@ func MakeDirectory(makeDirectoryInputJson *C.char) {
 	}
 
 	objectId, err := makeDirectoryWithResult(i.StorageId, i.FullPath)
+	if cancelledErr := abortIfTransferCancelled(); cancelledErr != nil {
+		err = cancelledErr
+	}
 	if err != nil {
 		send_to_js.SendError(err)
 
@@ -236,6 +241,7 @@ func MakeDirectory(makeDirectoryInputJson *C.char) {
 func FileExists(fileExistsInputJson *C.char) {
 	lockMtp()
 	defer unlockMtp()
+	defer atomic.StoreUint32(&transferCancelRequested, 0)
 
 	i := FileExistsInput{}
 
@@ -258,6 +264,9 @@ func FileExists(fileExistsInputJson *C.char) {
 	}
 
 	fc, err := _fileExists(i.StorageId, fProps)
+	if cancelledErr := abortIfTransferCancelled(); cancelledErr != nil {
+		err = cancelledErr
+	}
 	if err != nil {
 		send_to_js.SendError(err)
 
@@ -340,6 +349,9 @@ func RenameFile(renameFileInputJson *C.char) {
 }
 
 func makeDirectoryWithResult(storageId uint32, fullPath string) (uint32, error) {
+	if err := abortIfTransferCancelled(); err != nil {
+		return 0, err
+	}
 	if err := verifyMtpSession(verifyMtpSessionMode{}); err != nil {
 		return 0, err
 	}
@@ -365,6 +377,7 @@ func renameFileWithResult(storageId uint32, fileProp mtpx.FileProp, newFileName 
 func Walk(walkInputJson *C.char) {
 	lockMtp()
 	defer unlockMtp()
+	defer atomic.StoreUint32(&transferCancelRequested, 0)
 
 	i := WalkInput{}
 
@@ -380,6 +393,9 @@ func Walk(walkInputJson *C.char) {
 	}
 
 	files, err := _walk(i.StorageId, i.FullPath, i.Recursive, i.SkipDisallowedFiles, i.SkipHiddenFiles)
+	if cancelledErr := abortIfTransferCancelled(); cancelledErr != nil {
+		err = cancelledErr
+	}
 	if err != nil {
 		send_to_js.SendError(err)
 
@@ -393,6 +409,7 @@ func Walk(walkInputJson *C.char) {
 func UploadFiles(uploadFilesInputJson *C.char) {
 	lockMtp()
 	defer unlockMtp()
+	defer atomic.StoreUint32(&transferCancelRequested, 0)
 
 	i := UploadFilesInput{}
 
@@ -480,6 +497,9 @@ func UploadFiles(uploadFilesInputJson *C.char) {
 
 			return nil
 		})
+	if err == nil {
+		err = abortIfTransferCancelled()
+	}
 	if err != nil {
 		send_to_js.SendTransferError(err)
 
@@ -493,6 +513,7 @@ func UploadFiles(uploadFilesInputJson *C.char) {
 func DownloadFiles(downloadFilesInputJson *C.char) {
 	lockMtp()
 	defer unlockMtp()
+	defer atomic.StoreUint32(&transferCancelRequested, 0)
 
 	i := DownloadFilesInput{}
 
@@ -579,6 +600,9 @@ func DownloadFiles(downloadFilesInputJson *C.char) {
 
 			return nil
 		})
+	if err == nil {
+		err = abortIfTransferCancelled()
+	}
 	if err != nil {
 		send_to_js.SendTransferError(err)
 
@@ -592,6 +616,7 @@ func DownloadFiles(downloadFilesInputJson *C.char) {
 func Dispose() {
 	lockMtp()
 	defer unlockMtp()
+	defer atomic.StoreUint32(&transferCancelRequested, 0)
 
 	if err := _dispose(); err != nil {
 		send_to_js.SendError(err)

@@ -1,10 +1,10 @@
 package mtpx
 
-import "errors"
+import "github.com/ganeshrvel/go-mtpfs/mtp"
 
 // ErrTransferCancelled is returned by transfer progress callbacks when the
 // host asks the current native transfer to stop.
-var ErrTransferCancelled = errors.New("transfer cancelled")
+var ErrTransferCancelled = mtp.ErrTransferCancelled
 
 type MtpDetectFailedError struct {
 	error

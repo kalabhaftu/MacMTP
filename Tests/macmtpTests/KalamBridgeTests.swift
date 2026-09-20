@@ -13,6 +13,18 @@ func malformedTransferCallbacksFailInsteadOfDisappearing() {
 }
 
 @Test
+func completedNativeCancellationIsNotRearmedByTheBridge() {
+    let cancellation = KalamError.nativeOperationFailed(
+        operation: "transfer",
+        errorType: "ErrorTransferCancelled",
+        message: "transfer cancelled"
+    )
+
+    #expect(!shouldSignalNativeCancellation(after: cancellation))
+    #expect(shouldSignalNativeCancellation(after: KalamError.timedOut("upload")))
+}
+
+@Test
 func lateDoneCallbackAfterContinuationCleanupIsIgnored() async {
     do {
         _ = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
