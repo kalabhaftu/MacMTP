@@ -316,7 +316,20 @@ func handleMakeLocalFile(dev *mtp.Device, fi *FileInfo, destination string, prog
 // return:
 // [totalFiles]: total number of files
 // [totalDirectories]: total number of directories
-func proccessWalk(dev *mtp.Device, storageId uint32, fileProp FileProp, recursive, skipDisallowedFiles, skipHiddenFiles bool, cb WalkCb) (totalFiles, totalDirectories int64, err error) {
+const maxWalkDepth = 30
+
+func visitWalkNode(visited map[uint32]struct{}, objectID uint32, depth int) (bool, error) {
+	if depth > maxWalkDepth {
+		return false, fmt.Errorf("MTP walk exceeded maximum depth of %d", maxWalkDepth)
+	}
+	if _, seen := visited[objectID]; seen {
+		return false, nil
+	}
+	visited[objectID] = struct{}{}
+	return true, nil
+}
+
+func proccessWalk(dev *mtp.Device, storageId uint32, fileProp FileProp, recursive, skipDisallowedFiles, skipHiddenFiles bool, cb WalkCb, depth int, visited map[uint32]struct{}) (totalFiles, totalDirectories int64, err error) {
 	fi, err := GetObjectFromObjectIdOrPath(dev, storageId, FileProp{fileProp.ObjectId, fileProp.FullPath})
 
 	if err != nil {
@@ -331,6 +344,14 @@ func proccessWalk(dev *mtp.Device, storageId uint32, fileProp FileProp, recursiv
 	totalFiles = 0
 
 	for _, objId := range handles.Values {
+		shouldVisit, err := visitWalkNode(visited, objId, depth+1)
+		if err != nil {
+			return totalFiles, totalDirectories, err
+		}
+		if !shouldVisit {
+			continue
+		}
+
 		fi, err := GetObjectFromObjectId(dev, objId, fileProp.FullPath)
 		if err != nil {
 			continue
@@ -370,7 +391,7 @@ func proccessWalk(dev *mtp.Device, storageId uint32, fileProp FileProp, recursiv
 		}
 
 		_totalFiles, _totalDirectories, err := proccessWalk(
-			dev, storageId, FileProp{objId, fi.FullPath}, recursive, skipDisallowedFiles, skipHiddenFiles, cb,
+			dev, storageId, FileProp{objId, fi.FullPath}, recursive, skipDisallowedFiles, skipHiddenFiles, cb, depth+1, visited,
 		)
 		if err != nil {
 			return totalFiles, totalDirectories, err

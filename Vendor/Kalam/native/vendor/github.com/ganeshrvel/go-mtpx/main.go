@@ -33,8 +33,11 @@ func Initialize(init Init) (*mtp.Device, error) {
 }
 
 // Dispose - close the mtp device
-func Dispose(dev *mtp.Device) {
-	dev.Close()
+func Dispose(dev *mtp.Device) error {
+	if dev == nil {
+		return nil
+	}
+	return dev.Close()
 }
 
 // FetchDeviceInfo - fetch device Info
@@ -159,7 +162,8 @@ func Walk(dev *mtp.Device, storageId uint32, fullPath string, recursive, skipDis
 		return fi.ObjectId, 1, totalDirectories, nil
 	}
 
-	totalFiles, totalDirectories, err = proccessWalk(dev, storageId, FileProp{fi.ObjectId, fullPath}, recursive, skipDisallowedFiles, skipHiddenFiles, cb)
+	visited := map[uint32]struct{}{fi.ObjectId: {}}
+	totalFiles, totalDirectories, err = proccessWalk(dev, storageId, FileProp{fi.ObjectId, fullPath}, recursive, skipDisallowedFiles, skipHiddenFiles, cb, 0, visited)
 	if err != nil {
 		return 0, totalFiles, totalDirectories, err
 	}
@@ -189,7 +193,7 @@ func FileExists(dev *mtp.Device, storageId uint32, fileProps []FileProp) (fc []F
 				}
 
 			default:
-				return []FileExistsContainer{}, nil
+				return fc, err
 			}
 
 		} else {
@@ -212,11 +216,17 @@ func DeleteFile(dev *mtp.Device, storageId uint32, fileProps []FileProp) error {
 	for _, fileProp := range fileProps {
 		fc, err := FileExists(dev, storageId, []FileProp{fileProp})
 		if err != nil {
-			return nil
+			return err
+		}
+		if len(fc) != 1 {
+			return fmt.Errorf("file existence response contained %d results for one path", len(fc))
 		}
 
 		if !fc[0].Exists {
-			return nil
+			continue
+		}
+		if fc[0].FileInfo == nil {
+			return fmt.Errorf("file existence response marked a path as existing without metadata")
 		}
 
 		if err := dev.DeleteObject(fc[0].FileInfo.ObjectId); err != nil {
@@ -239,9 +249,15 @@ func RenameFile(dev *mtp.Device, storageId uint32, fileProp FileProp, newFileNam
 	if err != nil {
 		return 0, err
 	}
+	if len(fc) != 1 {
+		return 0, fmt.Errorf("file existence response contained %d results for one path", len(fc))
+	}
 
 	if !fc[0].Exists {
 		return 0, InvalidPathError{error: fmt.Errorf("file not found: %s", fileProp.FullPath)}
+	}
+	if fc[0].FileInfo == nil {
+		return 0, fmt.Errorf("file existence response marked a path as existing without metadata")
 	}
 
 	fi := fc[0].FileInfo

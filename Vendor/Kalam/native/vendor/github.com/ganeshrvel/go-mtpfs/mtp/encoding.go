@@ -110,7 +110,7 @@ func decodeArray(r io.Reader, t reflect.Type) (reflect.Value, error) {
 	ksz := int(kindSize(t.Elem().Kind()))
 
 	data := make([]byte, int(sz)*ksz)
-	_, err := r.Read(data)
+	_, err := io.ReadFull(r, data)
 	if err != nil {
 		return nullValue, err
 	}
@@ -266,11 +266,16 @@ func decodeField(r io.Reader, f reflect.Value, typeSelector DataTypeSelector) er
 		}
 		f.Set(sl)
 	case reflect.Interface:
-		val := InstantiateType(typeSelector)
-		decodeField(r, val, typeSelector)
+		val, err := InstantiateType(typeSelector)
+		if err != nil {
+			return err
+		}
+		if err := decodeField(r, val, typeSelector); err != nil {
+			return err
+		}
 		f.Set(val)
 	default:
-		panic(fmt.Sprintf("unimplemented kind %v", f))
+		return fmt.Errorf("unimplemented kind %v", f.Kind())
 	}
 	return nil
 }
@@ -365,14 +370,14 @@ func Encode(w io.Writer, iface interface{}) error {
 }
 
 // Instantiates an object of wanted type as addressable value.
-func InstantiateType(t DataTypeSelector) reflect.Value {
+func InstantiateType(t DataTypeSelector) (reflect.Value, error) {
 	var val interface{}
 	switch t {
 	case DTC_INT8:
 		v := int8(0)
 		val = &v
 	case DTC_UINT8:
-		v := int8(0)
+		v := uint8(0)
 		val = &v
 	case DTC_INT16:
 		v := int16(0)
@@ -402,10 +407,10 @@ func InstantiateType(t DataTypeSelector) reflect.Value {
 		s := ""
 		val = &s
 	default:
-		panic(fmt.Sprintf("type not known 0x%x", t))
+		return reflect.Value{}, fmt.Errorf("type not known 0x%x", t)
 	}
 
-	return reflect.ValueOf(val).Elem()
+	return reflect.ValueOf(val).Elem(), nil
 }
 
 func decodePropDescForm(r io.Reader, selector DataTypeSelector, formFlag uint8) (DataDependentType, error) {

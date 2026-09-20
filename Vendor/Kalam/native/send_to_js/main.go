@@ -23,6 +23,7 @@ package send_to_js
 */
 import "C"
 import (
+	"fmt"
 	"github.com/ganeshrvel/go-mtpfs/mtp"
 	"github.com/ganeshrvel/go-mtpx"
 	"os"
@@ -104,6 +105,10 @@ func SendMakeDirectory(objectId uint32) {
 }
 
 func SendFileExists(fc []mtpx.FileExistsContainer, inputFiles []string) {
+	if len(fc) != len(inputFiles) {
+		SendError(fmt.Errorf("file existence response contained %d results for %d paths", len(fc), len(inputFiles)))
+		return
+	}
 	fdSlice := make([]FileExistsData, 0, len(fc))
 	for i, f := range fc {
 		fd := FileExistsData{
@@ -145,6 +150,10 @@ func SendWalk(files []*mtpx.FileInfo) {
 	outputFiles := make([]FileInfo, 0, len(files))
 
 	for _, f := range files {
+		if f == nil {
+			SendError(fmt.Errorf("walk response contained a nil file entry"))
+			return
+		}
 		outputFile := FileInfo{
 			Size:       f.Size,
 			IsDir:      f.IsDir,
@@ -170,6 +179,10 @@ func SendWalk(files []*mtpx.FileInfo) {
 }
 
 func SendUploadFilesPreprocess(fi *os.FileInfo, fullPath string) {
+	if fi == nil {
+		SendTransferError(fmt.Errorf("upload preprocess returned no file information"))
+		return
+	}
 	o := UploadFilesPreprocessResult{
 		Data: TransferPreprocessData{
 			FullPath: fullPath,
@@ -184,6 +197,10 @@ func SendUploadFilesPreprocess(fi *os.FileInfo, fullPath string) {
 }
 
 func SendDownloadFilesPreprocess(fi *mtpx.FileInfo) {
+	if fi == nil {
+		SendTransferError(fmt.Errorf("download preprocess returned no file information"))
+		return
+	}
 	o := DownloadFilesPreprocessResult{
 		Data: TransferPreprocessData{
 			FullPath: fi.FullPath,
@@ -198,6 +215,10 @@ func SendDownloadFilesPreprocess(fi *mtpx.FileInfo) {
 }
 
 func SendTransferFilesProgress(p *mtpx.ProgressInfo) {
+	if p == nil || p.FileInfo == nil || p.ActiveFileSize == nil || p.BulkFileSize == nil {
+		SendTransferError(fmt.Errorf("transfer progress returned incomplete information"))
+		return
+	}
 	o := UploadFilesProgressResult{
 		Data: TransferProgressInfo{
 			FullPath:          p.FileInfo.FullPath,

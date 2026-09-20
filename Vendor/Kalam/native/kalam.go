@@ -28,6 +28,19 @@ var container deviceContainer
 
 var transferCancelRequested uint32
 
+const maxNativeInputJSONBytes = 1 << 20
+
+func decodeInputJSON(input *C.char, target interface{}) error {
+	if input == nil {
+		return fmt.Errorf("native input JSON is nil")
+	}
+	raw := C.GoString(input)
+	if len(raw) > maxNativeInputJSONBytes {
+		return fmt.Errorf("native input JSON exceeds %d bytes", maxNativeInputJSONBytes)
+	}
+	return jsoniter.ConfigFastest.UnmarshalFromString(raw, target)
+}
+
 func transferCancellationRequested() bool {
 	return atomic.LoadUint32(&transferCancelRequested) == 1
 }
@@ -65,12 +78,8 @@ func snapshotProgress(p *mtpx.ProgressInfo) *mtpx.ProgressInfo {
 
 //export Initialize
 func Initialize() {
-
-	if err := lockMtp(); err != nil {
-		send_to_js.SendError(err)
-
-		return
-	}
+	lockMtp()
+	defer unlockMtp()
 
 	_, err := _initialize(mtpx.Init{DebugMode: false})
 	if err != nil {
@@ -98,12 +107,8 @@ func Initialize() {
 
 //export FetchDeviceInfo
 func FetchDeviceInfo() {
-
-	if err := lockMtp(); err != nil {
-		send_to_js.SendError(err)
-
-		return
-	}
+	lockMtp()
+	defer unlockMtp()
 
 	dInfo, err := _fetchDeviceInfo()
 	if err != nil {
@@ -124,12 +129,8 @@ func FetchDeviceInfo() {
 
 //export FetchStorages
 func FetchStorages() {
-
-	if err := lockMtp(); err != nil {
-		send_to_js.SendError(err)
-
-		return
-	}
+	lockMtp()
+	defer unlockMtp()
 
 	_sendFetchStorages(true)
 }
@@ -165,20 +166,19 @@ func _sendFetchStorages(retry bool) {
 
 //export MakeDirectory
 func MakeDirectory(makeDirectoryInputJson *C.char) {
-
-	if err := lockMtp(); err != nil {
-		send_to_js.SendError(err)
-
-		return
-	}
+	lockMtp()
+	defer unlockMtp()
 
 	i := MakeDirectoryInput{}
 
-	var j = jsoniter.ConfigFastest
-	err := j.UnmarshalFromString(C.GoString(makeDirectoryInputJson), &i)
+	err := decodeInputJSON(makeDirectoryInputJson, &i)
 	if err != nil {
 		send_to_js.SendError(fmt.Errorf("error occured while Unmarshalling MakeDirectory input data %+v: ", err))
 
+		return
+	}
+	if err := validateMakeDirectoryInput(i); err != nil {
+		send_to_js.SendError(err)
 		return
 	}
 
@@ -194,20 +194,19 @@ func MakeDirectory(makeDirectoryInputJson *C.char) {
 
 //export FileExists
 func FileExists(fileExistsInputJson *C.char) {
-
-	if err := lockMtp(); err != nil {
-		send_to_js.SendError(err)
-
-		return
-	}
+	lockMtp()
+	defer unlockMtp()
 
 	i := FileExistsInput{}
 
-	var j = jsoniter.ConfigFastest
-	err := j.UnmarshalFromString(C.GoString(fileExistsInputJson), &i)
+	err := decodeInputJSON(fileExistsInputJson, &i)
 	if err != nil {
 		send_to_js.SendError(fmt.Errorf("error occured while Unmarshalling FileExists input data %+v: ", err))
 
+		return
+	}
+	if err := validateFileListInput(i.StorageId, i.Files); err != nil {
+		send_to_js.SendError(err)
 		return
 	}
 
@@ -235,20 +234,19 @@ func FileExists(fileExistsInputJson *C.char) {
 
 //export DeleteFile
 func DeleteFile(deleteFileInputJson *C.char) {
-
-	if err := lockMtp(); err != nil {
-		send_to_js.SendError(err)
-
-		return
-	}
+	lockMtp()
+	defer unlockMtp()
 
 	i := DeleteFileInput{}
 
-	var j = jsoniter.ConfigFastest
-	err := j.UnmarshalFromString(C.GoString(deleteFileInputJson), &i)
+	err := decodeInputJSON(deleteFileInputJson, &i)
 	if err != nil {
 		send_to_js.SendError(fmt.Errorf("error occured while Unmarshalling DeleteFile input data %+v: ", err))
 
+		return
+	}
+	if err := validateFileListInput(i.StorageId, i.Files); err != nil {
+		send_to_js.SendError(err)
 		return
 	}
 
@@ -271,20 +269,19 @@ func DeleteFile(deleteFileInputJson *C.char) {
 
 //export RenameFile
 func RenameFile(renameFileInputJson *C.char) {
-
-	if err := lockMtp(); err != nil {
-		send_to_js.SendError(err)
-
-		return
-	}
+	lockMtp()
+	defer unlockMtp()
 
 	i := RenameFileInput{}
 
-	var j = jsoniter.ConfigFastest
-	err := j.UnmarshalFromString(C.GoString(renameFileInputJson), &i)
+	err := decodeInputJSON(renameFileInputJson, &i)
 	if err != nil {
 		send_to_js.SendError(fmt.Errorf("error occured while Unmarshalling RenameFile input data %+v: ", err))
 
+		return
+	}
+	if err := validateRenameInput(i); err != nil {
+		send_to_js.SendError(err)
 		return
 	}
 
@@ -326,20 +323,19 @@ func renameFileWithResult(storageId uint32, fileProp mtpx.FileProp, newFileName 
 
 //export Walk
 func Walk(walkInputJson *C.char) {
-
-	if err := lockMtp(); err != nil {
-		send_to_js.SendError(err)
-
-		return
-	}
+	lockMtp()
+	defer unlockMtp()
 
 	i := WalkInput{}
 
-	var j = jsoniter.ConfigFastest
-	err := j.UnmarshalFromString(C.GoString(walkInputJson), &i)
+	err := decodeInputJSON(walkInputJson, &i)
 	if err != nil {
 		send_to_js.SendError(fmt.Errorf("error occured while Unmarshalling Walk input data %+v: ", err))
 
+		return
+	}
+	if err := validateWalkInput(i); err != nil {
+		send_to_js.SendError(err)
 		return
 	}
 
@@ -355,20 +351,19 @@ func Walk(walkInputJson *C.char) {
 
 //export UploadFiles
 func UploadFiles(uploadFilesInputJson *C.char) {
-
-	if err := lockMtp(); err != nil {
-		send_to_js.SendTransferError(err)
-
-		return
-	}
+	lockMtp()
+	defer unlockMtp()
 
 	i := UploadFilesInput{}
 
-	var j = jsoniter.ConfigFastest
-	err := j.UnmarshalFromString(C.GoString(uploadFilesInputJson), &i)
+	err := decodeInputJSON(uploadFilesInputJson, &i)
 	if err != nil {
 		send_to_js.SendTransferError(fmt.Errorf("error occured while Unmarshalling UploadFiles input data %+v: ", err))
 
+		return
+	}
+	if err := validateTransferInput(i.StorageId, i.Sources, i.Destination); err != nil {
+		send_to_js.SendTransferError(err)
 		return
 	}
 
@@ -456,20 +451,19 @@ func UploadFiles(uploadFilesInputJson *C.char) {
 
 //export DownloadFiles
 func DownloadFiles(downloadFilesInputJson *C.char) {
-
-	if err := lockMtp(); err != nil {
-		send_to_js.SendTransferError(err)
-
-		return
-	}
+	lockMtp()
+	defer unlockMtp()
 
 	i := DownloadFilesInput{}
 
-	var j = jsoniter.ConfigFastest
-	err := j.UnmarshalFromString(C.GoString(downloadFilesInputJson), &i)
+	err := decodeInputJSON(downloadFilesInputJson, &i)
 	if err != nil {
 		send_to_js.SendTransferError(fmt.Errorf("error occured while Unmarshalling DownloadFiles input data %+v: ", err))
 
+		return
+	}
+	if err := validateTransferInput(i.StorageId, i.Sources, i.Destination); err != nil {
+		send_to_js.SendTransferError(err)
 		return
 	}
 
@@ -556,21 +550,14 @@ func DownloadFiles(downloadFilesInputJson *C.char) {
 
 //export Dispose
 func Dispose() {
-
-	if err := lockMtp(); err != nil {
-		send_to_js.SendError(err)
-
-		return
-	}
+	lockMtp()
+	defer unlockMtp()
 
 	if err := _dispose(); err != nil {
 		send_to_js.SendError(err)
 
 		return
 	}
-
-	container.dev = nil
-	container.deviceInfo = nil
 
 	send_to_js.SendDispose()
 }

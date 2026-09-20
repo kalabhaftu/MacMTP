@@ -5,7 +5,15 @@ import (
 	"github.com/ganeshrvel/go-mtpfs/mtp"
 	"github.com/ganeshrvel/go-mtpx"
 	"log"
+	"strings"
+	"sync"
 )
+
+const (
+	maxNativePathLength = 4096
+)
+
+var mtpOperationMu sync.Mutex
 
 func verifyMtpSession(c verifyMtpSessionMode) error {
 	if container.dev == nil {
@@ -179,25 +187,94 @@ func _downloadFiles(storageId uint32, sources []string, destination string, prep
 }
 
 func _dispose() error {
-	if container.dev == nil {
+	dev := container.dev
+	container.dev = nil
+	container.deviceInfo = nil
+	if dev == nil {
 		return nil
 	}
 
-	mtpx.Dispose(container.dev)
+	return mtpx.Dispose(dev)
+}
 
+func lockMtp() {
+	mtpOperationMu.Lock()
+}
+
+func unlockMtp() {
+	mtpOperationMu.Unlock()
+}
+
+func validateStorageID(storageID uint32) error {
+	if storageID == 0 {
+		return fmt.Errorf("storage ID must be nonzero")
+	}
 	return nil
 }
 
-func lockMtp() error {
-	if container.locked {
-		return fmt.Errorf("ErrorMtpLockExists")
+func validateMTPPath(value string) error {
+	if value == "" || len(value) > maxNativePathLength || strings.IndexByte(value, 0) >= 0 {
+		return fmt.Errorf("invalid MTP path")
 	}
-
-	container.locked = true
-
-	defer func() {
-		container.locked = false
-	}()
-
 	return nil
+}
+
+func validateMTPName(value string) error {
+	if value == "" || value == "." || value == ".." || strings.ContainsAny(value, "/\\") || strings.IndexByte(value, 0) >= 0 {
+		return fmt.Errorf("invalid MTP name")
+	}
+	return validateMTPPath(value)
+}
+
+func validateMTPPaths(paths []string, allowEmpty bool) error {
+	if !allowEmpty && len(paths) == 0 {
+		return fmt.Errorf("at least one MTP path is required")
+	}
+	for _, path := range paths {
+		if err := validateMTPPath(path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateMakeDirectoryInput(input MakeDirectoryInput) error {
+	if err := validateStorageID(input.StorageId); err != nil {
+		return err
+	}
+	return validateMTPPath(input.FullPath)
+}
+
+func validateFileListInput(storageID uint32, files []string) error {
+	if err := validateStorageID(storageID); err != nil {
+		return err
+	}
+	return validateMTPPaths(files, false)
+}
+
+func validateRenameInput(input RenameFileInput) error {
+	if err := validateStorageID(input.StorageId); err != nil {
+		return err
+	}
+	if err := validateMTPPath(input.FullPath); err != nil {
+		return err
+	}
+	return validateMTPName(input.NewFileName)
+}
+
+func validateWalkInput(input WalkInput) error {
+	if err := validateStorageID(input.StorageId); err != nil {
+		return err
+	}
+	return validateMTPPath(input.FullPath)
+}
+
+func validateTransferInput(storageID uint32, sources []string, destination string) error {
+	if err := validateStorageID(storageID); err != nil {
+		return err
+	}
+	if err := validateMTPPaths(sources, false); err != nil {
+		return err
+	}
+	return validateMTPPath(destination)
 }

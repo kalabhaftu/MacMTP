@@ -11,6 +11,9 @@ import (
 
 // process errors
 func processError(e error) (errorType ErrorType, errorMsg string) {
+	if e == nil {
+		return ErrorGeneral, "unknown native error"
+	}
 	if errors.Is(e, mtpx.ErrTransferCancelled) || strings.Contains(strings.ToLower(e.Error()), mtpx.ErrTransferCancelled.Error()) {
 		return ErrorTransferCancelled, e.Error()
 	}
@@ -125,7 +128,7 @@ func toJson(o interface{}) string {
 	if err != nil {
 		fmt.Printf("error occured in SendError.json.Marshal %+v: ", err)
 
-		return ""
+		return `{"errorType":"ErrorGeneral","error":"native response serialization failed","data":null}`
 	}
 
 	return string(w)
