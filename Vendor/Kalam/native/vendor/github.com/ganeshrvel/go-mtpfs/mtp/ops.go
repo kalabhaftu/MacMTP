@@ -201,8 +201,9 @@ func (d *Device) SendObjectInfo(wantStorageID, wantParent uint32, info *ObjectIn
 func (d *Device) SendObject(r io.Reader, size int64, progressCb ProgressFunc) error {
 	var req, rep Container
 	req.Code = OC_SendObject
-	// Standard SendObject expects the header and first payload in one USB transfer.
-	// AndroidSendPartialObject keeps the separate-header workaround for its distinct protocol bug.
+	originalSeparateHeader := d.SeparateHeader
+	d.SeparateHeader = true
+	defer func() { d.SeparateHeader = originalSeparateHeader }()
 	return d.RunTransaction(&req, &rep, nil, r, size, progressCb)
 }
 

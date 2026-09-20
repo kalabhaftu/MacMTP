@@ -167,7 +167,16 @@ func (d *Device) Open() error {
 		return err
 	}
 
-	d.claim()
+	if err := d.claim(); err != nil {
+		d.Close()
+		return err
+	}
+	if d.ifaceDescr.AlternateSetting != 0 {
+		if err := d.h.SetInterfaceAltSetting(int(d.ifaceDescr.InterfaceNumber), int(d.ifaceDescr.AlternateSetting)); err != nil {
+			d.Close()
+			return err
+		}
+	}
 
 	if d.ifaceDescr.InterfaceStringIndex == 0 {
 		// Some devices have no interface field, so we'll hardcode ones

@@ -17,18 +17,24 @@ private actor RecordingMTPBridge: MTPBridge {
     private(set) var listDirectoryCalls = 0
     private let failListingAfterMutation: Bool
     private let initializeDelay: UInt64
+    private let cancelInitialize: Bool
 
     init(
         files: [GoFileInfo] = [],
         failListingAfterMutation: Bool = false,
-        initializeDelay: UInt64 = 0
+        initializeDelay: UInt64 = 0,
+        cancelInitialize: Bool = false
     ) {
         self.files = files
         self.failListingAfterMutation = failListingAfterMutation
         self.initializeDelay = initializeDelay
+        self.cancelInitialize = cancelInitialize
     }
 
     func initialize() async throws -> GoDeviceInfoData {
+        if cancelInitialize {
+            throw CancellationError()
+        }
         if initializeDelay > 0 {
             try await Task.sleep(nanoseconds: initializeDelay)
         }
@@ -363,6 +369,16 @@ func staleConnectionCompletionCannotLeaveTheManagerLoading() async {
     #expect(!manager.isLoading)
 }
 
+@Test @MainActor
+func cancelledConnectionDoesNotPublishAnError() async {
+    let manager = MTPDeviceManager(bridge: RecordingMTPBridge(cancelInitialize: true))
+    let connected = await manager.connectDevice()
+
+    #expect(!connected)
+    #expect(!manager.isLoading)
+    #expect(manager.errorMessage == nil)
+}
+
 @Test
 func duplicateUSBNotificationsDoNotScheduleAnotherDevice() {
     let identity = USBDeviceIdentity(vendorID: 0x1234, productID: 0x5678, locationID: 1, serialNumber: "test")
@@ -463,4 +479,3 @@ func nonDuplicateStoragesSharingSameDescriptionAreDisambiguated() {
     #expect(processed[0].description == "Internal Storage (1)")
     #expect(processed[1].description == "Internal Storage (2)")
 }
-

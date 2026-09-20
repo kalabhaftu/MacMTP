@@ -106,6 +106,12 @@ public final class MTPDeviceManager: ObservableObject {
             }
             guard generation == connectionGeneration else { return false }
 
+            // USBWatcher cancels superseded auto-connect tasks. That is normal
+            // lifecycle control flow, not a connection failure to report.
+            if error is CancellationError {
+                return false
+            }
+
             USBWatcher.shared.clearActiveDevice()
 
             let errLower = error.localizedDescription.lowercased()

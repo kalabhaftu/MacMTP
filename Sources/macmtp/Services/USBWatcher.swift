@@ -135,7 +135,7 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         }
         
         Task { @MainActor in
-            await handleDevicesRemoved(iterator: removedIterator)
+            await handleDevicesRemoved(iterator: removedIterator, isInitialScan: true)
         }
         
     }
@@ -229,7 +229,7 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         scheduleAutoConnect(isInitialScan: isInitialScan)
     }
     
-    private func handleDevicesRemoved(iterator: io_iterator_t) async {
+    private func handleDevicesRemoved(iterator: io_iterator_t, isInitialScan: Bool = false) async {
         var removedIdentities: [USBDeviceIdentity] = []
         while case let device = IOIteratorNext(iterator), device != 0 {
             if let identity = deviceIdentity(for: device) {
@@ -238,6 +238,10 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
             }
             IOObjectRelease(device)
         }
+
+        // Draining the removal iterator arms future notifications; it is not a
+        // device-removal event and must not cancel the launch-time connection.
+        guard !isInitialScan else { return }
         
         try? await Task.sleep(nanoseconds: 50_000_000)
         let remainingIdentities = connectedDeviceIdentities()
@@ -324,6 +328,9 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
                 }
                 if MTPDeviceManager.shared.isConnected {
                     self.pendingAutoConnectTask = nil
+                    return
+                }
+                if MTPDeviceManager.shared.errorMessage != nil {
                     return
                 }
             }
