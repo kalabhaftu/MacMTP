@@ -141,7 +141,9 @@ final class MTPConnectionCoordinator: ObservableObject {
                         "event": "mtp_probe",
                         "state": selectors.isEmpty ? "mtp_unavailable" : "mtp_candidate_found",
                         "candidate_count": selectors.count,
-                        "candidate_vid_pids": selectors.map { String(format: "0x%04x:0x%04x", $0.vendorId, $0.productId) },
+                        "candidate_vid_pids": selectors
+                            .map { String(format: "0x%04x:0x%04x:%@", $0.vendorId, $0.productId, $0.serialNumber.isEmpty ? "no-serial" : $0.serialNumber) }
+                            .joined(separator: ","),
                         "generation": Int64(token)
                     ]
                 )

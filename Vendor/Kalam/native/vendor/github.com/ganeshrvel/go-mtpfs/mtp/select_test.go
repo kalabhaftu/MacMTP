@@ -1,9 +1,19 @@
 package mtp
 
 import (
+	"fmt"
 	"github.com/ganeshrvel/usb"
 	"testing"
 )
+
+func TestUSBClaimErrorClassification(t *testing.T) {
+	if !isUSBClaimError(fmt.Errorf("LIBUSB_ERROR_ACCESS")) {
+		t.Fatal("access failure should trigger claimant recovery")
+	}
+	if isUSBClaimError(fmt.Errorf("interface does not identify MTP")) {
+		t.Fatal("interface rejection should remain a normal non-MTP candidate")
+	}
+}
 
 func TestHasMTPDataEndpointsRejectsMouseShape(t *testing.T) {
 	endpoints := []usb.EndpointDescriptor{{

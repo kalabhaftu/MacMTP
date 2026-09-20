@@ -29,11 +29,26 @@ func DiscoverDeviceSelectors() ([]DeviceSelector, error) {
 		candidate.USBDebug = false
 		candidate.DataDebug = false
 		if err := candidate.Open(); err != nil {
-			if strings.Contains(err.Error(), "LIBUSB_ERROR_ACCESS") ||
-				strings.Contains(err.Error(), "LIBUSB_ERROR_BUSY") ||
-				strings.Contains(err.Error(), "LIBUSB_ERROR_NOT_FOUND") {
+			if isUSBClaimError(err) {
 				claimError = err
 			}
+			candidate.Done()
+			continue
+		}
+		if err := candidate.OpenSession(); err != nil {
+			if isUSBClaimError(err) {
+				claimError = err
+			}
+			candidate.Close()
+			candidate.Done()
+			continue
+		}
+		var deviceInfo DeviceInfo
+		if err := candidate.GetDeviceInfo(&deviceInfo); err != nil {
+			if isUSBClaimError(err) {
+				claimError = err
+			}
+			candidate.Close()
 			candidate.Done()
 			continue
 		}
@@ -57,6 +72,14 @@ func DiscoverDeviceSelectors() ([]DeviceSelector, error) {
 		return nil, fmt.Errorf("MTP interface probe failed: %w", claimError)
 	}
 	return selectors, nil
+}
+
+func isUSBClaimError(err error) bool {
+	details := strings.ToUpper(err.Error())
+	return strings.Contains(details, "LIBUSB_ERROR_ACCESS") ||
+		strings.Contains(details, "LIBUSB_ERROR_BUSY") ||
+		strings.Contains(details, "LIBUSB_ERROR_NOT_FOUND") ||
+		strings.Contains(details, "LIBUSB_ERROR_NO_DEVICE")
 }
 
 func selectorMatches(selector DeviceSelector, vendorID, productID uint16, serialNumber string) bool {
