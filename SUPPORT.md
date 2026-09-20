@@ -45,6 +45,11 @@ retry. Further retries require the Retry Connection button. Repeated
 `OpenSession` or `GetDeviceInfo` lines without a new USB attach event indicate
 a regression and should be reported.
 
+On macOS, `ptpcamerad` and `mscamerad-xpc` can temporarily claim the phone's
+MTP/PTP interface. After a failed handshake macMTP releases only those exact
+process names and immediately retries once. It does not kill them before a
+failure, and it does not use broad process-name matching.
+
 For a phone connected before launch, keep it unlocked in File Transfer mode,
 start macMTP, and wait for `Android device detected` before copying. Test both
 a single file and a nested folder. A transfer failure should identify the

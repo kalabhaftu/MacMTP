@@ -189,7 +189,7 @@ final class MTPConnectionCoordinator: ObservableObject {
                     ]
                 )
 
-                if await MTPDeviceManager.shared.connectDevice(selector: identity.selector) {
+                if await MTPDeviceManager.shared.connectDevice(selector: identity) {
                     guard self.generation == token else { return }
                     self.state = .connected
                     ErrorLogger.logMessage(
@@ -218,18 +218,47 @@ final class MTPConnectionCoordinator: ObservableObject {
                     return
                 }
 
-                try? await Task.sleep(nanoseconds: 500_000_000)
+                releaseMTPInterfaceClaimants()
+                // launchd can restart these daemons immediately; retry directly
+                // after the exact-name kill to win the interface race.
             }
         }
     }
-}
 
-extension USBDeviceIdentity {
-    var selector: MTPDeviceSelector {
-        MTPDeviceSelector(
-            vendorId: vendorID,
-            productId: productID,
-            serialNumber: serialNumber?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    private func releaseMTPInterfaceClaimants() {
+        let names = ["ptpcamerad", "mscamerad-xpc"]
+        var released: [String] = []
+
+        for name in names {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+            process.arguments = ["-9", "-x", name]
+            do {
+                try process.run()
+                process.waitUntilExit()
+                if process.terminationStatus == 0 {
+                    released.append(name)
+                }
+            } catch {
+                ErrorLogger.logMessage(
+                    "Failed to release MTP interface claimant",
+                    level: .warning,
+                    userInfo: [
+                        "event": "mtp_claimant_release_failed",
+                        "process": name,
+                        "details": error.localizedDescription
+                    ]
+                )
+            }
+        }
+
+        ErrorLogger.logMessage(
+            "Released macOS MTP interface claimants",
+            level: .info,
+            userInfo: [
+                "event": "mtp_claimant_release",
+                "released": released
+            ]
         )
     }
 }

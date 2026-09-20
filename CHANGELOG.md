@@ -4,6 +4,7 @@
 
 ### MTP Connection and Transfer Reliability
 - Reworked USB detection and MTP session ownership into one serialized coordinator with explicit connection states, capped recovery, stale-session cancellation, and structured Terminal diagnostics.
+- Added a post-failure recovery for macOS Image Capture daemons that can hold the MTP interface (`ptpcamerad` and `mscamerad-xpc`), using exact-name release and an immediate single retry.
 - Selected native MTP devices by the detected USB vendor, product, and serial identity, removed the pre-session device-info probe, and hardened interface/session cleanup.
 - Reworked upload packet framing and partial-write handling so SendObject reports payload bytes accurately and handles endpoint-sized packets consistently.
 - Added invalid local filename rejection and updated support guidance for launch-time detection and transfer failures.
