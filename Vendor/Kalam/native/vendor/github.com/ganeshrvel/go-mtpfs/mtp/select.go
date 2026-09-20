@@ -14,6 +14,29 @@ type DeviceSelector struct {
 	SerialNumber string
 }
 
+func DiscoverDeviceSelectors() ([]DeviceSelector, error) {
+	c := usb.NewContext()
+	devs, err := FindDevices(c)
+	if err != nil {
+		return nil, err
+	}
+
+	seen := make(map[DeviceSelector]struct{})
+	selectors := make([]DeviceSelector, 0, len(devs))
+	for _, candidate := range devs {
+		selector := DeviceSelector{
+			VendorID:  candidate.devDescr.IdVendor,
+			ProductID: candidate.devDescr.IdProduct,
+		}
+		if _, exists := seen[selector]; !exists {
+			seen[selector] = struct{}{}
+			selectors = append(selectors, selector)
+		}
+		candidate.Done()
+	}
+	return selectors, nil
+}
+
 func selectorMatches(selector DeviceSelector, vendorID, productID uint16, serialNumber string) bool {
 	if selector.VendorID != vendorID || selector.ProductID != productID {
 		return false

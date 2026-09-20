@@ -132,6 +132,19 @@ func Initialize(inputJSON *C.char) {
 	send_to_js.SendInitialize(dInfo, usbDesc)
 }
 
+//export DiscoverMTPDevices
+func DiscoverMTPDevices() {
+	lockMtp()
+	defer unlockMtp()
+
+	selectors, err := mtp.DiscoverDeviceSelectors()
+	if err != nil {
+		send_to_js.SendError(err)
+		return
+	}
+	send_to_js.SendMTPDevices(selectors)
+}
+
 //export FetchDeviceInfo
 func FetchDeviceInfo() {
 	lockMtp()

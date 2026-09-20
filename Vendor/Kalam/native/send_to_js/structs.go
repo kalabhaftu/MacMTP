@@ -86,6 +86,17 @@ type DeviceInfo struct {
 	UsbDeviceInfo *mtp.UsbDeviceInfo `json:"usbDeviceInfo"`
 }
 
+type DeviceSelector struct {
+	VendorID  uint16 `json:"vendorId"`
+	ProductID uint16 `json:"productId"`
+}
+
+type MTPDevicesResult struct {
+	ErrorType ErrorType        `json:"errorType"`
+	Error     string           `json:"error"`
+	Data      []DeviceSelector `json:"data"`
+}
+
 type InitializeResult struct {
 	ErrorType ErrorType  `json:"errorType"`
 	Error     string     `json:"error"`

@@ -10,7 +10,7 @@ public enum MTPConnectionState: Equatable {
     var title: String {
         switch self {
         case .usbAbsent: return "USB device not connected"
-        case .deviceFound: return "Android device detected"
+        case .deviceFound: return "USB device detected"
         case .connecting(let attempt): return "Connecting, attempt \(attempt) of 2"
         case .connected: return "Connected"
         case .failed: return "Connection failed"
@@ -20,7 +20,7 @@ public enum MTPConnectionState: Equatable {
     var detail: String {
         switch self {
         case .usbAbsent: return "Connect an Android device and select File Transfer (MTP)."
-        case .deviceFound: return "Starting MTP session…"
+        case .deviceFound: return "Checking for an MTP interface…"
         case .connecting: return "Opening the MTP session…"
         case .connected: return "Connected via USB"
         case .failed(let message, _): return message
@@ -34,9 +34,11 @@ final class MTPConnectionCoordinator: ObservableObject {
 
     @Published private(set) var state: MTPConnectionState = .usbAbsent
 
-    private var availableDevices: Set<USBDeviceIdentity> = []
+    private var availableDevices: Set<MTPDeviceSelector> = []
+    private var usbDevicePresent = false
     private var generation: UInt64 = 0
     private var connectionTask: Task<Void, Never>?
+    private var discoveryTask: Task<Void, Never>?
     private var pendingEmptyAvailabilityTask: Task<Void, Never>?
 
     private init() {}
@@ -46,9 +48,12 @@ final class MTPConnectionCoordinator: ObservableObject {
             pendingEmptyAvailabilityTask?.cancel()
             pendingEmptyAvailabilityTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: 400_000_000)
-                guard let self, self.availableDevices.isEmpty == false else { return }
+                guard let self, self.usbDevicePresent else { return }
+                self.usbDevicePresent = false
                 self.availableDevices.removeAll()
                 self.generation &+= 1
+                self.discoveryTask?.cancel()
+                self.discoveryTask = nil
                 self.connectionTask?.cancel()
                 self.connectionTask = nil
                 self.state = .usbAbsent
@@ -71,45 +76,37 @@ final class MTPConnectionCoordinator: ObservableObject {
             return
         }
 
+        usbDevicePresent = true
         pendingEmptyAvailabilityTask?.cancel()
         pendingEmptyAvailabilityTask = nil
-        if availableDevices == devices,
-           connectionTask == nil || state != .usbAbsent {
-            return
-        }
-        availableDevices = devices
 
         guard !MTPDeviceManager.shared.isConnected else {
             state = .connected
-            return
-        }
-        guard devices.count == 1 else {
-            state = .failed(
-                message: "Multiple Android devices detected. Disconnect all but one device, then Retry.",
-                technicalDetails: "Detected \(devices.count) Android USB devices."
-            )
             return
         }
         guard startAutomatically else {
             state = .deviceFound
             return
         }
-        guard connectionTask == nil else { return }
+        guard connectionTask == nil, discoveryTask == nil else { return }
         if case .failed = state { return }
         state = .deviceFound
-        startConnection()
+        startDiscovery()
     }
 
     func retry() {
         generation &+= 1
         connectionTask?.cancel()
         connectionTask = nil
-        guard !availableDevices.isEmpty else {
+        discoveryTask?.cancel()
+        discoveryTask = nil
+        guard usbDevicePresent else {
             state = .usbAbsent
             return
         }
+        availableDevices.removeAll()
         state = .deviceFound
-        startConnection()
+        startDiscovery()
     }
 
     func markSessionLost(message: String) {
@@ -117,6 +114,52 @@ final class MTPConnectionCoordinator: ObservableObject {
         connectionTask?.cancel()
         connectionTask = nil
         state = .failed(message: message, technicalDetails: message)
+    }
+
+    private func startDiscovery() {
+        guard discoveryTask == nil else { return }
+        let token = generation
+        discoveryTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.discoveryTask = nil }
+
+            do {
+                let selectors = Set(try await MTPDeviceManager.shared.discoverMTPDevices())
+                guard self.generation == token, !Task.isCancelled else { return }
+                self.availableDevices = selectors
+                ErrorLogger.logMessage(
+                    "MTP candidate discovery completed",
+                    level: .info,
+                    userInfo: [
+                        "event": "mtp_probe",
+                        "state": selectors.isEmpty ? "mtp_unavailable" : "mtp_candidate_found",
+                        "candidate_count": selectors.count,
+                        "generation": Int64(token)
+                    ]
+                )
+                guard !selectors.isEmpty else {
+                    self.state = .failed(
+                        message: "USB device detected, but no MTP interface is available. Select File Transfer (MTP) on the phone, then Retry.",
+                        technicalDetails: "Native MTP descriptor discovery returned zero candidates."
+                    )
+                    return
+                }
+                guard selectors.count == 1 else {
+                    self.state = .failed(
+                        message: "Multiple MTP devices detected. Disconnect all but one device, then Retry.",
+                        technicalDetails: "Native MTP descriptor discovery returned \(selectors.count) candidates."
+                    )
+                    return
+                }
+                self.startConnection()
+            } catch {
+                guard self.generation == token, !Task.isCancelled else { return }
+                self.state = .failed(
+                    message: "MTP discovery failed: \(error.localizedDescription)",
+                    technicalDetails: error.localizedDescription
+                )
+            }
+        }
     }
 
     private func startConnection() {

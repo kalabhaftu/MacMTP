@@ -88,6 +88,7 @@ extern "C" {
 #endif
 
 extern void Initialize(char* initializeInputJson);
+extern void DiscoverMTPDevices(void);
 extern void FetchDeviceInfo(void);
 extern void FetchStorages(void);
 extern void MakeDirectory(char* makeDirectoryInputJson);

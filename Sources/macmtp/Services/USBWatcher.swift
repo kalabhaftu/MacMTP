@@ -185,9 +185,7 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         
         knownDeviceIdentities.formUnion(identities)
         let allDeviceIdentities = connectedDeviceIdentities()
-        availableDeviceIdentities = allDeviceIdentities.filter {
-            PTPConflictDetector.knownAndroidVendorIDs.contains($0.vendorID)
-        }
+        availableDeviceIdentities = allDeviceIdentities
         MTPConnectionCoordinator.shared.updateAvailableDevices(
             availableDeviceIdentities,
             startAutomatically: UserDefaults.standard.object(forKey: "autoDetectDevice") as? Bool ?? true
@@ -197,10 +195,9 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
             level: .info,
             userInfo: [
                 "event": "usb_scan",
-                "state": availableDeviceIdentities.isEmpty ? "usb_absent" : "device_found",
+                "state": availableDeviceIdentities.isEmpty ? "usb_absent" : "usb_detected",
                 "initial_scan": isInitialScan,
-                "usb_device_count": allDeviceIdentities.count,
-                "android_device_count": availableDeviceIdentities.count,
+                "usb_device_count": availableDeviceIdentities.count,
                 "usb_vendor_ids": Array(Set(allDeviceIdentities.map(\.vendorID))).sorted()
             ]
         )
@@ -220,9 +217,7 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         
         try? await Task.sleep(nanoseconds: 150_000_000)
         let allDeviceIdentities = connectedDeviceIdentities()
-        availableDeviceIdentities = allDeviceIdentities.filter {
-            PTPConflictDetector.knownAndroidVendorIDs.contains($0.vendorID)
-        }
+        availableDeviceIdentities = allDeviceIdentities
         knownDeviceIdentities = availableDeviceIdentities
         MTPConnectionCoordinator.shared.updateAvailableDevices(
             availableDeviceIdentities,
@@ -233,9 +228,8 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
             level: .info,
             userInfo: [
                 "event": "usb_scan",
-                "state": availableDeviceIdentities.isEmpty ? "usb_absent" : "device_found",
-                "usb_device_count": allDeviceIdentities.count,
-                "android_device_count": availableDeviceIdentities.count,
+                "state": availableDeviceIdentities.isEmpty ? "usb_absent" : "usb_detected",
+                "usb_device_count": availableDeviceIdentities.count,
                 "usb_vendor_ids": Array(Set(allDeviceIdentities.map(\.vendorID))).sorted()
             ]
         )

@@ -76,6 +76,17 @@ func SendDeviceInfo(deviceInfo *mtp.DeviceInfo, usbDesc *mtp.UsbDeviceInfo) {
 	C.call_done(C.CString(json))
 }
 
+func SendMTPDevices(selectors []mtp.DeviceSelector) {
+	data := make([]DeviceSelector, 0, len(selectors))
+	for _, selector := range selectors {
+		data = append(data, DeviceSelector{
+			VendorID:  selector.VendorID,
+			ProductID: selector.ProductID,
+		})
+	}
+	C.call_done(C.CString(toJson(MTPDevicesResult{Data: data})))
+}
+
 func SendStorages(storages []mtpx.StorageData) {
 	if storages == nil {
 		storages = make([]mtpx.StorageData, 0)

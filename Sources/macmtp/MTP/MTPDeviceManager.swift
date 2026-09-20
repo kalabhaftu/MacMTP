@@ -57,6 +57,10 @@ public final class MTPDeviceManager: ObservableObject {
         return await connectDevice(selector: selector)
     }
 
+    func discoverMTPDevices() async throws -> [MTPDeviceSelector] {
+        try await bridge.discoverMTPDevices()
+    }
+
     @discardableResult
     func connectDevice(selector: MTPDeviceSelector) async -> Bool {
         guard !isLoading, !isConnected else { return false }

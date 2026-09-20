@@ -54,6 +54,10 @@ private actor RecordingMTPBridge: MTPBridge {
         )
     }
 
+    func discoverMTPDevices() async throws -> [MTPDeviceSelector] {
+        [MTPDeviceSelector(vendorId: 0x1234, productId: 0x5678, serialNumber: "")]
+    }
+
     func fetchStorages() async throws -> [GoStorageData] {
         [GoStorageData(
             Sid: 1,

@@ -43,6 +43,17 @@ public struct GoDeviceInfoResult: Decodable, Sendable {
     public let data: GoDeviceInfoData?
 }
 
+public struct GoMTPDeviceSelector: Decodable, Sendable {
+    public let vendorId: UInt16
+    public let productId: UInt16
+}
+
+public struct GoMTPDevicesResult: Decodable, Sendable {
+    public let error: String?
+    public let errorType: String?
+    public let data: [GoMTPDeviceSelector]
+}
+
 public struct GoStorageInfo: Decodable, Sendable {
     public let StorageType: UInt16
     public let FilesystemType: UInt16

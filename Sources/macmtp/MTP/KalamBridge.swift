@@ -623,6 +623,15 @@ public actor KalamBridge {
         return data
     }
 
+    public func discoverMTPDevices() async throws -> [MTPDeviceSelector] {
+        let result: GoMTPDevicesResult = try await executeMTP(operationName: "discover_mtp_devices") {
+            DiscoverMTPDevices()
+        }
+        return result.data.map {
+            MTPDeviceSelector(vendorId: $0.vendorId, productId: $0.productId, serialNumber: "")
+        }
+    }
+
     public func fetchStorages() async throws -> [GoStorageData] {
         let result: GoStoragesResult = try await executeMTP(operationName: "fetch_storages") {
             FetchStorages()

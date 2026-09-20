@@ -1,6 +1,6 @@
 import Foundation
 
-public struct MTPDeviceSelector: Encodable, Sendable, Equatable {
+public struct MTPDeviceSelector: Encodable, Sendable, Equatable, Hashable {
     public let vendorId: UInt16
     public let productId: UInt16
     public let serialNumber: String
@@ -15,6 +15,7 @@ public struct MTPDeviceSelector: Encodable, Sendable, Equatable {
 /// The directory coordinator depends on this narrow bridge contract so native
 /// transport behavior can be tested without a connected handset.
 protocol MTPBridge: Sendable {
+    func discoverMTPDevices() async throws -> [MTPDeviceSelector]
     func initialize(selector: MTPDeviceSelector) async throws -> GoDeviceInfoData
     func fetchStorages() async throws -> [GoStorageData]
     func dispose() async throws
