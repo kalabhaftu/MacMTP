@@ -65,9 +65,12 @@ func (d *Device) AndroidSendPartialObject(handle uint32, offset int64, size uint
 	// MtpServer.cpp is buggy: it uses write() without offset
 	// rather than pwrite to send the data for data coming with
 	// the header packet
+	orig := d.SeparateHeader
 	d.SeparateHeader = true
+	defer func() {
+		d.SeparateHeader = orig
+	}()
 	err := d.RunTransaction(&req, &rep, nil, r, int64(size), EmptyProgressFunc)
-	d.SeparateHeader = false
 	return err
 }
 

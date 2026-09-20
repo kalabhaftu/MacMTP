@@ -201,6 +201,16 @@ func (d *Device) SendObjectInfo(wantStorageID, wantParent uint32, info *ObjectIn
 func (d *Device) SendObject(r io.Reader, size int64, progressCb ProgressFunc) error {
 	var req, rep Container
 	req.Code = OC_SendObject
+
+	// Android MtpServer.cpp and Linux FunctionFS require 512-byte packet alignment.
+	// Sending the 12-byte MTP header separately ensures the data payload begins
+	// at offset 0, avoiding unaligned writes that cause transfer stalls and USB bus resets.
+	orig := d.SeparateHeader
+	d.SeparateHeader = true
+	defer func() {
+		d.SeparateHeader = orig
+	}()
+
 	return d.RunTransaction(&req, &rep, nil, r, size, progressCb)
 }
 

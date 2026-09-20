@@ -393,7 +393,7 @@ func UploadFiles(dev *mtp.Device, storageId uint32, sources []string, destinatio
 						// if the parent path DOES NOT Exists within the [destinationFilesDict] create a new directory using costlier [MakeDirectory] method
 						// this is a fallback situation
 					} else {
-						objId, err := MakeDirectory(dev, storageId, _destination)
+						objId, err := MakeDirectory(dev, storageId, destinationFilePath)
 						if err != nil {
 							return err
 						}
@@ -432,86 +432,95 @@ func UploadFiles(dev *mtp.Device, storageId uint32, sources []string, destinatio
 				if err != nil {
 					return InvalidPathError{error: err}
 				}
-				defer fileBuf.Close()
 
-				var compressedSize uint32
+				uploadErr := func() error {
+					defer fileBuf.Close()
 
-				// assign compressedSize of the file
-				if size > 0xFFFFFFFF {
-					compressedSize = 0xFFFFFFFF
-				} else {
-					compressedSize = uint32(size)
+					var compressedSize uint32
+
+					// assign compressedSize of the file
+					if size > 0xFFFFFFFF {
+						compressedSize = 0xFFFFFFFF
+					} else {
+						compressedSize = uint32(size)
+					}
+
+					fObj := mtp.ObjectInfo{
+						StorageID:        storageId,
+						ObjectFormat:     mtp.OFC_Undefined,
+						ParentObject:     fileParentId,
+						Filename:         name,
+						CompressedSize:   compressedSize,
+						ModificationDate: fInfo.ModTime(),
+					}
+
+					// keep track of [bulkFilesSent]
+					bulkFilesSent += 1
+
+					pInfo.FileInfo = &FileInfo{
+						Info:       &fObj,
+						Size:       size,
+						IsDir:      isDir,
+						ModTime:    fObj.ModificationDate,
+						Name:       fObj.Filename,
+						FullPath:   destinationFilePath,
+						ParentPath: destinationParentPath,
+						Extension:  extension(fObj.Filename, isDir),
+						ParentId:   fObj.ParentObject,
+					}
+					pInfo.LatestSentTime = time.Now()
+
+					// create file
+					var prevSentSize int64 = 0
+					objId, err := handleMakeFile(
+						dev, storageId, &fObj, &fInfo, fileBuf,
+						true,
+						func(total, sent int64, objId uint32, err error) error {
+							if err != nil {
+								return err
+							}
+
+							pInfo.FileInfo.ObjectId = objId
+							pInfo.ActiveFileSize.Total = total
+							pInfo.ActiveFileSize.Sent = sent
+							pInfo.ActiveFileSize.Progress = Percent(float32(sent), float32(total))
+
+							chunkSize := sent - prevSentSize
+							bulkSizeSent += chunkSize
+
+							pInfo.BulkFileSize.Sent = bulkSizeSent
+							pInfo.BulkFileSize.Progress = Percent(float32(bulkSizeSent), float32(totalSize))
+
+							pInfo.Speed = transferRate(chunkSize, pInfo.LatestSentTime)
+							if err = progressCb(&pInfo, nil); err != nil {
+								return err
+							}
+
+							pInfo.LatestSentTime = time.Now()
+							prevSentSize = sent
+
+							return nil
+						},
+					)
+
+					if err != nil {
+						return err
+					}
+
+					pInfo.FilesSent = bulkFilesSent
+					pInfo.FilesSentProgress = Percent(float32(bulkFilesSent), float32(totalFiles))
+
+					pInfo.FileInfo.ObjectId = objId
+
+					// append the current objectId to [destinationFilesDict]
+					destinationFilesDict[destinationFilePath] = objId
+
+					return nil
+				}()
+
+				if uploadErr != nil {
+					return uploadErr
 				}
-
-				fObj := mtp.ObjectInfo{
-					StorageID:        storageId,
-					ObjectFormat:     mtp.OFC_Undefined,
-					ParentObject:     fileParentId,
-					Filename:         name,
-					CompressedSize:   compressedSize,
-					ModificationDate: fInfo.ModTime(),
-				}
-
-				// keep track of [bulkFilesSent]
-				bulkFilesSent += 1
-
-				pInfo.FileInfo = &FileInfo{
-					Info:       &fObj,
-					Size:       size,
-					IsDir:      isDir,
-					ModTime:    fObj.ModificationDate,
-					Name:       fObj.Filename,
-					FullPath:   destinationFilePath,
-					ParentPath: destinationParentPath,
-					Extension:  extension(fObj.Filename, isDir),
-					ParentId:   fObj.ParentObject,
-				}
-				pInfo.LatestSentTime = time.Now()
-
-				// create file
-				var prevSentSize int64 = 0
-				objId, err := handleMakeFile(
-					dev, storageId, &fObj, &fInfo, fileBuf,
-					true,
-					func(total, sent int64, objId uint32, err error) error {
-						if err != nil {
-							return err
-						}
-
-						pInfo.FileInfo.ObjectId = objId
-						pInfo.ActiveFileSize.Total = total
-						pInfo.ActiveFileSize.Sent = sent
-						pInfo.ActiveFileSize.Progress = Percent(float32(sent), float32(total))
-
-						chunkSize := sent - prevSentSize
-						bulkSizeSent += chunkSize
-
-						pInfo.BulkFileSize.Sent = bulkSizeSent
-						pInfo.BulkFileSize.Progress = Percent(float32(bulkSizeSent), float32(totalSize))
-
-						pInfo.Speed = transferRate(chunkSize, pInfo.LatestSentTime)
-						if err = progressCb(&pInfo, nil); err != nil {
-							return err
-						}
-
-						pInfo.LatestSentTime = time.Now()
-						prevSentSize = sent
-
-						return nil
-					},
-				)
-
-				if err != nil {
-					return err
-				}
-
-				pInfo.FilesSent = bulkFilesSent
-				pInfo.FilesSentProgress = Percent(float32(bulkFilesSent), float32(totalFiles))
-
-				pInfo.FileInfo.ObjectId = objId
-
-				// append the current objectId to [destinationFilesDict]
-				destinationFilesDict[destinationFilePath] = objId
 
 				return nil
 			},
