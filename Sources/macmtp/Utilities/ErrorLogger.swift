@@ -92,6 +92,7 @@ public struct ErrorLogger {
                 scope.setExtra(value: value, key: key)
             }
         }
+        flushCapturedEvents()
     }
 
     public static func logMessage(_ message: String, level: SentryLevel = .error, userInfo: [String: Any]? = nil) {
@@ -122,6 +123,7 @@ public struct ErrorLogger {
         SentrySDK.capture(event: event) { scope in
             setContextTags(extras, on: scope)
         }
+        flushCapturedEvents()
     }
 
     static func shouldCaptureMessage(_ level: SentryLevel) -> Bool {
@@ -296,6 +298,12 @@ public struct ErrorLogger {
             }
         }
         return SentrySDK.isEnabled
+    }
+
+    private static func flushCapturedEvents() {
+        DispatchQueue.global(qos: .utility).async {
+            SentrySDK.flush(timeout: 2)
+        }
     }
 
     private static func sanitizedExtras(_ extras: [String: Any]?) -> [String: Any] {

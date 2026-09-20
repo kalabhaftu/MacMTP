@@ -390,6 +390,8 @@ func (d *Device) RunTransaction(req *Container, rep *Container,
 		if ok1 || ok2 {
 			operation := getName(OC_names, int(req.Code))
 			log.Printf("fatal error operation=%s code=0x%x transaction=0x%x: %v; closing connection.", operation, req.Code, req.TransactionID, err)
+			// The USB link is already broken; skip a second CloseSession transaction.
+			d.session = nil
 			d.Close()
 		}
 		return err
@@ -526,13 +528,13 @@ func (d *Device) dataPrint(ep byte, data []byte) {
 	hexDump(data)
 }
 
-// The linux usb stack can send 16kb per call, according to libusb.
-const rwBufSize = 0x4000
-
 // bulkWrite returns the number of non-header bytes written.
 func (d *Device) bulkWrite(hdr *usbBulkHeader, r io.Reader, size int64, req *Container, progressCb ProgressFunc) (n int64, err error) {
 	totalSize := size
 	packetSize := d.sendMaxPacketSize()
+	if packetSize <= 0 {
+		return 0, fmt.Errorf("invalid USB bulk OUT packet size %d", packetSize)
+	}
 	if hdr != nil {
 		if size+usbHdrLen > 0xFFFFFFFF {
 			hdr.Length = 0xFFFFFFFF
@@ -569,7 +571,9 @@ func (d *Device) bulkWrite(hdr *usbBulkHeader, r io.Reader, size int64, req *Con
 		}
 	}
 
-	var buf [rwBufSize]byte
+	// ponytail: one endpoint packet per libusb write; slower, but avoids Android
+	// firmware that stalls when a single OUT transfer spans multiple USB packets.
+	buf := make([]byte, packetSize)
 	var lastTransfer int
 
 	for size > 0 {
@@ -608,6 +612,8 @@ func (d *Device) bulkWrite(hdr *usbBulkHeader, r io.Reader, size int64, req *Con
 
 	return n, err
 }
+
+const rwBufSize = 0x4000
 
 func (d *Device) bulkRead(w io.Writer, progressCb ProgressFunc) (n int64, lastPacket []byte, err error) {
 	var buf [rwBufSize]byte

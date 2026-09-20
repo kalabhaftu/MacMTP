@@ -36,23 +36,7 @@ struct DroppedFile {
             }
         }
 
-        // 2. Check NSFilenamesPboardType
-        if let filenames = pasteboard.propertyList(forType: NSPasteboard.PasteboardType("NSFilenamesPboardType")) as? [String] {
-            for path in filenames {
-                guard !seenPaths.contains(path) else { continue }
-                seenPaths.insert(path)
-                var isDir: ObjCBool = false
-                let exists = FileManager.default.fileExists(atPath: path, isDirectory: &isDir)
-                guard exists else { continue }
-                let name = (path as NSString).lastPathComponent
-                collected.append(DroppedFile(path: path, isLocal: true, name: name, isDirectory: isDir.boolValue))
-            }
-            if !collected.isEmpty {
-                return collected
-            }
-        }
-
-        // 3. Check file URLs
+        // 2. Check file URLs
         if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [
             .urlReadingFileURLsOnly: true
         ]) as? [URL] {

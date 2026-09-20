@@ -480,8 +480,7 @@ final class FileBrowserHostView: NSView {
             table.registerForDraggedTypes([
                 .fileURL,
                 .string,
-                NSPasteboard.PasteboardType(UTType.utf8PlainText.identifier),
-                NSPasteboard.PasteboardType("NSFilenamesPboardType")
+                NSPasteboard.PasteboardType(UTType.utf8PlainText.identifier)
             ])
             table.setDraggingSourceOperationMask(.copy, forLocal: false)
             table.setDraggingSourceOperationMask(.copy, forLocal: true)
@@ -521,8 +520,7 @@ final class FileBrowserHostView: NSView {
             collection.registerForDraggedTypes([
                 .fileURL,
                 .string,
-                NSPasteboard.PasteboardType(UTType.utf8PlainText.identifier),
-                NSPasteboard.PasteboardType("NSFilenamesPboardType")
+                NSPasteboard.PasteboardType(UTType.utf8PlainText.identifier)
             ])
             collection.setDraggingSourceOperationMask(.copy, forLocal: false)
             collection.setDraggingSourceOperationMask(.copy, forLocal: true)
@@ -918,13 +916,10 @@ final class AppKitFilePasteboardWriter: NSObject, NSPasteboardWriting {
     }
 
     func writableTypes(for pasteboard: NSPasteboard) -> [NSPasteboard.PasteboardType] {
-        var types: [NSPasteboard.PasteboardType] = [
+        let types: [NSPasteboard.PasteboardType] = [
             .string,
             NSPasteboard.PasteboardType(UTType.utf8PlainText.identifier)
         ]
-        if isLocal {
-            types.append(NSPasteboard.PasteboardType("NSFilenamesPboardType"))
-        }
         return types
     }
 
@@ -933,9 +928,6 @@ final class AppKitFilePasteboardWriter: NSObject, NSPasteboardWriting {
             return files.map {
                 "\(isLocal ? "local" : "mtp"):\($0.isDirectory ? "dir" : "file"):\($0.path)"
             }.joined(separator: "\n")
-        }
-        if type == NSPasteboard.PasteboardType("NSFilenamesPboardType") {
-            return files.map(\.path)
         }
         return nil
     }
