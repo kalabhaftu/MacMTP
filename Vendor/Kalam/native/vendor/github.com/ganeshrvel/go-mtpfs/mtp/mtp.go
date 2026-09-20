@@ -388,7 +388,8 @@ func (d *Device) RunTransaction(req *Container, rep *Container,
 		_, ok2 := err.(SyncError)
 		_, ok1 := err.(usb.Error)
 		if ok1 || ok2 {
-			log.Printf("fatal error %v; closing connection.", err)
+			operation := getName(OC_names, int(req.Code))
+			log.Printf("fatal error operation=%s code=0x%x transaction=0x%x: %v; closing connection.", operation, req.Code, req.TransactionID, err)
 			d.Close()
 		}
 		return err
@@ -415,6 +416,7 @@ func (d *Device) runTransaction(req *Container, rep *Container,
 		if d.MTPDebug {
 			log.Printf("MTP sendreq failed: %v\n", err)
 		}
+		log.Printf("MTP operation=%s phase=command-send: %v", getName(OC_names, int(req.Code)), err)
 		return err
 	}
 
@@ -428,6 +430,7 @@ func (d *Device) runTransaction(req *Container, rep *Container,
 
 		_, err := d.bulkWrite(&hdr, src, writeSize, req, progressCb)
 		if err != nil {
+			log.Printf("MTP operation=%s phase=data-send: %v", getName(OC_names, int(req.Code)), err)
 			return err
 		}
 	}
@@ -436,6 +439,7 @@ func (d *Device) runTransaction(req *Container, rep *Container,
 	h := &usbBulkHeader{}
 	rest, n, err := d.fetchPacket(data[:], h)
 	if err != nil {
+		log.Printf("MTP operation=%s phase=response-read: %v", getName(OC_names, int(req.Code)), err)
 		return err
 	}
 	var unexpectedData bool
@@ -586,6 +590,9 @@ func (d *Device) bulkWrite(hdr *usbBulkHeader, r io.Reader, size int64, req *Con
 		n += int64(lastTransfer)
 
 		if err != nil || lastTransfer == 0 {
+			if err != nil {
+				log.Printf("MTP operation=%s phase=data-payload sent=%d requested=%d: %v", getName(OC_names, int(req.Code)), n, m, err)
+			}
 			break
 		}
 

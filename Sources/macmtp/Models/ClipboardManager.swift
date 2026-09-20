@@ -161,9 +161,9 @@ public final class ClipboardManager: ObservableObject {
         let textPayload = items.map {
             "\(isLocal ? "local" : "mtp"):\($0.isDirectory ? "dir" : "file"):\($0.path)"
         }.joined(separator: "\n")
-        pasteboard.setString(textPayload, forType: .string)
         if isLocal {
-            pasteboard.setPropertyList(items.map(\.path), forType: NSPasteboard.PasteboardType("NSFilenamesPboardType"))
+            _ = pasteboard.writeObjects(items.map { URL(fileURLWithPath: $0.path) as NSURL })
         }
+        pasteboard.setString(textPayload, forType: .string)
     }
 }

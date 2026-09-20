@@ -114,6 +114,14 @@ public final class FileTransferService: ObservableObject {
                 )
                 return false
             }
+            guard MTPDeviceManager.shared.isConnected else {
+                ErrorLogger.logMessage(
+                    "Rejected MTP transfer because the device session is not connected.",
+                    level: .warning,
+                    userInfo: ["operation": "transfer", "connection_state": "disconnected"]
+                )
+                return false
+            }
         }
 
         guard !sources.isEmpty else {
@@ -204,6 +212,9 @@ public final class FileTransferService: ObservableObject {
         }
         
         guard let mStorageId = storageId, mStorageId != 0 else {
+            throw KalamError.deviceNotConnected
+        }
+        guard MTPDeviceManager.shared.isConnected else {
             throw KalamError.deviceNotConnected
         }
         
