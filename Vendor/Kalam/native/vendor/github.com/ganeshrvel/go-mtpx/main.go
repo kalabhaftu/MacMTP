@@ -46,6 +46,13 @@ func Dispose(dev *mtp.Device) error {
 	return dev.Close()
 }
 
+func Abort(dev *mtp.Device) error {
+	if dev == nil {
+		return nil
+	}
+	return dev.Abort()
+}
+
 // FetchDeviceInfo - fetch device Info
 func FetchDeviceInfo(dev *mtp.Device) (*mtp.DeviceInfo, error) {
 	info := mtp.DeviceInfo{}

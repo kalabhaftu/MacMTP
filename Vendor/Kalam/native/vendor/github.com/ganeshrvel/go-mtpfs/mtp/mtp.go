@@ -129,6 +129,13 @@ func (d *Device) Close() error {
 	return err
 }
 
+// Abort closes the transport without sending another MTP command. Use after a
+// cancelled data phase, where the device may still have an incomplete packet.
+func (d *Device) Abort() error {
+	d.session = nil
+	return d.Close()
+}
+
 // Done releases the libusb device reference.
 func (d *Device) Done() {
 	d.dev.Unref()
@@ -600,7 +607,11 @@ func (d *Device) bulkWrite(hdr *usbBulkHeader, r io.Reader, size int64, req *Con
 		}
 	}
 
-	buf := make([]byte, packetSize)
+	payloadChunkSize := packetSize
+	if d.SeparateHeader {
+		payloadChunkSize = rwBufSize
+	}
+	buf := make([]byte, payloadChunkSize)
 	var lastPayloadSize int64
 
 	for size > 0 {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"github.com/ganeshrvel/go-mtpfs/mtp"
 	"github.com/ganeshrvel/go-mtpx"
@@ -481,6 +482,9 @@ func UploadFiles(uploadFilesInputJson *C.char) {
 			return nil
 		})
 	if err != nil {
+		if errors.Is(err, mtpx.ErrTransferCancelled) {
+			_ = _abort()
+		}
 		send_to_js.SendTransferError(err)
 
 		return
@@ -580,6 +584,9 @@ func DownloadFiles(downloadFilesInputJson *C.char) {
 			return nil
 		})
 	if err != nil {
+		if errors.Is(err, mtpx.ErrTransferCancelled) {
+			_ = _abort()
+		}
 		send_to_js.SendTransferError(err)
 
 		return

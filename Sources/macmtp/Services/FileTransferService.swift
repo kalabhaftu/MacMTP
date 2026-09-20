@@ -69,7 +69,6 @@ public final class FileTransferService: ObservableObject {
         bridge.cancelTransfer()
         if let batch = activeBatch {
             batch.cancel()
-            activeBatch = nil
         }
         
         if let continuation = conflictContinuation {

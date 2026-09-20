@@ -53,7 +53,7 @@ func concurrentTransferRequestsAreRejectedWithoutStartingAnotherBatch() {
 }
 
 @Test @MainActor
-func cancellingTransferHidesThePublishedBatchImmediately() {
+func cancellingTransferKeepsBatchVisibleUntilNativeCancellationReturns() {
     let service = FileTransferService.shared
     let batch = TransferBatch()
     service.activeBatch = batch
@@ -62,5 +62,5 @@ func cancellingTransferHidesThePublishedBatchImmediately() {
     service.cancelTransfer()
 
     #expect(batch.state == .cancelled)
-    #expect(service.activeBatch == nil)
+    #expect(service.activeBatch === batch)
 }

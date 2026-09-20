@@ -197,6 +197,16 @@ func _dispose() error {
 	return mtpx.Dispose(dev)
 }
 
+func _abort() error {
+	dev := container.dev
+	container.dev = nil
+	container.deviceInfo = nil
+	if dev == nil {
+		return nil
+	}
+	return mtpx.Abort(dev)
+}
+
 func lockMtp() {
 	mtpOperationMu.Lock()
 }

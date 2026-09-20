@@ -79,7 +79,12 @@ func isUSBClaimError(err error) bool {
 	return strings.Contains(details, "LIBUSB_ERROR_ACCESS") ||
 		strings.Contains(details, "LIBUSB_ERROR_BUSY") ||
 		strings.Contains(details, "LIBUSB_ERROR_NOT_FOUND") ||
-		strings.Contains(details, "LIBUSB_ERROR_NO_DEVICE")
+		strings.Contains(details, "LIBUSB_ERROR_NO_DEVICE") ||
+		strings.Contains(details, "LIBUSB_ERROR_TIMEOUT")
+}
+
+func isMTPDeviceDescriptor(descriptor usb.DeviceDescriptor) bool {
+	return descriptor.DeviceClass == usb.CLASS_PER_INTERFACE
 }
 
 func selectorMatches(selector DeviceSelector, vendorID, productID uint16, serialNumber string) bool {
@@ -107,6 +112,9 @@ func hasMTPDataEndpoints(endpoints []usb.EndpointDescriptor) bool {
 func candidateFromDeviceDescriptor(d *usb.Device) *Device {
 	dd, err := d.GetDeviceDescriptor()
 	if err != nil {
+		return nil
+	}
+	if !isMTPDeviceDescriptor(*dd) {
 		return nil
 	}
 	for i := byte(0); i < dd.NumConfigurations; i++ {
