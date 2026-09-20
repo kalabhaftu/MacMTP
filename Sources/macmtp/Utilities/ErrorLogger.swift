@@ -63,7 +63,7 @@ public struct ErrorLogger {
             .compactMap { $0 }
             .map(sanitize)
             .joined(separator: ": ")
-        systemLogger.error("\(reportDescription, privacy: .private)")
+        systemLogger.error("\(reportDescription, privacy: .public)")
 
         guard ensureStarted() else { return }
         guard shouldReport(error) else { return }
@@ -105,7 +105,7 @@ public struct ErrorLogger {
         case .none: logLevel = .default
         @unknown default: logLevel = .error
         }
-        systemLogger.log(level: logLevel, "\(sanitizedMessage, privacy: .private)")
+        systemLogger.log(level: logLevel, "\(sanitizedMessage, privacy: .public)")
         guard ensureStarted() else { return }
 
         let extras = sanitizedExtras(userInfo)
@@ -246,8 +246,19 @@ public struct ErrorLogger {
         case .operationFailed(let message)
             where message.localizedCaseInsensitiveContains("no MTP devices found"):
             return false
-        case .nativeOperationFailed(_, let errorType, let message):
+        case .nativeOperationFailed(let operation, let errorType, let message):
             let normalized = "\(errorType ?? "") \(message)".lowercased()
+            let isTransferOp = operation.lowercased().contains("transfer")
+                || operation.lowercased().contains("upload")
+                || operation.lowercased().contains("download")
+
+            if isTransferOp {
+                // For active transfers, only filter out intentional user cancellations.
+                // Timeouts, pipe errors, and bus resets during an active transfer are real failures.
+                return !normalized.contains("errorcancel")
+                    && !normalized.contains("transfer cancelled")
+            }
+
             return !normalized.contains("no mtp devices found")
                 && !normalized.contains("errormtpdetectfailed")
                 && !normalized.contains("errormultipledevice")

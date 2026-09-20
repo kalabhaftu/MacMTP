@@ -10,9 +10,6 @@ import (
 	"time"
 )
 
-// todo: work on documentations
-// todo: hotplug
-
 // initialize the mtp device
 // returns mtp device
 func Initialize(init Init) (*mtp.Device, error) {

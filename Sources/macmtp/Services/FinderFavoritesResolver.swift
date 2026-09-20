@@ -63,6 +63,23 @@ public struct FinderFavoritesResolver {
             ))
         }
 
+        var nameCounts: [String: Int] = [:]
+        for item in results {
+            nameCounts[item.name, default: 0] += 1
+        }
+        if nameCounts.values.contains(where: { $0 > 1 }) {
+            results = results.map { item in
+                if nameCounts[item.name, default: 0] > 1 {
+                    let parent = (item.path as NSString).deletingLastPathComponent
+                    let parentName = FileManager.default.displayName(atPath: parent)
+                    var disambiguated = item
+                    disambiguated.name = "\(item.name) (\(parentName))"
+                    return disambiguated
+                }
+                return item
+            }
+        }
+
         return results
     }
 

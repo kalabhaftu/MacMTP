@@ -267,9 +267,7 @@ async function runPrerequisites({ bottles }) {
         `[${bottlePath.identifier}] fixing the rpath in the libusb-1.0.0.dylib...\n`
       );
 
-      // todo: FIXME
-      //  strangely the `install_name_tool` command doesnt work on a macos monterey dylib file
-      await $`install_name_tool -id ${bottlePath.rpath} ${bottlePath.libusbDylib}`;
+      await $`install_name_tool -id ${bottlePath.rpath} ${bottlePath.libusbDylibInBuildDir}`;
     } else {
       console.info(
         `skipping the processing of the libusb dylib which was downloaded from the custom file path`

@@ -361,6 +361,10 @@ public final class FileTransferService: ObservableObject {
                     itm.markFailed(formattedErr)
                     batch.items[idx] = itm
                 }
+                if isMTPTransportFailure(error) {
+                    terminalTransferError = error
+                    break queueLoop
+                }
                 continue
             }
             
@@ -452,11 +456,26 @@ public final class FileTransferService: ObservableObject {
                         break queueLoop
                     }
 
-                    if shouldReportMTPTransportFailure(
+                    let isUnexpectedFailure = !error.localizedDescription.lowercased().contains("libusb_error_no_device")
+                        && !error.localizedDescription.lowercased().contains("device not connected")
+                    let shouldReport = shouldReportMTPTransportFailure(
                         error,
                         connectionIsActive: MTPDeviceManager.shared.isConnected
-                    ) {
-                        ErrorLogger.log(error, message: "FileTransferService: File copy failed for chunk")
+                    ) || isUnexpectedFailure
+
+                    if shouldReport {
+                        ErrorLogger.log(
+                            error,
+                            message: "FileTransferService: File copy failed for chunk",
+                            userInfo: [
+                                "operation": "transfer",
+                                "total_files": batch.totalFileCount,
+                                "completed_files": batch.completedFileCount,
+                                "bytes_transferred": batch.totalBytesTransferred,
+                                "connection_active": MTPDeviceManager.shared.isConnected,
+                                "native_error_type": nativeErrorType(for: error)
+                            ]
+                        )
                     } else {
                         ErrorLogger.logMessage(
                             "MTP transfer stopped after the Android device disconnected",
@@ -505,6 +524,15 @@ public final class FileTransferService: ObservableObject {
                 title: "Transfer Cancelled",
                 body: "\(batch.completedFileCount) of \(batch.totalFileCount) files copied\(completed)",
                 isError: false
+            )
+        } else if let terminalTransferError {
+            batch.complete()
+            let title = batch.completedFileCount == 0 ? "Transfer Failed" : "Transfer Aborted"
+            let errorDetail = formatTransferError(terminalTransferError)
+            postTransferNotification(
+                title: title,
+                body: "\(batch.completedFileCount) of \(batch.totalFileCount) files copied. \(errorDetail)",
+                isError: true
             )
         } else {
             let failedCount = batch.failedFileCount
@@ -662,7 +690,7 @@ public final class FileTransferService: ObservableObject {
             if let enumerator = fileManager.enumerator(
                 at: rootURL,
                 includingPropertiesForKeys: keys,
-                options: [.skipsPackageDescendants],
+                options: [.skipsPackageDescendants, .skipsHiddenFiles],
                 errorHandler: { _, _ in true }
             ) {
                 for case let fileURL as URL in enumerator {
@@ -671,6 +699,9 @@ public final class FileTransferService: ObservableObject {
                         continue
                     }
                     if fileURL.path.count > PathValidation.maxPathLength {
+                        continue
+                    }
+                    if fileURL.lastPathComponent.hasPrefix(".") {
                         continue
                     }
                     let subRel = getRelativePath(path: fileURL.path, baseParent: baseParent)

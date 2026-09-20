@@ -118,6 +118,7 @@ struct SidebarView: View {
         .onAppear {
             refreshFavorites()
             refreshVolumes()
+            syncSelection(with: currentLocalPath)
             startVolumeRefreshTimer()
         }
         .onDisappear {
@@ -125,6 +126,9 @@ struct SidebarView: View {
         }
         .onChange(of: selectedItem) { _, newItem in
             handleSelection(newItem)
+        }
+        .onChange(of: currentLocalPath) { _, newPath in
+            syncSelection(with: newPath)
         }
     }
     
@@ -162,6 +166,11 @@ struct SidebarView: View {
             }
         }
         .padding(.vertical, 2)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            selectedItem = item.id
+            currentLocalPath = item.path
+        }
         .tag(item.id)
     }
     
@@ -262,6 +271,20 @@ struct SidebarView: View {
         if let matched = volumes.first(where: { $0.id == itemId }) {
             currentLocalPath = matched.path
             return
+        }
+    }
+
+    private func syncSelection(with path: String) {
+        if let matched = quickLinks.first(where: { $0.path == path }) {
+            if selectedItem != matched.id {
+                selectedItem = matched.id
+            }
+        } else if let matched = volumes.first(where: { $0.path == path }) {
+            if selectedItem != matched.id {
+                selectedItem = matched.id
+            }
+        } else {
+            selectedItem = nil
         }
     }
     

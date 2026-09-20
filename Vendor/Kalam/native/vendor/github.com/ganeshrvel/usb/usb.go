@@ -306,12 +306,44 @@ func (e *EndpointDescriptor) String() string {
 		tDir = "in"
 	}
 
-	// TODO - print isochronous data too.
 	s := fmt.Sprintf("ep num %x dir %s ttype %s maxpacket %d",
 		e.Number(), tDir, transferTypeString(e.TransferType()),
 		e.MaxPacketSize)
+	if e.TransferType() == TRANSFER_TYPE_ISOCHRONOUS {
+		s += fmt.Sprintf(" sync %s usage %s",
+			isoSyncTypeString((e.Attributes>>2)&0x3),
+			isoUsageTypeString((e.Attributes>>4)&0x3))
+	}
 
 	return s
+}
+
+func isoSyncTypeString(value byte) string {
+	switch value {
+	case ISO_SYNC_TYPE_NONE:
+		return "none"
+	case ISO_SYNC_TYPE_ASYNC:
+		return "async"
+	case ISO_SYNC_TYPE_ADAPTIVE:
+		return "adaptive"
+	case ISO_SYNC_TYPE_SYNC:
+		return "sync"
+	default:
+		return "unknown"
+	}
+}
+
+func isoUsageTypeString(value byte) string {
+	switch value {
+	case ISO_USAGE_TYPE_DATA:
+		return "data"
+	case ISO_USAGE_TYPE_FEEDBACK:
+		return "feedback"
+	case ISO_USAGE_TYPE_IMPLICIT:
+		return "implicit"
+	default:
+		return "unknown"
+	}
 }
 
 func byteArrToSlice(a *C.uchar, n C.int) []byte {
