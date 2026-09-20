@@ -28,6 +28,7 @@ require_pattern 'func BeginTransfer' "$KALAM_SOURCE"
 require_pattern 'func CancelTransfer' "$KALAM_SOURCE"
 require_pattern 'func SetOperationID' "$KALAM_SOURCE"
 require_pattern 'func Initialize\(inputJSON \*C.char\)' "$KALAM_SOURCE"
+require_pattern 'func DiscoverMTPDevices' "$KALAM_SOURCE"
 require_pattern 'ErrorTransferCancelled' "$ROOT_DIR/Vendor/Kalam/native/send_to_js/enums.go"
 
 echo "Verified native collection and mutation response contract."
