@@ -184,20 +184,24 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         }
         
         knownDeviceIdentities.formUnion(identities)
-        availableDeviceIdentities = connectedDeviceIdentities()
+        let allDeviceIdentities = connectedDeviceIdentities()
+        availableDeviceIdentities = allDeviceIdentities.filter {
+            PTPConflictDetector.knownAndroidVendorIDs.contains($0.vendorID)
+        }
         MTPConnectionCoordinator.shared.updateAvailableDevices(
             availableDeviceIdentities,
             startAutomatically: UserDefaults.standard.object(forKey: "autoDetectDevice") as? Bool ?? true
         )
-        guard !identities.isEmpty else { return }
         ErrorLogger.logMessage(
             "USB device availability changed",
             level: .info,
             userInfo: [
                 "event": "usb_scan",
-                "state": "device_found",
+                "state": availableDeviceIdentities.isEmpty ? "usb_absent" : "device_found",
                 "initial_scan": isInitialScan,
-                "device_count": availableDeviceIdentities.count
+                "usb_device_count": allDeviceIdentities.count,
+                "android_device_count": availableDeviceIdentities.count,
+                "usb_vendor_ids": Array(Set(allDeviceIdentities.map(\.vendorID))).sorted()
             ]
         )
     }
@@ -215,7 +219,10 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         guard !isInitialScan else { return }
         
         try? await Task.sleep(nanoseconds: 150_000_000)
-        availableDeviceIdentities = connectedDeviceIdentities()
+        let allDeviceIdentities = connectedDeviceIdentities()
+        availableDeviceIdentities = allDeviceIdentities.filter {
+            PTPConflictDetector.knownAndroidVendorIDs.contains($0.vendorID)
+        }
         knownDeviceIdentities = availableDeviceIdentities
         MTPConnectionCoordinator.shared.updateAvailableDevices(
             availableDeviceIdentities,
@@ -227,7 +234,9 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
             userInfo: [
                 "event": "usb_scan",
                 "state": availableDeviceIdentities.isEmpty ? "usb_absent" : "device_found",
-                "device_count": availableDeviceIdentities.count
+                "usb_device_count": allDeviceIdentities.count,
+                "android_device_count": availableDeviceIdentities.count,
+                "usb_vendor_ids": Array(Set(allDeviceIdentities.map(\.vendorID))).sorted()
             ]
         )
     }
@@ -257,7 +266,13 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
     }
 
     public func getConnectedAndroidVendorIDs() -> [UInt16] {
-        Array(Set(connectedDeviceIdentities().map(\.vendorID))).sorted()
+        Array(Set(androidDeviceIdentities().map(\.vendorID))).sorted()
+    }
+
+    private func androidDeviceIdentities() -> Set<USBDeviceIdentity> {
+        connectedDeviceIdentities().filter {
+            PTPConflictDetector.knownAndroidVendorIDs.contains($0.vendorID)
+        }
     }
 
     private func connectedDeviceIdentities() -> Set<USBDeviceIdentity> {

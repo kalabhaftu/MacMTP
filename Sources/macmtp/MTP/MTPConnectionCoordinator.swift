@@ -59,6 +59,13 @@ final class MTPConnectionCoordinator: ObservableObject {
             state = .connected
             return
         }
+        guard devices.count == 1 else {
+            state = .failed(
+                message: "Multiple Android devices detected. Disconnect all but one device, then Retry.",
+                technicalDetails: "Detected \(devices.count) Android USB devices."
+            )
+            return
+        }
         guard startAutomatically else {
             state = .deviceFound
             return
@@ -90,6 +97,7 @@ final class MTPConnectionCoordinator: ObservableObject {
 
     private func startConnection() {
         guard connectionTask == nil,
+              availableDevices.count == 1,
               let identity = availableDevices.first else { return }
 
         let token = generation

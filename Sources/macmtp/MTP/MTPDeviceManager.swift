@@ -130,7 +130,7 @@ public final class MTPDeviceManager: ObservableObject {
                 || errLower.contains("libusb_error_not_found")
 
             let isExpectedUserCondition = isNoStorageError || isDeviceNotFound || isMultipleDeviceError
-            canRetryConnection = isMTPTransportFailure(error)
+            canRetryConnection = isMTPTransportFailure(error) && !isDeviceNotFound
             if !isExpectedUserCondition {
                 ErrorLogger.log(
                     error,
@@ -149,7 +149,7 @@ public final class MTPDeviceManager: ObservableObject {
             } else if isNoStorageError {
                 self.errorMessage = "No storage found on device.\n\nPlease unlock your Android phone screen and ensure its USB connection mode is set to \"File Transfer\" (MTP), then click Retry."
             } else if isDeviceNotFound {
-                self.errorMessage = nil
+                self.errorMessage = "Android USB device found, but MTP is unavailable. Unlock the phone and select File Transfer (MTP), then Retry."
             } else {
                 self.errorMessage = "Failed to connect: \(error.localizedDescription)"
             }
