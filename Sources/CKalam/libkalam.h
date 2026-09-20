@@ -96,6 +96,7 @@ extern void BeginTransfer(void);
 extern void CancelTransfer(void);
 extern void SetOperationID(char* id);
 extern void Initialize(char* inputJSON);
+extern void DiscoverMTPDevices(void);
 extern void FetchDeviceInfo(void);
 extern void FetchStorages(void);
 extern void MakeDirectory(char* makeDirectoryInputJson);
