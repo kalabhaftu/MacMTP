@@ -132,6 +132,11 @@ func (d *Device) Close() error {
 // Abort closes the transport without sending another MTP command. Use after a
 // cancelled data phase, where the device may still have an incomplete packet.
 func (d *Device) Abort() error {
+	if d.h != nil {
+		if err := d.h.Reset(); err != nil && d.USBDebug {
+			log.Printf("USB: Reset after abort, err: %v", err)
+		}
+	}
 	d.session = nil
 	return d.Close()
 }
@@ -398,9 +403,8 @@ func (d *Device) RunTransaction(req *Container, rep *Container,
 		if ok1 || ok2 {
 			operation := getName(OC_names, int(req.Code))
 			log.Printf("fatal error operation=%s code=0x%x transaction=0x%x: %v; closing connection.", operation, req.Code, req.TransactionID, err)
-			// The USB link is already broken; skip a second CloseSession transaction.
-			d.session = nil
-			d.Close()
+			// Reset before closing so Android can recover after a stalled response.
+			d.Abort()
 		}
 		return err
 	}
