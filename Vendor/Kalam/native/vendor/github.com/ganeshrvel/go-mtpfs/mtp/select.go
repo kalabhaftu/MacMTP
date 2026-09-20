@@ -23,16 +23,38 @@ func DiscoverDeviceSelectors() ([]DeviceSelector, error) {
 
 	seen := make(map[DeviceSelector]struct{})
 	selectors := make([]DeviceSelector, 0, len(devs))
+	var claimError error
 	for _, candidate := range devs {
+		candidate.MTPDebug = false
+		candidate.USBDebug = false
+		candidate.DataDebug = false
+		if err := candidate.Open(); err != nil {
+			if strings.Contains(err.Error(), "LIBUSB_ERROR_ACCESS") ||
+				strings.Contains(err.Error(), "LIBUSB_ERROR_BUSY") ||
+				strings.Contains(err.Error(), "LIBUSB_ERROR_NOT_FOUND") {
+				claimError = err
+			}
+			candidate.Done()
+			continue
+		}
+		info, err := candidate.GetUsbInfo()
+		candidate.Close()
+		candidate.Done()
+		if err != nil {
+			continue
+		}
 		selector := DeviceSelector{
-			VendorID:  candidate.devDescr.IdVendor,
-			ProductID: candidate.devDescr.IdProduct,
+			VendorID:     info.IdVendor,
+			ProductID:    info.IdProduct,
+			SerialNumber: info.SerialNumber,
 		}
 		if _, exists := seen[selector]; !exists {
 			seen[selector] = struct{}{}
 			selectors = append(selectors, selector)
 		}
-		candidate.Done()
+	}
+	if len(selectors) == 0 && claimError != nil {
+		return nil, fmt.Errorf("MTP interface probe failed: %w", claimError)
 	}
 	return selectors, nil
 }
@@ -42,6 +64,21 @@ func selectorMatches(selector DeviceSelector, vendorID, productID uint16, serial
 		return false
 	}
 	return selector.SerialNumber == "" || selector.SerialNumber == serialNumber
+}
+
+func hasMTPDataEndpoints(endpoints []usb.EndpointDescriptor) bool {
+	var event, inbound, outbound bool
+	for _, endpoint := range endpoints {
+		switch {
+		case endpoint.Direction() == usb.ENDPOINT_IN && endpoint.TransferType() == usb.TRANSFER_TYPE_INTERRUPT:
+			event = true
+		case endpoint.Direction() == usb.ENDPOINT_IN && endpoint.TransferType() == usb.TRANSFER_TYPE_BULK:
+			inbound = true
+		case endpoint.Direction() == usb.ENDPOINT_OUT && endpoint.TransferType() == usb.TRANSFER_TYPE_BULK:
+			outbound = true
+		}
+	}
+	return event && inbound && outbound
 }
 
 func candidateFromDeviceDescriptor(d *usb.Device) *Device {
@@ -56,7 +93,7 @@ func candidateFromDeviceDescriptor(d *usb.Device) *Device {
 		}
 		for _, iface := range cdecs.Interfaces {
 			for _, a := range iface.AltSetting {
-				if len(a.EndPoints) != 3 {
+				if len(a.EndPoints) != 3 || !hasMTPDataEndpoints(a.EndPoints) {
 					continue
 				}
 				m := Device{}

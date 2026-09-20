@@ -47,6 +47,13 @@ func newlyAttachedUSBIdentities(
     return identities.filter { seen.insert($0).inserted }
 }
 
+func usbInventoryChanged(
+    previous: Set<USBDeviceIdentity>,
+    current: Set<USBDeviceIdentity>
+) -> Bool {
+    previous != current
+}
+
 @MainActor
 public final class USBWatcher: ObservableObject, @unchecked Sendable {
     
@@ -65,10 +72,6 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
     
     private init() {}
 
-    var availableSelector: MTPDeviceSelector? {
-        availableDeviceIdentities.first?.selector
-    }
-    
 
     
     
@@ -194,7 +197,7 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
             "USB device availability changed",
             level: .info,
             userInfo: [
-                "event": "usb_scan",
+                "event": "usb_inventory_changed",
                 "state": availableDeviceIdentities.isEmpty ? "usb_absent" : "usb_detected",
                 "initial_scan": isInitialScan,
                 "usb_device_count": availableDeviceIdentities.count,
@@ -227,7 +230,7 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
             "USB device availability changed",
             level: .info,
             userInfo: [
-                "event": "usb_scan",
+                "event": "usb_inventory_changed",
                 "state": availableDeviceIdentities.isEmpty ? "usb_absent" : "usb_detected",
                 "usb_device_count": availableDeviceIdentities.count,
                 "usb_vendor_ids": Array(Set(allDeviceIdentities.map(\.vendorID))).sorted()
@@ -240,12 +243,6 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         let productID = (IORegistryEntryCreateCFProperty(device, "idProduct" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? NSNumber)?.uint16Value
         let locationID = (IORegistryEntryCreateCFProperty(device, "locationID" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? NSNumber)?.uint32Value
         let serial = IORegistryEntryCreateCFProperty(device, "USB Serial Number" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? String
-        let productName = IORegistryEntryCreateCFProperty(device, "USB Product Name" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? String
-        let nonPhoneProductWords = ["mouse", "keyboard", "camera", "hub", "bluetooth", "audio"]
-        if let productName,
-           nonPhoneProductWords.contains(where: { productName.localizedCaseInsensitiveContains($0) }) {
-            return nil
-        }
         guard let vendorID, let productID else { return nil }
         return USBDeviceIdentity(
             vendorID: vendorID,
@@ -263,16 +260,6 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
                 .trimmingCharacters(in: .controlCharacters)
         }
         return nil
-    }
-
-    public func getConnectedAndroidVendorIDs() -> [UInt16] {
-        Array(Set(androidDeviceIdentities().map(\.vendorID))).sorted()
-    }
-
-    private func androidDeviceIdentities() -> Set<USBDeviceIdentity> {
-        connectedDeviceIdentities().filter {
-            PTPConflictDetector.knownAndroidVendorIDs.contains($0.vendorID)
-        }
     }
 
     private func connectedDeviceIdentities() -> Set<USBDeviceIdentity> {

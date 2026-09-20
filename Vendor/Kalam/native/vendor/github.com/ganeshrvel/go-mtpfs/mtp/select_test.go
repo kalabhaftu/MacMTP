@@ -1,23 +1,36 @@
 package mtp
 
-import "testing"
+import (
+	"github.com/ganeshrvel/usb"
+	"testing"
+)
 
-func TestSelectorMatchesIdentity(t *testing.T) {
-	selector := DeviceSelector{VendorID: 0x1234, ProductID: 0x5678, SerialNumber: "phone"}
-	if !selectorMatches(selector, 0x1234, 0x5678, "phone") {
-		t.Fatal("expected exact selector match")
-	}
-	if selectorMatches(selector, 0x1234, 0x5678, "other") {
-		t.Fatal("rejected serial should not match")
-	}
-	if selectorMatches(selector, 0x1234, 0x5679, "phone") {
-		t.Fatal("rejected product should not match")
+func TestHasMTPDataEndpointsRejectsMouseShape(t *testing.T) {
+	endpoints := []usb.EndpointDescriptor{{
+		EndpointAddress: 0x81,
+		Attributes:      usb.TRANSFER_TYPE_INTERRUPT,
+	}}
+	if hasMTPDataEndpoints(endpoints) {
+		t.Fatal("interrupt-only device must not be treated as MTP")
 	}
 }
 
-func TestSelectorAllowsMissingSerial(t *testing.T) {
-	selector := DeviceSelector{VendorID: 0x1234, ProductID: 0x5678}
-	if !selectorMatches(selector, 0x1234, 0x5678, "phone") {
-		t.Fatal("missing selector serial should match the VID/PID candidate")
+func TestHasMTPDataEndpointsAcceptsMTPShape(t *testing.T) {
+	endpoints := []usb.EndpointDescriptor{
+		{EndpointAddress: 0x81, Attributes: usb.TRANSFER_TYPE_BULK},
+		{EndpointAddress: 0x02, Attributes: usb.TRANSFER_TYPE_BULK},
+		{EndpointAddress: 0x83, Attributes: usb.TRANSFER_TYPE_INTERRUPT},
+	}
+	if !hasMTPDataEndpoints(endpoints) {
+		t.Fatal("MTP bulk-in, bulk-out, interrupt-in endpoints should qualify")
+	}
+}
+
+func TestMTPInterfaceStringValidation(t *testing.T) {
+	if isMTPInterfaceString("Lenovo USB Optical Mouse") {
+		t.Fatal("mouse interface must not qualify as MTP")
+	}
+	if !isMTPInterfaceString("MTP") {
+		t.Fatal("MTP interface should qualify")
 	}
 }

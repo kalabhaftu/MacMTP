@@ -216,7 +216,7 @@ func invalidLocalFilenamesAreRejectedWithoutRenaming() {
 @Test
 func connectionStatesExposeActionableStatus() {
     #expect(MTPConnectionState.usbAbsent.title == "USB device not connected")
-    #expect(MTPConnectionState.deviceFound.detail == "Starting MTP session…")
+    #expect(MTPConnectionState.deviceFound.detail == "Checking for an MTP interface…")
     #expect(MTPConnectionState.connecting(attempt: 2).title == "Connecting, attempt 2 of 2")
     #expect(MTPConnectionState.connected.detail == "Connected via USB")
 }
@@ -406,6 +406,13 @@ func duplicateUSBNotificationsDoNotScheduleAnotherDevice() {
 
     #expect(newlyAttachedUSBIdentities([identity, identity], known: []) == [identity])
     #expect(newlyAttachedUSBIdentities([identity, otherIdentity], known: [identity]) == [otherIdentity])
+}
+
+@Test
+func unchangedUSBInventoryDoesNotNeedAnotherConnectionGeneration() {
+    let identity = USBDeviceIdentity(vendorID: 0x0e8d, productID: 0x2008, locationID: 1, serialNumber: "phone")
+    #expect(!usbInventoryChanged(previous: [identity], current: [identity]))
+    #expect(usbInventoryChanged(previous: [identity], current: []))
 }
 
 @Test

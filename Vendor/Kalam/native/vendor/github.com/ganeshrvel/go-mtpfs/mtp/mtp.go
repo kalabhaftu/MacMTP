@@ -66,6 +66,10 @@ type sessionData struct {
 	sid uint32
 }
 
+func isMTPInterfaceString(value string) bool {
+	return strings.Contains(value, "MTP") || strings.Contains(value, "CDC") || strings.Contains(value, "ACM")
+}
+
 // RCError are return codes from the Container.Code field.
 type RCError uint16
 
@@ -187,6 +191,10 @@ func (d *Device) Open() error {
 
 		if d.USBDebug {
 			log.Printf("USB: interface: %s", iface)
+		}
+		if !isMTPInterfaceString(iface) {
+			d.Close()
+			return fmt.Errorf("mtp: interface does not identify MTP: %q", iface)
 		}
 
 		log.Printf("MTP interface=%q class=%d subclass=%d protocol=%d", iface, d.ifaceDescr.InterfaceClass, d.ifaceDescr.InterfaceSubClass, d.ifaceDescr.InterfaceProtocol)

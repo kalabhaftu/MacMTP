@@ -40,10 +40,14 @@ final class MTPConnectionCoordinator: ObservableObject {
     private var connectionTask: Task<Void, Never>?
     private var discoveryTask: Task<Void, Never>?
     private var pendingEmptyAvailabilityTask: Task<Void, Never>?
+    private var lastUSBInventory: Set<USBDeviceIdentity> = []
+    private var claimantRecoveryUsed = false
 
     private init() {}
 
     func updateAvailableDevices(_ devices: Set<USBDeviceIdentity>, startAutomatically: Bool = true) {
+        guard usbInventoryChanged(previous: lastUSBInventory, current: devices) else { return }
+        lastUSBInventory = devices
         if devices.isEmpty {
             pendingEmptyAvailabilityTask?.cancel()
             pendingEmptyAvailabilityTask = Task { @MainActor [weak self] in
@@ -51,6 +55,7 @@ final class MTPConnectionCoordinator: ObservableObject {
                 guard let self, self.usbDevicePresent else { return }
                 self.usbDevicePresent = false
                 self.availableDevices.removeAll()
+                self.lastUSBInventory.removeAll()
                 self.generation &+= 1
                 self.discoveryTask?.cancel()
                 self.discoveryTask = nil
@@ -77,6 +82,7 @@ final class MTPConnectionCoordinator: ObservableObject {
         }
 
         usbDevicePresent = true
+        claimantRecoveryUsed = false
         pendingEmptyAvailabilityTask?.cancel()
         pendingEmptyAvailabilityTask = nil
 
@@ -100,6 +106,7 @@ final class MTPConnectionCoordinator: ObservableObject {
         connectionTask = nil
         discoveryTask?.cancel()
         discoveryTask = nil
+        claimantRecoveryUsed = false
         guard usbDevicePresent else {
             state = .usbAbsent
             return
@@ -134,6 +141,7 @@ final class MTPConnectionCoordinator: ObservableObject {
                         "event": "mtp_probe",
                         "state": selectors.isEmpty ? "mtp_unavailable" : "mtp_candidate_found",
                         "candidate_count": selectors.count,
+                        "candidate_vid_pids": selectors.map { String(format: "0x%04x:0x%04x", $0.vendorId, $0.productId) },
                         "generation": Int64(token)
                     ]
                 )
@@ -154,6 +162,15 @@ final class MTPConnectionCoordinator: ObservableObject {
                 self.startConnection()
             } catch {
                 guard self.generation == token, !Task.isCancelled else { return }
+                let details = error.localizedDescription.lowercased()
+                if !self.claimantRecoveryUsed,
+                   details.contains("libusb_error_access") || details.contains("libusb_error_busy") || details.contains("libusb_error_not_found") {
+                    self.claimantRecoveryUsed = true
+                    self.releaseMTPInterfaceClaimants()
+                    self.discoveryTask = nil
+                    self.startDiscovery()
+                    return
+                }
                 self.state = .failed(
                     message: "MTP discovery failed: \(error.localizedDescription)",
                     technicalDetails: error.localizedDescription

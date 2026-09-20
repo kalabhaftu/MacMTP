@@ -52,9 +52,10 @@ public final class MTPDeviceManager: ObservableObject {
 
     @discardableResult
     public func connectDevice() async -> Bool {
-        let selector = USBWatcher.shared.availableSelector
-            ?? MTPDeviceSelector(vendorId: 0xffff, productId: 0xffff, serialNumber: "")
-        return await connectDevice(selector: selector)
+        guard let selectors = try? await bridge.discoverMTPDevices(), selectors.count == 1 else {
+            return false
+        }
+        return await connectDevice(selector: selectors[0])
     }
 
     func discoverMTPDevices() async throws -> [MTPDeviceSelector] {
