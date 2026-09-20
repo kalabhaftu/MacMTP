@@ -324,7 +324,21 @@ public final class MTPDeviceManager: ObservableObject {
 
 
     public func refreshFiles() async {
+        while FileTransferService.shared.isTransferInFlight {
+            do {
+                try await Task.sleep(nanoseconds: 50_000_000)
+            } catch {
+                return
+            }
+        }
         await directoryCoordinator.waitForMutation()
+        while FileTransferService.shared.isTransferInFlight {
+            do {
+                try await Task.sleep(nanoseconds: 50_000_000)
+            } catch {
+                return
+            }
+        }
         await refreshFilesWithoutWaitingForMutation()
     }
 

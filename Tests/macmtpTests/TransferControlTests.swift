@@ -61,6 +61,9 @@ func cancellingTransferKeepsBatchVisibleUntilNativeCancellationReturns() {
 
     service.cancelTransfer()
 
-    #expect(batch.state == .cancelled)
+    #expect(batch.state == .cancelling)
     #expect(service.activeBatch === batch)
+
+    batch.finishCancellation()
+    #expect(batch.state == .cancelled)
 }

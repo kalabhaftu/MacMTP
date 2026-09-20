@@ -5,6 +5,7 @@ public enum TransferState: Equatable {
     case idle
     case transferring
     case paused
+    case cancelling
     case completed
     case failed(String)
     case cancelled
@@ -91,6 +92,10 @@ public class TransferBatch: ObservableObject {
         state == .transferring
     }
 
+    public var isCancelling: Bool {
+        state == .cancelling
+    }
+
     public var canPause: Bool {
         state == .transferring
     }
@@ -114,7 +119,12 @@ public class TransferBatch: ObservableObject {
         state = .transferring
     }
 
-    public func cancel() {
+    public func beginCancellation() {
+        guard !state.isTerminal else { return }
+        state = .cancelling
+    }
+
+    public func finishCancellation() {
         state = .cancelled
     }
 
@@ -220,7 +230,7 @@ public struct TransferProgressView: View {
 
                     overallProgressSection
 
-                    if let currentFile = batch.currentItem, batch.isActive || batch.state == .paused {
+                    if let currentFile = batch.currentItem, batch.isActive || batch.state == .paused || batch.isCancelling {
                         currentFileSection(currentFile)
                     }
 
@@ -327,6 +337,9 @@ public struct TransferProgressView: View {
                 Image(systemName: "pause.circle.fill")
                     .font(.title2)
                     .foregroundColor(.yellow)
+            case .cancelling:
+                ProgressView()
+                    .controlSize(.small)
             case .completed:
                 Image(systemName: "checkmark.circle.fill")
                     .font(.title2)
@@ -352,6 +365,7 @@ public struct TransferProgressView: View {
         switch batch.state {
         case .transferring: return "Transferring Files…"
         case .paused: return "Transfer Paused"
+        case .cancelling: return "Cancelling Transfer…"
         case .completed:
             if batch.failedFileCount > 0 {
                 return "Transfer Completed with Errors"
@@ -375,6 +389,8 @@ public struct TransferProgressView: View {
                 return "Pausing after \(current.fileName) completes..."
             }
             return "Tap Resume to continue"
+        case .cancelling:
+            return "Waiting for the MTP session to clean up…"
         case .completed:
             let duration = formatDuration(batch.elapsedTime)
             return "Completed in \(duration)"
@@ -445,6 +461,7 @@ public struct TransferProgressView: View {
         switch batch.state {
         case .transferring: return .accentColor
         case .paused: return .yellow
+        case .cancelling: return .orange
         case .completed: return .green
         case .failed: return .red
         case .cancelled: return .secondary
@@ -543,6 +560,7 @@ public struct TransferProgressView: View {
     private var etaDisplayString: String {
         guard batch.isActive else {
             if batch.state == .paused { return "Paused" }
+            if batch.isCancelling { return "Cancelling" }
             if batch.state == .completed { return "Done" }
             return "—"
         }
