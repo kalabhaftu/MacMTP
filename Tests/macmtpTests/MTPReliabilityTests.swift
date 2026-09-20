@@ -31,7 +31,7 @@ private actor RecordingMTPBridge: MTPBridge {
         self.cancelInitialize = cancelInitialize
     }
 
-    func initialize() async throws -> GoDeviceInfoData {
+    func initialize(selector: MTPDeviceSelector) async throws -> GoDeviceInfoData {
         if cancelInitialize {
             throw CancellationError()
         }
@@ -199,6 +199,22 @@ func mtpFolderNamesAreTrimmedAndInvalidNamesRejected() {
     } catch {
         Issue.record("Unexpected error: \(error)")
     }
+}
+
+@Test
+func invalidLocalFilenamesAreRejectedWithoutRenaming() {
+    #expect(PathValidation.isValidLocalFilename("photo.jpg"))
+    #expect(!PathValidation.isValidLocalFilename("folder/name"))
+    #expect(!PathValidation.isValidLocalFilename("photo:"))
+    #expect(!PathValidation.isValidLocalFilename("photo."))
+}
+
+@Test
+func connectionStatesExposeActionableStatus() {
+    #expect(MTPConnectionState.usbAbsent.title == "USB device not connected")
+    #expect(MTPConnectionState.deviceFound.detail == "Starting MTP session…")
+    #expect(MTPConnectionState.connecting(attempt: 2).title == "Connecting, attempt 2 of 2")
+    #expect(MTPConnectionState.connected.detail == "Connected via USB")
 }
 
 @Test

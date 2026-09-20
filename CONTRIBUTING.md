@@ -28,9 +28,18 @@ Run the focused checks before opening a pull request:
 ```bash
 bash -n scripts/*.sh
 swift test
+bash scripts/test-native-contract.sh
+go test -mod=vendor ./...
+go vet -mod=vendor ./...
 bash scripts/build.sh release --arch "$(uname -m)"
 scripts/verify-app.sh macMTP.app "$(uname -m)"
+git diff --check
 ```
+
+For MTP changes, also run a physical check with an unlocked Android phone in
+File Transfer mode: launch with the phone already connected, unplug/replug it,
+upload one file, upload a nested folder, download a file, and confirm the
+Terminal lifecycle lines show one connection generation with no retry storm.
 
 ## Code Style
 

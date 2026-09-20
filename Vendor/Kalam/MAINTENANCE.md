@@ -8,6 +8,9 @@ must be reviewed before a manual native-source update.
 - Baseline date: 2026-07-02
 - Adapter change: replace callback function pointers with direct C calls to
   prevent embedded-Go callback crashes
+- Current reliability changes: selector-aware device matching, explicit session
+  ordering, fatal transport cleanup, operation IDs on callback JSON, and exact
+  SendObject payload framing. These changes remain macMTP-owned adapter work.
 
 The native protocol dependencies are pinned to:
 

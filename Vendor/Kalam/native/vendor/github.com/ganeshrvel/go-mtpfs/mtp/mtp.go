@@ -178,19 +178,7 @@ func (d *Device) Open() error {
 		}
 	}
 
-	if d.ifaceDescr.InterfaceStringIndex == 0 {
-		// Some devices have no interface field, so we'll hardcode ones
-		// that we know about. If this list gets too unwieldy, we may
-		// need to look into a more generic solution.
-		info := DeviceInfo{}
-		d.GetDeviceInfo(&info)
-
-		if !strings.Contains(info.MTPExtension, "microsoft/WindowsPhone") &&
-			!strings.Contains(info.MTPExtension, "fujifilm.co.jp") {
-			d.Close()
-			return fmt.Errorf("mtp: no MTP extensions in %s", info.MTPExtension)
-		}
-	} else {
+	if d.ifaceDescr.InterfaceStringIndex != 0 {
 		iface, err := d.h.GetStringDescriptorASCII(d.ifaceDescr.InterfaceStringIndex)
 		if err != nil {
 			d.Close()
@@ -201,11 +189,7 @@ func (d *Device) Open() error {
 			log.Printf("USB: interface: %s", iface)
 		}
 
-		// support for older samsung phones
-		if !strings.Contains(iface, "MTP") && !strings.Contains(iface, "CDC") && !strings.Contains(iface, "ACM") {
-			d.Close()
-			return fmt.Errorf("has no MTP in interface string")
-		}
+		log.Printf("MTP interface=%q class=%d subclass=%d protocol=%d", iface, d.ifaceDescr.InterfaceClass, d.ifaceDescr.InterfaceSubClass, d.ifaceDescr.InterfaceProtocol)
 	}
 
 	return nil
@@ -544,6 +528,22 @@ func (d *Device) bulkWrite(hdr *usbBulkHeader, r io.Reader, size int64, req *Con
 	if packetSize <= 0 {
 		return 0, fmt.Errorf("invalid USB bulk OUT packet size %d", packetSize)
 	}
+	writePacket := func(packet []byte) (int64, error) {
+		var written int64
+		for len(packet) > 0 {
+			actual, writeErr := d.h.BulkTransfer(d.sendEP, packet, d.Timeout)
+			written += int64(actual)
+			if writeErr != nil {
+				return written, writeErr
+			}
+			if actual <= 0 {
+				return written, fmt.Errorf("USB bulk write made no progress")
+			}
+			packet = packet[actual:]
+		}
+		return written, nil
+	}
+
 	if hdr != nil {
 		if size+usbHdrLen > 0xFFFFFFFF {
 			hdr.Length = 0xFFFFFFFF
@@ -560,63 +560,74 @@ func (d *Device) bulkWrite(hdr *usbBulkHeader, r io.Reader, size int64, req *Con
 		}
 
 		buf := bytes.NewBuffer(packet[:0])
-		binary.Write(buf, byteOrder, hdr)
+		if err := binary.Write(buf, byteOrder, hdr); err != nil {
+			return 0, err
+		}
 		cpSize := int64(len(packet) - usbHdrLen)
 		if cpSize > size {
 			cpSize = size
 		}
+		if cpSize > 0 {
+			payload := make([]byte, cpSize)
+			read, readErr := io.ReadFull(r, payload)
+			if read > 0 {
+				_, _ = buf.Write(payload[:read])
+			}
+			if readErr != nil {
+				return 0, readErr
+			}
+		}
 
-		_, err = io.CopyN(buf, r, cpSize)
 		d.dataPrint(d.sendEP, buf.Bytes())
-		_, err = d.h.BulkTransfer(d.sendEP, buf.Bytes(), d.Timeout)
-		if err != nil {
-			return cpSize, err
+		written, writeErr := writePacket(buf.Bytes())
+		if writeErr != nil {
+			log.Printf("MTP operation=%s phase=data-header sent=%d requested=%d packet=%d: %v", getName(OC_names, int(req.Code)), written, int64(buf.Len()), packetSize, writeErr)
+			return written, writeErr
 		}
 		size -= cpSize
 		n += cpSize
 
 		if err = progressCb(totalSize - size); err != nil {
-			return cpSize, err
+			return n, err
 		}
 	}
 
-	// ponytail: one endpoint packet per libusb write; slower, but avoids Android
-	// firmware that stalls when a single OUT transfer spans multiple USB packets.
 	buf := make([]byte, packetSize)
-	var lastTransfer int
+	var lastPayloadSize int64
 
 	for size > 0 {
-		var m int
-		toread := buf[:]
-		if int64(len(toread)) > size {
-			toread = buf[:int(size)]
+		want := int64(len(buf))
+		if want > size {
+			want = size
 		}
-
-		m, err = r.Read(toread)
-		if err != nil {
-			break
+		read, readErr := io.ReadFull(r, buf[:want])
+		if read == 0 && readErr != nil {
+			return n, readErr
 		}
-		size -= int64(m)
-
-		d.dataPrint(d.sendEP, buf[:m])
-		lastTransfer, err = d.h.BulkTransfer(d.sendEP, buf[:m], d.Timeout)
-		n += int64(lastTransfer)
-
-		if err != nil || lastTransfer == 0 {
-			if err != nil {
-				log.Printf("MTP operation=%s phase=data-payload sent=%d requested=%d: %v", getName(OC_names, int(req.Code)), n, m, err)
+		d.dataPrint(d.sendEP, buf[:read])
+		written, writeErr := writePacket(buf[:read])
+		n += written
+		size -= written
+		lastPayloadSize = written
+		if writeErr != nil || written != int64(read) {
+			if writeErr == nil {
+				writeErr = fmt.Errorf("USB bulk write incomplete: sent=%d requested=%d", written, read)
 			}
-			break
+			log.Printf("MTP operation=%s phase=data-payload sent=%d requested=%d packet=%d: %v", getName(OC_names, int(req.Code)), n, read, packetSize, writeErr)
+			return n, writeErr
 		}
-
+		if readErr != nil {
+			return n, readErr
+		}
 		if err = progressCb(totalSize - size); err != nil {
-			return size, err
+			return n, err
 		}
 	}
 
-	if lastTransfer%packetSize == 0 {
-		// write a short packet just to be sure.
-		d.h.BulkTransfer(d.sendEP, buf[:0], 250)
+	if d.SeparateHeader && lastPayloadSize > 0 && lastPayloadSize%int64(packetSize) == 0 {
+		if _, err = writePacket(buf[:0]); err != nil {
+			return n, fmt.Errorf("MTP operation=%s phase=short-packet: %w", getName(OC_names, int(req.Code)), err)
+		}
 	}
 
 	return n, err

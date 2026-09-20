@@ -10,6 +10,7 @@ type allowedSecondExtMap map[string]string
 
 type Init struct {
 	DebugMode bool
+	Selector  *mtp.DeviceSelector
 }
 
 type StorageData struct {

@@ -99,6 +99,7 @@ enum FileViewMode: String, CaseIterable {
 
 
 struct FileExplorerPane: View {
+    @ObservedObject private var connectionCoordinator = MTPConnectionCoordinator.shared
     @AppStorage("appFontScale") private var appFontScale: Double = 1.0
 
     var title: String
@@ -873,15 +874,26 @@ struct FileExplorerPane: View {
                 .foregroundColor(.secondary)
                 .symbolRenderingMode(.hierarchical)
 
-            Text(isLocal ? "Local drive not accessible" : "Connect an Android device to view files")
+            Text(isLocal ? "Local drive not accessible" : MTPConnectionCoordinator.shared.state.title)
                 .font(.headline)
                 .foregroundColor(.secondary)
 
-            Text(isLocal ? "Check that the selected volume is mounted." : "Plug in your Android device via USB and enable file transfer (MTP) mode.")
+            Text(isLocal ? "Check that the selected volume is mounted." : MTPConnectionCoordinator.shared.state.detail)
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 280)
+
+            if case .failed(_, let technicalDetails) = MTPConnectionCoordinator.shared.state {
+                DisclosureGroup("Technical details") {
+                    Text(technicalDetails)
+                        .font(.caption2.monospaced())
+                        .foregroundColor(.secondary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: 320, alignment: .leading)
+                }
+                .frame(maxWidth: 320, alignment: .leading)
+            }
 
             if !isLocal {
                 Button(action: { onConnect?() }) {

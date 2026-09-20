@@ -15,6 +15,12 @@ type deviceContainer struct {
 	deviceInfo *mtp.DeviceInfo
 }
 
+type InitializeInput struct {
+	VendorID     uint16 `json:"vendorId"`
+	ProductID    uint16 `json:"productId"`
+	SerialNumber string `json:"serialNumber"`
+}
+
 type MakeDirectoryInput struct {
 	StorageId uint32 `json:"storageId"`
 	FullPath  string `json:"fullPath"`

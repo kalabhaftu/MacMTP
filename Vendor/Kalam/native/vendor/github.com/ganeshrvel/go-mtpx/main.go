@@ -13,7 +13,13 @@ import (
 // initialize the mtp device
 // returns mtp device
 func Initialize(init Init) (*mtp.Device, error) {
-	dev, err := mtp.SelectDeviceWithDebugging("", init.DebugMode)
+	var dev *mtp.Device
+	var err error
+	if init.Selector != nil {
+		dev, err = mtp.SelectDeviceWithSelector(*init.Selector, init.DebugMode)
+	} else {
+		dev, err = mtp.SelectDeviceWithDebugging("", init.DebugMode)
+	}
 
 	if err != nil {
 		return nil, MtpDetectFailedError{error: err}

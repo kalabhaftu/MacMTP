@@ -30,6 +30,30 @@ Attach only the relevant lines. Directory failures include the native MTP
 operation and error type when the library provides them; blank native messages
 are replaced with an actionable fallback.
 
+Connection lifecycle lines are also written to Terminal. They use fields such
+as `event`, `state`, `generation`, `attempt`, `operation`, `phase`, and
+`usb_error`. A healthy launch normally looks like:
+
+```text
+MTP event=USB device availability changed level=info event=usb_scan state=device_found
+MTP event=MTP connection attempt level=info event=connection_attempt state=connecting generation=1 attempt=1
+MTP event=MTP connection established level=info event=connection_ready state=connected generation=1 attempt=1
+```
+
+After a transport failure, macMTP performs at most one controlled session
+retry. Further retries require the Retry Connection button. Repeated
+`OpenSession` or `GetDeviceInfo` lines without a new USB attach event indicate
+a regression and should be reported.
+
+For a phone connected before launch, keep it unlocked in File Transfer mode,
+start macMTP, and wait for `Android device detected` before copying. Test both
+a single file and a nested folder. A transfer failure should identify the
+operation phase and payload bytes, for example:
+
+```text
+MTP operation=SendObject phase=data-payload sent=512 requested=512 packet=512
+```
+
 ## Transfer Semantics
 
 Pause and resume apply at file boundaries because the upstream `go-mtpx`

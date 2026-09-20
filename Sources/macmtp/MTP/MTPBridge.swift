@@ -1,9 +1,21 @@
 import Foundation
 
+public struct MTPDeviceSelector: Encodable, Sendable, Equatable {
+    public let vendorId: UInt16
+    public let productId: UInt16
+    public let serialNumber: String
+
+    public init(vendorId: UInt16, productId: UInt16, serialNumber: String) {
+        self.vendorId = vendorId
+        self.productId = productId
+        self.serialNumber = serialNumber
+    }
+}
+
 /// The directory coordinator depends on this narrow bridge contract so native
 /// transport behavior can be tested without a connected handset.
 protocol MTPBridge: Sendable {
-    func initialize() async throws -> GoDeviceInfoData
+    func initialize(selector: MTPDeviceSelector) async throws -> GoDeviceInfoData
     func fetchStorages() async throws -> [GoStorageData]
     func dispose() async throws
     func listDirectory(
@@ -19,4 +31,3 @@ protocol MTPBridge: Sendable {
 }
 
 extension KalamBridge: MTPBridge {}
-

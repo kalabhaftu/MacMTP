@@ -15,6 +15,8 @@ public final class MTPDeviceManager: ObservableObject {
     @Published public var isLoading = false
     @Published public private(set) var isPerformingMutation = false
     @Published public var errorMessage: String?
+    @Published public private(set) var connectionState: MTPConnectionState = .usbAbsent
+    @Published public private(set) var canRetryConnection = false
 
 
     private var backHistory: [String] = []
@@ -50,11 +52,19 @@ public final class MTPDeviceManager: ObservableObject {
 
     @discardableResult
     public func connectDevice() async -> Bool {
+        let selector = USBWatcher.shared.availableSelector
+            ?? MTPDeviceSelector(vendorId: 0xffff, productId: 0xffff, serialNumber: "")
+        return await connectDevice(selector: selector)
+    }
+
+    @discardableResult
+    func connectDevice(selector: MTPDeviceSelector) async -> Bool {
         guard !isLoading, !isConnected else { return false }
         connectionGeneration &+= 1
         let generation = connectionGeneration
         isLoading = true
         errorMessage = nil
+        canRetryConnection = false
         defer {
             if generation == connectionGeneration {
                 isLoading = false
@@ -62,7 +72,7 @@ public final class MTPDeviceManager: ObservableObject {
         }
 
         do {
-            let goDevInfo = try await bridge.initialize()
+            let goDevInfo = try await bridge.initialize(selector: selector)
             guard generation == connectionGeneration else { return false }
             
             let goStorages = try await bridge.fetchStorages()
@@ -83,12 +93,8 @@ public final class MTPDeviceManager: ObservableObject {
 
             self.deviceInfo = mappedDevInfo
             self.storages = mappedStorages
-            USBWatcher.shared.registerActiveDevice(
-                vendorID: goDevInfo.usbDeviceInfo?.IdVendor,
-                productID: goDevInfo.usbDeviceInfo?.IdProduct,
-                serialNumber: goDevInfo.usbDeviceInfo?.SerialNumber
-            )
             self.isConnected = true
+            self.connectionState = .connected
             
             if let firstStorage = mappedStorages.first {
                 self.selectedStorageId = firstStorage.storageId
@@ -112,8 +118,6 @@ public final class MTPDeviceManager: ObservableObject {
                 return false
             }
 
-            USBWatcher.shared.clearActiveDevice()
-
             let errLower = error.localizedDescription.lowercased()
             let isNoStorageError = errLower.contains("no storage found")
             let isMultipleDeviceError = errLower.contains("errormultipledevice")
@@ -126,6 +130,7 @@ public final class MTPDeviceManager: ObservableObject {
                 || errLower.contains("libusb_error_not_found")
 
             let isExpectedUserCondition = isNoStorageError || isDeviceNotFound || isMultipleDeviceError
+            canRetryConnection = isMTPTransportFailure(error)
             if !isExpectedUserCondition {
                 ErrorLogger.log(
                     error,
@@ -149,6 +154,10 @@ public final class MTPDeviceManager: ObservableObject {
                 self.errorMessage = "Failed to connect: \(error.localizedDescription)"
             }
             self.isConnected = false
+            self.connectionState = .failed(
+                message: self.errorMessage ?? "The MTP session could not be opened.",
+                technicalDetails: error.localizedDescription
+            )
             self.deviceInfo = nil
             self.storages = []
             self.selectedStorageId = nil
@@ -180,8 +189,9 @@ public final class MTPDeviceManager: ObservableObject {
         } catch {
             ErrorLogger.log(error, message: "Failed to dispose MTP device cleanly")
         }
-        USBWatcher.shared.clearActiveDevice()
         self.isConnected = false
+        self.connectionState = .usbAbsent
+        self.canRetryConnection = false
         self.deviceInfo = nil
         self.storages = []
         self.selectedStorageId = nil
@@ -224,19 +234,19 @@ public final class MTPDeviceManager: ObservableObject {
         }
         isLoading = false
         errorMessage = message
+        connectionState = .failed(message: message, technicalDetails: message)
 
         Task { @MainActor [weak self] in
             guard let self else { return }
             try? await bridge.dispose()
             guard self.connectionGeneration == invalidatedGeneration else { return }
-            let scheduled = USBWatcher.shared.reconnectIfAvailable()
             ErrorLogger.logMessage(
-                scheduled ? "MTP connection recovery scheduled" : "MTP connection recovery was not scheduled",
-                level: scheduled ? .info : .warning,
+                "MTP connection invalidated",
+                level: .warning,
                 userInfo: [
-                    "operation": "reconnect",
+                    "operation": "connection",
                     "operation_phase": "connection",
-                    "reconnect_result": scheduled ? "scheduled" : "no_active_usb_identity",
+                    "reconnect_result": "manual_retry_required",
                     "session_generation": Int64(invalidatedGeneration),
                 ]
             )

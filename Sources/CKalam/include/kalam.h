@@ -87,7 +87,7 @@ typedef struct { void *data; GoInt len; GoInt cap; } GoSlice;
 extern "C" {
 #endif
 
-extern void Initialize(void);
+extern void Initialize(char* initializeInputJson);
 extern void FetchDeviceInfo(void);
 extern void FetchStorages(void);
 extern void MakeDirectory(char* makeDirectoryInputJson);
@@ -99,6 +99,7 @@ extern void UploadFiles(char* uploadFilesInputJson);
 extern void DownloadFiles(char* downloadFilesInputJson);
 extern void BeginTransfer(void);
 extern void CancelTransfer(void);
+extern void SetOperationID(char* operationId);
 extern void Dispose(void);
 
 #ifdef __cplusplus

@@ -4,6 +4,7 @@ struct ToolbarView: View {
     @AppStorage("appFontScale") private var appFontScale: Double = 1.0
     var isMTPConnected: Bool
     var deviceName: String
+    var connectionState: MTPConnectionState
     var onRefresh: () -> Void
     var onCopy: () -> Void
     var onCut: () -> Void
@@ -48,11 +49,11 @@ struct ToolbarView: View {
             }
             
             VStack(alignment: .leading, spacing: 2) {
-                Text(isMTPConnected ? deviceName : "No Device Detected")
+                Text(isMTPConnected ? deviceName : connectionState.title)
                     .font(.system(size: 13 * appFontScale, weight: .semibold))
                     .lineLimit(1)
                 
-                Text(isMTPConnected ? "Connected via USB" : "Connect your Android device via USB cable")
+                Text(connectionState.detail)
                     .font(.system(size: 11 * appFontScale))
                     .foregroundColor(.secondary)
                     .lineLimit(1)

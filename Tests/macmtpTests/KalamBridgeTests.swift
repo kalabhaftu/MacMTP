@@ -16,7 +16,7 @@ func malformedTransferCallbacksFailInsteadOfDisappearing() {
 func lateDoneCallbackAfterContinuationCleanupIsIgnored() async {
     do {
         _ = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
-            KalamRegistry.shared.setDoneContinuation(continuation)
+            KalamRegistry.shared.setDoneContinuation(continuation, operationID: "test")
             KalamRegistry.shared.rejectDone(with: KalamError.timedOut("test"))
         }
         Issue.record("Expected the cleaned continuation to fail")
@@ -27,4 +27,20 @@ func lateDoneCallbackAfterContinuationCleanupIsIgnored() async {
     }
 
     KalamRegistry.shared.resolveDone(with: #"{"data":true}"#)
+}
+
+@Test
+func callbackForAnotherOperationCannotResumeTheActiveContinuation() async {
+    do {
+        _ = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
+            KalamRegistry.shared.setDoneContinuation(continuation, operationID: "current")
+            KalamRegistry.shared.resolveDone(with: #"{"operationId":"late","data":true}"#)
+            KalamRegistry.shared.rejectDone(with: KalamError.timedOut("current"))
+        }
+        Issue.record("Expected the active operation to be rejected")
+    } catch let error as KalamError {
+        #expect(error.localizedDescription.contains("timed out"))
+    } catch {
+        Issue.record("Unexpected continuation error: \(error)")
+    }
 }

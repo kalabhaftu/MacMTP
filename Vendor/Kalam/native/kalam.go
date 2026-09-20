@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/ganeshrvel/go-mtpfs/mtp"
 	"github.com/ganeshrvel/go-mtpx"
 	jsoniter "github.com/json-iterator/go"
 	"kalam/send_to_js"
@@ -55,6 +56,15 @@ func CancelTransfer() {
 	atomic.StoreUint32(&transferCancelRequested, 1)
 }
 
+//export SetOperationID
+func SetOperationID(id *C.char) {
+	if id == nil {
+		send_to_js.SetOperationID("")
+		return
+	}
+	send_to_js.SetOperationID(C.GoString(id))
+}
+
 func snapshotProgress(p *mtpx.ProgressInfo) *mtpx.ProgressInfo {
 	if p == nil {
 		return nil
@@ -77,11 +87,28 @@ func snapshotProgress(p *mtpx.ProgressInfo) *mtpx.ProgressInfo {
 }
 
 //export Initialize
-func Initialize() {
+func Initialize(inputJSON *C.char) {
 	lockMtp()
 	defer unlockMtp()
 
-	_, err := _initialize(mtpx.Init{DebugMode: false})
+	var input InitializeInput
+	if err := decodeInputJSON(inputJSON, &input); err != nil {
+		send_to_js.SendError(err)
+		return
+	}
+	if input.VendorID == 0 || input.ProductID == 0 {
+		send_to_js.SendError(fmt.Errorf("USB selector requires nonzero vendorId and productId"))
+		return
+	}
+
+	_, err := _initialize(mtpx.Init{
+		DebugMode: false,
+		Selector: &mtp.DeviceSelector{
+			VendorID:     input.VendorID,
+			ProductID:    input.ProductID,
+			SerialNumber: input.SerialNumber,
+		},
+	})
 	if err != nil {
 		send_to_js.SendError(err)
 

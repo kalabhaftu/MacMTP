@@ -1,13 +1,21 @@
 package send_to_js
 
 import (
+	stdjson "encoding/json"
 	"errors"
 	"fmt"
 	"github.com/ganeshrvel/go-mtpfs/mtp"
 	"github.com/ganeshrvel/go-mtpx"
 	jsoniter "github.com/json-iterator/go"
 	"strings"
+	"sync/atomic"
 )
+
+var operationID atomic.Value
+
+func SetOperationID(id string) {
+	operationID.Store(id)
+}
 
 // process errors
 func processError(e error) (errorType ErrorType, errorMsg string) {
@@ -131,5 +139,17 @@ func toJson(o interface{}) string {
 		return `{"errorType":"ErrorGeneral","error":"native response serialization failed","data":null}`
 	}
 
-	return string(w)
+	var payload map[string]stdjson.RawMessage
+	if err := stdjson.Unmarshal(w, &payload); err != nil {
+		return string(w)
+	}
+	if id, ok := operationID.Load().(string); ok && id != "" {
+		encodedID, _ := stdjson.Marshal(id)
+		payload["operationId"] = encodedID
+	}
+	result, err := stdjson.Marshal(payload)
+	if err != nil {
+		return string(w)
+	}
+	return string(result)
 }

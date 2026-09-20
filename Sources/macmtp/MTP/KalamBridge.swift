@@ -260,7 +260,9 @@ final class KalamRegistry: @unchecked Sendable {
     private let lock = NSLock()
 
     private var doneContinuation: CheckedContinuation<String, Error>?
+    private var doneOperationID: String?
     private var transferContinuation: CheckedContinuation<Void, Error>?
+    private var transferOperationID: String?
     
     private var preprocessCallback: ((String) -> Void)?
     private var progressCallback: ((String) -> Void)?
@@ -268,7 +270,7 @@ final class KalamRegistry: @unchecked Sendable {
 
     private init() {}
 
-    func setDoneContinuation(_ continuation: CheckedContinuation<String, Error>) {
+    func setDoneContinuation(_ continuation: CheckedContinuation<String, Error>, operationID: String) {
         lock.lock()
         if doneContinuation != nil {
             lock.unlock()
@@ -276,11 +278,13 @@ final class KalamRegistry: @unchecked Sendable {
             return
         }
         doneContinuation = continuation
+        doneOperationID = operationID
         lock.unlock()
     }
 
     func setTransferCallbacks(
         continuation: CheckedContinuation<Void, Error>,
+        operationID: String,
         preprocess: @escaping (String) -> Void,
         progress: @escaping (String) -> Void,
         done: @escaping (String) -> Void
@@ -292,6 +296,7 @@ final class KalamRegistry: @unchecked Sendable {
             return
         }
         transferContinuation = continuation
+        transferOperationID = operationID
         preprocessCallback = preprocess
         progressCallback = progress
         transferDoneCallback = done
@@ -300,8 +305,13 @@ final class KalamRegistry: @unchecked Sendable {
 
     func resolveDone(with json: String) {
         lock.lock()
+        guard callbackMatches(json, expected: doneOperationID) else {
+            lock.unlock()
+            return
+        }
         let continuation = doneContinuation
         doneContinuation = nil
+        doneOperationID = nil
         let transferCallback = continuation == nil ? transferDoneCallback : nil
         lock.unlock()
         if let continuation {
@@ -318,6 +328,7 @@ final class KalamRegistry: @unchecked Sendable {
         lock.lock()
         let continuation = doneContinuation
         doneContinuation = nil
+        doneOperationID = nil
         lock.unlock()
         continuation?.resume(throwing: error)
     }
@@ -330,6 +341,7 @@ final class KalamRegistry: @unchecked Sendable {
         lock.lock()
         let continuation = transferContinuation
         transferContinuation = nil
+        transferOperationID = nil
         preprocessCallback = nil
         progressCallback = nil
         transferDoneCallback = nil
@@ -346,6 +358,10 @@ final class KalamRegistry: @unchecked Sendable {
     func triggerPreprocess(_ json: String) {
         let cb: ((String) -> Void)?
         lock.lock()
+        guard callbackMatches(json, expected: transferOperationID) else {
+            lock.unlock()
+            return
+        }
         cb = preprocessCallback
         lock.unlock()
         cb?(json)
@@ -354,6 +370,10 @@ final class KalamRegistry: @unchecked Sendable {
     func triggerProgress(_ json: String) {
         let cb: ((String) -> Void)?
         lock.lock()
+        guard callbackMatches(json, expected: transferOperationID) else {
+            lock.unlock()
+            return
+        }
         cb = progressCallback
         lock.unlock()
         cb?(json)
@@ -362,10 +382,28 @@ final class KalamRegistry: @unchecked Sendable {
     func triggerTransferDone(_ json: String) {
         let cb: ((String) -> Void)?
         lock.lock()
+        guard callbackMatches(json, expected: transferOperationID) else {
+            lock.unlock()
+            return
+        }
         cb = transferDoneCallback
         lock.unlock()
         cb?(json)
     }
+}
+
+private struct NativeOperationEnvelope: Decodable {
+    let operationId: String?
+}
+
+private func callbackMatches(_ json: String, expected: String?) -> Bool {
+    guard let expected else { return false }
+    guard let data = json.data(using: .utf8),
+          let envelope = try? JSONDecoder().decode(NativeOperationEnvelope.self, from: data),
+          let actual = envelope.operationId else {
+        return true
+    }
+    return actual == expected
 }
 
 private let bounceQueue = DispatchQueue(label: "com.macmtp.callback-bounce", qos: .userInitiated)
@@ -473,12 +511,13 @@ public actor KalamBridge {
 
     private static let callbackTimeoutNanoseconds: UInt64 = 60_000_000_000
 
-    private func waitForDone(operationName: String, startOperation: @escaping @Sendable () -> Void) async throws -> String {
-        try await withThrowingTaskGroup(of: String.self) { group in
+    private func waitForDone(operationName: String, startOperation: @escaping @Sendable (String) -> Void) async throws -> String {
+        let operationID = UUID().uuidString
+        return try await withThrowingTaskGroup(of: String.self) { group in
             group.addTask {
                 try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
-                    KalamRegistry.shared.setDoneContinuation(continuation)
-                    startOperation()
+                    KalamRegistry.shared.setDoneContinuation(continuation, operationID: operationID)
+                    startOperation(operationID)
                 }
             }
             group.addTask {
@@ -504,8 +543,14 @@ public actor KalamBridge {
         await beginOperation()
         defer { endOperation() }
 
-        let jsonString = try await waitForDone(operationName: operationName) {
-            self.mtpQueue.async { operation() }
+        let jsonString = try await waitForDone(operationName: operationName) { operationID in
+            self.mtpQueue.async {
+                var id = operationID.utf8CString
+                id.withUnsafeMutableBufferPointer { buffer in
+                    SetOperationID(buffer.baseAddress)
+                }
+                operation()
+            }
         }
         return try decodeResponse(jsonString, operation: operationName)
     }
@@ -523,10 +568,14 @@ public actor KalamBridge {
         await beginOperation()
         defer { endOperation() }
 
-        let jsonString = try await waitForDone(operationName: operationName) {
+        let jsonString = try await waitForDone(operationName: operationName) { operationID in
             self.mtpQueue.async {
                 var cInput = inputJson.utf8CString
                 cInput.withUnsafeMutableBufferPointer { buffer in
+                    var id = operationID.utf8CString
+                    id.withUnsafeMutableBufferPointer { idBuffer in
+                        SetOperationID(idBuffer.baseAddress)
+                    }
                     operation(buffer.baseAddress)
                 }
             }
@@ -559,9 +608,9 @@ public actor KalamBridge {
     }
 
 
-    public func initialize() async throws -> GoDeviceInfoData {
-        let result: GoDeviceInfoResult = try await executeMTP(operationName: "initialize") {
-            Initialize()
+    public func initialize(selector: MTPDeviceSelector) async throws -> GoDeviceInfoData {
+        let result: GoDeviceInfoResult = try await executeMTPWithInput(operationName: "initialize", selector) { input in
+            Initialize(input)
         }
         guard let data = result.data else {
             throw nativeOperationError(
@@ -723,11 +772,14 @@ public actor KalamBridge {
         await beginOperation()
         defer { endOperation() }
 
+        let operationID = UUID().uuidString
+
         try await withThrowingTaskGroup(of: Void.self) { group in
             group.addTask {
                 try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                     KalamRegistry.shared.setTransferCallbacks(
                         continuation: continuation,
+                        operationID: operationID,
                         preprocess: { json in
                             do {
                                 onPreprocess(try decodeMTPPreprocessCallback(json))
@@ -752,6 +804,10 @@ public actor KalamBridge {
                     self.beginTransfer()
 
                     self.mtpQueue.async {
+                        var id = operationID.utf8CString
+                        id.withUnsafeMutableBufferPointer { buffer in
+                            SetOperationID(buffer.baseAddress)
+                        }
                         var cInput = inputJson.utf8CString
                         cInput.withUnsafeMutableBufferPointer { buffer in
                             UploadFiles(buffer.baseAddress)
@@ -804,11 +860,14 @@ public actor KalamBridge {
         await beginOperation()
         defer { endOperation() }
 
+        let operationID = UUID().uuidString
+
         try await withThrowingTaskGroup(of: Void.self) { group in
             group.addTask {
                 try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                     KalamRegistry.shared.setTransferCallbacks(
                         continuation: continuation,
+                        operationID: operationID,
                         preprocess: { json in
                             do {
                                 onPreprocess(try decodeMTPPreprocessCallback(json))
@@ -833,6 +892,10 @@ public actor KalamBridge {
                     self.beginTransfer()
 
                     self.mtpQueue.async {
+                        var id = operationID.utf8CString
+                        id.withUnsafeMutableBufferPointer { buffer in
+                            SetOperationID(buffer.baseAddress)
+                        }
                         var cInput = inputJson.utf8CString
                         cInput.withUnsafeMutableBufferPointer { buffer in
                             DownloadFiles(buffer.baseAddress)

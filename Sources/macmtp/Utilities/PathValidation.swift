@@ -1,6 +1,16 @@
 import Foundation
 
 public enum PathValidation {
+    public static func isValidLocalFilename(_ name: String) -> Bool {
+        guard !name.isEmpty,
+              name != ".",
+              name != "..",
+              !name.contains("/"),
+              !name.contains(":") else { return false }
+        guard name.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) else { return false }
+        return !name.hasSuffix(" ") && !name.hasSuffix(".")
+    }
+
     /// Maximum allowable directory depth before aborting scanning/transfer to prevent runaway recursion or stack overflow.
     public static let maxDirectoryDepth: Int = 30
 

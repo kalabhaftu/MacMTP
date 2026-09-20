@@ -59,15 +59,15 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
     private var removedIterator: io_iterator_t = 0
     private var runLoopSource: CFRunLoopSource?
     private var isWatching = false
-    private var connectionLifecycle = USBConnectionLifecycle()
-    private var pendingAutoConnectTask: Task<Void, Never>?
-    private var activeDeviceVendorID: UInt16?
-    private var activeDeviceProductID: UInt16?
-    private var activeDeviceSerialNumber: String?
     private var knownDeviceIdentities: Set<USBDeviceIdentity> = []
+    private var availableDeviceIdentities: Set<USBDeviceIdentity> = []
     
     
     private init() {}
+
+    var availableSelector: MTPDeviceSelector? {
+        availableDeviceIdentities.first?.selector
+    }
     
 
     
@@ -145,44 +145,10 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         cleanupWatchingResources()
     }
 
-    @discardableResult
-    public func reconnectIfAvailable() -> Bool {
-        guard isWatching,
-              UserDefaults.standard.object(forKey: "autoDetectDevice") as? Bool ?? true else { return false }
-        let identities = connectedDeviceIdentities()
-        guard let vendorID = activeDeviceVendorID,
-              let productID = activeDeviceProductID,
-              identities.contains(where: {
-                  $0.matches(vendorID: vendorID, productID: productID, serialNumber: activeDeviceSerialNumber)
-              }) else { return false }
-        knownDeviceIdentities.formUnion(identities)
-        scheduleAutoConnect(
-            isInitialScan: false,
-            vendorID: vendorID,
-            productID: productID,
-            serialNumber: activeDeviceSerialNumber
-        )
-        return true
-    }
-
-    public func registerActiveDevice(vendorID: UInt16?, productID: UInt16?, serialNumber: String?) {
-        activeDeviceVendorID = vendorID
-        activeDeviceProductID = productID
-        activeDeviceSerialNumber = serialNumber
-    }
-
-    public func clearActiveDevice() {
-        activeDeviceVendorID = nil
-        activeDeviceProductID = nil
-        activeDeviceSerialNumber = nil
-    }
-
     private func cleanupWatchingResources() {
-        pendingAutoConnectTask?.cancel()
-        pendingAutoConnectTask = nil
-        _ = connectionLifecycle.detached()
-        clearActiveDevice()
         knownDeviceIdentities.removeAll()
+        availableDeviceIdentities.removeAll()
+        MTPConnectionCoordinator.shared.updateAvailableDevices([])
         
         if let source = runLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes)
@@ -217,23 +183,28 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
             IOObjectRelease(device)
         }
         
-        let newIdentities = newlyAttachedUSBIdentities(identities, known: knownDeviceIdentities)
         knownDeviceIdentities.formUnion(identities)
-        let shouldRetryKnownCandidate = newIdentities.isEmpty
-            && pendingAutoConnectTask == nil
-            && MTPDeviceManager.shared.isConnected == false
-        guard (!newIdentities.isEmpty || shouldRetryKnownCandidate),
-              activeDeviceVendorID == nil,
-              activeDeviceProductID == nil else { return }
-        guard UserDefaults.standard.object(forKey: "autoDetectDevice") as? Bool ?? true else { return }
-        scheduleAutoConnect(isInitialScan: isInitialScan)
+        availableDeviceIdentities = connectedDeviceIdentities()
+        MTPConnectionCoordinator.shared.updateAvailableDevices(
+            availableDeviceIdentities,
+            startAutomatically: UserDefaults.standard.object(forKey: "autoDetectDevice") as? Bool ?? true
+        )
+        guard !identities.isEmpty else { return }
+        ErrorLogger.logMessage(
+            "USB device availability changed",
+            level: .info,
+            userInfo: [
+                "event": "usb_scan",
+                "state": "device_found",
+                "initial_scan": isInitialScan,
+                "device_count": availableDeviceIdentities.count
+            ]
+        )
     }
     
     private func handleDevicesRemoved(iterator: io_iterator_t, isInitialScan: Bool = false) async {
-        var removedIdentities: [USBDeviceIdentity] = []
         while case let device = IOIteratorNext(iterator), device != 0 {
             if let identity = deviceIdentity(for: device) {
-                removedIdentities.append(identity)
                 knownDeviceIdentities.remove(identity)
             }
             IOObjectRelease(device)
@@ -243,111 +214,22 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         // device-removal event and must not cancel the launch-time connection.
         guard !isInitialScan else { return }
         
-        try? await Task.sleep(nanoseconds: 50_000_000)
-        let remainingIdentities = connectedDeviceIdentities()
-        knownDeviceIdentities = remainingIdentities
-        guard let vendorID = activeDeviceVendorID,
-              let productID = activeDeviceProductID else {
-            if pendingAutoConnectTask != nil {
-                pendingAutoConnectTask?.cancel()
-                pendingAutoConnectTask = nil
-                _ = connectionLifecycle.detached()
-            }
-            if remainingIdentities.count == 1 && !MTPDeviceManager.shared.isConnected {
-                scheduleAutoConnect(isInitialScan: false)
-            }
-            return
-        }
-        let matchesActiveDevice: (USBDeviceIdentity) -> Bool = {
-            $0.matches(vendorID: vendorID, productID: productID, serialNumber: self.activeDeviceSerialNumber)
-        }
-        let removedActiveDevice = removedIdentities.contains(where: matchesActiveDevice)
-        let activeDeviceIsGone = !remainingIdentities.contains(where: matchesActiveDevice)
-        guard removedActiveDevice || activeDeviceIsGone else { return }
-
-        pendingAutoConnectTask?.cancel()
-        pendingAutoConnectTask = nil
-        _ = connectionLifecycle.detached()
-        clearActiveDevice()
+        try? await Task.sleep(nanoseconds: 150_000_000)
+        availableDeviceIdentities = connectedDeviceIdentities()
+        knownDeviceIdentities = availableDeviceIdentities
+        MTPConnectionCoordinator.shared.updateAvailableDevices(
+            availableDeviceIdentities,
+            startAutomatically: UserDefaults.standard.object(forKey: "autoDetectDevice") as? Bool ?? true
+        )
         ErrorLogger.logMessage(
-            "USB device detached",
+            "USB device availability changed",
             level: .info,
             userInfo: [
-                "usb_event": "detach",
-                "connection_state": MTPDeviceManager.shared.isConnected ? "connected" : "connecting"
+                "event": "usb_scan",
+                "state": availableDeviceIdentities.isEmpty ? "usb_absent" : "device_found",
+                "device_count": availableDeviceIdentities.count
             ]
         )
-        MTPDeviceManager.shared.invalidateConnection(
-            message: "The Android device was disconnected. Reconnect it and try again."
-        )
-    }
-
-    private func scheduleAutoConnect(
-        isInitialScan: Bool,
-        vendorID: UInt16? = nil,
-        productID: UInt16? = nil,
-        serialNumber: String? = nil
-    ) {
-        pendingAutoConnectTask?.cancel()
-        let token = connectionLifecycle.attachScheduled()
-        ErrorLogger.logMessage(
-            "USB device attached",
-            level: .info,
-            userInfo: [
-                "usb_event": "attach",
-                "connection_state": "pending",
-                "initial_scan": isInitialScan
-            ]
-        )
-
-        pendingAutoConnectTask = Task { @MainActor [weak self] in
-            let delays: [UInt64] = [300_000_000, 750_000_000, 1_500_000_000, 3_000_000_000]
-            for delay in delays {
-                try? await Task.sleep(nanoseconds: delay)
-                guard !Task.isCancelled,
-                      let self,
-                      self.connectionLifecycle.accepts(token) else { return }
-                guard !MTPDeviceManager.shared.isConnected else {
-                    self.pendingAutoConnectTask = nil
-                    return
-                }
-
-                let identities = self.connectedDeviceIdentities()
-                if let vendorID, let productID {
-                    guard identities.contains(where: {
-                        $0.matches(vendorID: vendorID, productID: productID, serialNumber: serialNumber)
-                    }) else { return }
-                } else {
-                    guard !identities.isEmpty else { return }
-                }
-
-                if await MTPDeviceManager.shared.connectDevice() {
-                    guard self.connectionLifecycle.accepts(token) else { return }
-                    self.pendingAutoConnectTask = nil
-                    return
-                }
-                if MTPDeviceManager.shared.isConnected {
-                    self.pendingAutoConnectTask = nil
-                    return
-                }
-                if MTPDeviceManager.shared.errorMessage != nil {
-                    return
-                }
-            }
-
-            guard let self,
-                  self.connectionLifecycle.accepts(token) else { return }
-            self.pendingAutoConnectTask = nil
-            ErrorLogger.logMessage(
-                "MTP auto-connect attempts exhausted",
-                level: .warning,
-                userInfo: [
-                    "operation": "initialize",
-                    "operation_phase": "connection",
-                    "reconnect_result": "attempts_exhausted"
-                ]
-            )
-        }
     }
     
     private func deviceIdentity(for device: io_object_t) -> USBDeviceIdentity? {

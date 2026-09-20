@@ -8,6 +8,19 @@ import (
 	"github.com/ganeshrvel/usb"
 )
 
+type DeviceSelector struct {
+	VendorID     uint16
+	ProductID    uint16
+	SerialNumber string
+}
+
+func selectorMatches(selector DeviceSelector, vendorID, productID uint16, serialNumber string) bool {
+	if selector.VendorID != vendorID || selector.ProductID != productID {
+		return false
+	}
+	return selector.SerialNumber == "" || selector.SerialNumber == serialNumber
+}
+
 func candidateFromDeviceDescriptor(d *usb.Device) *Device {
 	dd, err := d.GetDeviceDescriptor()
 	if err != nil {
@@ -20,6 +33,10 @@ func candidateFromDeviceDescriptor(d *usb.Device) *Device {
 		}
 		for _, iface := range cdecs.Interfaces {
 			for _, a := range iface.AltSetting {
+				if a.InterfaceClass != usb.CLASS_IMAGE &&
+					!(a.InterfaceClass == usb.CLASS_PER_INTERFACE && a.InterfaceSubClass == 1 && a.InterfaceProtocol == 1) {
+					continue
+				}
 				if len(a.EndPoints) != 3 {
 					continue
 				}
@@ -142,6 +159,68 @@ func selectDevice(cands []*Device, pattern string) (*Device, error) {
 		}
 	}
 	return found[0], nil
+}
+
+func SelectDeviceWithSelector(selector DeviceSelector, allowDebugging bool) (*Device, error) {
+	c := usb.NewContext()
+	devs, err := FindDevices(c)
+	if err != nil {
+		return nil, err
+	}
+	if len(devs) == 0 {
+		return nil, fmt.Errorf("no MTP devices found")
+	}
+
+	var matching []*Device
+	for _, candidate := range devs {
+		if candidate.devDescr.IdVendor != selector.VendorID || candidate.devDescr.IdProduct != selector.ProductID {
+			candidate.Done()
+			continue
+		}
+		candidate.USBDebug = allowDebugging
+		candidate.DataDebug = allowDebugging
+		candidate.MTPDebug = allowDebugging
+		if err := candidate.Open(); err != nil {
+			candidate.Done()
+			continue
+		}
+		if selector.SerialNumber != "" {
+			info, infoErr := candidate.GetUsbInfo()
+			if infoErr != nil || !selectorMatches(selector, info.IdVendor, info.IdProduct, info.SerialNumber) {
+				candidate.Close()
+				candidate.Done()
+				continue
+			}
+		}
+		matching = append(matching, candidate)
+	}
+
+	if len(matching) == 0 {
+		return nil, fmt.Errorf("no MTP device matched vendor=0x%04x product=0x%04x", selector.VendorID, selector.ProductID)
+	}
+	if len(matching) > 1 {
+		for _, candidate := range matching {
+			candidate.Close()
+			candidate.Done()
+		}
+		return nil, fmt.Errorf("more than one MTP device matched vendor=0x%04x product=0x%04x", selector.VendorID, selector.ProductID)
+	}
+
+	candidate := matching[0]
+	config, err := candidate.h.GetConfiguration()
+	if err != nil {
+		candidate.Close()
+		candidate.Done()
+		return nil, fmt.Errorf("could not get configuration: %w", err)
+	}
+	if config != candidate.configValue {
+		if err := candidate.h.SetConfiguration(candidate.configValue); err != nil {
+			candidate.Close()
+			candidate.Done()
+			return nil, fmt.Errorf("could not set configuration: %w", err)
+		}
+	}
+	return candidate, nil
 }
 
 // SelectDevice returns opened MTP device that matches the given pattern.

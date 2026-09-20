@@ -21,7 +21,7 @@ extern const char *_GoStringPtr(_GoString_ s);
 /* Start of preamble from import "C" comments.  */
 
 
-#line 16 "kalam.go"
+#line 17 "kalam.go"
 	#include "stdint.h"
 	typedef void (* on_cb_result_t)(char*);
 
@@ -94,7 +94,8 @@ extern "C" {
 
 extern void BeginTransfer(void);
 extern void CancelTransfer(void);
-extern void Initialize(void);
+extern void SetOperationID(char* id);
+extern void Initialize(char* inputJSON);
 extern void FetchDeviceInfo(void);
 extern void FetchStorages(void);
 extern void MakeDirectory(char* makeDirectoryInputJson);

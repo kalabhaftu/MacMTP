@@ -74,6 +74,8 @@ This is community-maintained software, so this README should describe the curren
 ### File Transfer
 
 - USB MTP device detection through IOKit, with optional auto-connect.
+- Serialized connection ownership with explicit USB, handshake, retry, and
+  failure states; auto-connect performs at most one controlled session retry.
 - Local-to-device uploads and device-to-local downloads.
 - Internal storage and SD card selection when the connected device exposes multiple MTP storages.
 - Batch transfers with per-file progress, pause/resume controls for the queue, cancellation, and completion/error notifications.
@@ -253,8 +255,11 @@ release/
 SwiftUI app
   ContentView, FileExplorerPane, SidebarView, transfer/progress UI
         |
+Swift connection coordinator
+  USB availability, device identity, session generation, retry policy
+        |
 Swift services and models
-  ClipboardManager, FileTransferService, USBWatcher, MTPDeviceManager
+  ClipboardManager, FileTransferService, MTPDeviceManager
         |
 KalamBridge
   Swift async wrappers around C callbacks and JSON payloads
@@ -265,6 +270,12 @@ CKalam
 Kalam / go-mtpx / libusb
   MTP operations and USB transport
 ```
+
+IOKit only reports USB availability. The connection coordinator owns session
+creation and recovery, and passes the detected vendor/product/serial identity
+to the native selector. Native initialization opens the interface, starts the
+MTP session, then fetches device information and storages. It does not probe
+`GetDeviceInfo` before `OpenSession`.
 
 The Go MTP engine is compiled as a static C archive (`libkalam.a`) and linked into the Swift executable. `libusb.dylib` is bundled into the app package during scripted builds.
 

@@ -64,6 +64,7 @@ public struct ErrorLogger {
             .map(sanitize)
             .joined(separator: ": ")
         systemLogger.error("\(reportDescription, privacy: .public)")
+        writeTerminal("MTP error=\(reportDescription)")
 
         guard ensureStarted() else { return }
         guard shouldReport(error) else { return }
@@ -110,6 +111,8 @@ public struct ErrorLogger {
         guard ensureStarted() else { return }
 
         let extras = sanitizedExtras(userInfo)
+        let fields = extras.keys.sorted().map { "\($0)=\(String(describing: extras[$0]!))" }.joined(separator: " ")
+        writeTerminal("MTP event=\(sanitizedMessage) level=\(level.rawValue)\(fields.isEmpty ? "" : " \(fields)")")
         let breadcrumb = Breadcrumb(level: level, category: "macmtp")
         breadcrumb.message = sanitizedMessage
         breadcrumb.data = extras
@@ -128,6 +131,11 @@ public struct ErrorLogger {
 
     static func shouldCaptureMessage(_ level: SentryLevel) -> Bool {
         level == .error || level == .fatal
+    }
+
+    private static func writeTerminal(_ line: String) {
+        guard let data = (line + "\n").data(using: .utf8) else { return }
+        try? FileHandle.standardError.write(contentsOf: data)
     }
 
     public static func captureTestReport() async -> TestReportResult {

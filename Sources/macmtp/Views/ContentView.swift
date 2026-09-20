@@ -17,6 +17,7 @@ struct ContentView: View {
 
     @State private var isMTPConnected: Bool = false
     @State private var connectedDeviceName: String = "No Device Connected"
+    @State private var connectionState: MTPConnectionState = .usbAbsent
 
 
     @State private var selectedSidebarItem: String? = "home"
@@ -87,6 +88,7 @@ struct ContentView: View {
             _selectedMTPItems = State(initialValue: Set(ScreenshotDemo.mtpFiles.prefix(3).map(\.path)))
             _isMTPConnected = State(initialValue: true)
             _connectedDeviceName = State(initialValue: ScreenshotDemo.deviceInfo.displayName)
+            _connectionState = State(initialValue: .connected)
             _selectedSidebarItem = State(initialValue: "home")
             _localFiles = State(initialValue: ScreenshotDemo.localFiles)
             _mtpFiles = State(initialValue: ScreenshotDemo.mtpFiles)
@@ -103,6 +105,7 @@ struct ContentView: View {
             ToolbarView(
                 isMTPConnected: isMTPConnected,
                 deviceName: connectedDeviceName,
+                connectionState: connectionState,
                 onRefresh: handleRefresh,
                 onCopy: handleCopy,
                 onCut: handleCut,
@@ -309,6 +312,10 @@ struct ContentView: View {
                 }
             }
         }
+        .onReceive(MTPConnectionCoordinator.shared.$state) { state in
+            guard !screenshotMode else { return }
+            connectionState = state
+        }
         .onReceive(MTPDeviceManager.shared.$mtpFiles) { newFiles in
             guard !screenshotMode else { return }
             mtpFiles = newFiles
@@ -466,7 +473,7 @@ struct ContentView: View {
                 onConnect: {
                     Task {
                         guard !screenshotMode else { return }
-                        _ = await MTPDeviceManager.shared.connectDevice()
+                        MTPConnectionCoordinator.shared.retry()
                     }
                 },
                 onFilesDropped: { files, destination in
@@ -917,6 +924,12 @@ struct ContentView: View {
                                 DispatchQueue.main.async {
                                     self.showTransferToast(reason)
                                 }
+                            }
+                            continue
+                        }
+                        guard PathValidation.isValidLocalFilename(file.name) else {
+                            DispatchQueue.main.async {
+                                self.showTransferToast("Cannot copy '\(file.name)': the filename is invalid on macOS.")
                             }
                             continue
                         }
