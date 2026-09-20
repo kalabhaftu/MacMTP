@@ -66,7 +66,9 @@ public final class FileTransferService: ObservableObject {
     
     public func cancelTransfer() {
         cancelRequested = true
-        bridge.cancelTransfer()
+        if transferInFlight {
+            bridge.cancelTransfer()
+        }
         if let batch = activeBatch {
             batch.beginCancellation()
         }
@@ -154,6 +156,11 @@ public final class FileTransferService: ObservableObject {
                 } else {
                     ErrorLogger.log(error, message: "File transfer failed")
                     activeBatch?.state = .failed(error.localizedDescription)
+                    if isMTPTransportFailure(error) {
+                        MTPDeviceManager.shared.invalidateConnection(
+                            message: "The MTP connection stopped responding. Reconnect your Android device and try again."
+                        )
+                    }
                     postTransferNotification(
                         title: "Transfer Failed",
                         body: error.localizedDescription,

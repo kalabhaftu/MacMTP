@@ -57,6 +57,11 @@ func transportFailureClassificationKeepsContentionSeparateFromBrokenSessions() {
     #expect(isMTPTransportFailure(KalamError.deviceNotConnected))
     #expect(isMTPTransportFailure(KalamError.operationFailed("transaction ID mismatch: got 7, expected 6")))
     #expect(isMTPTransportFailure(KalamError.transferFailed("libusb: device disconnected")))
+    #expect(isMTPTransportFailure(KalamError.nativeOperationFailed(
+        operation: "discover_mtp_devices",
+        errorType: "ErrorGeneral",
+        message: "MTP interface probe failed: SessionAlreadyOpened"
+    )))
 }
 
 @Test
@@ -166,4 +171,3 @@ func systemAndUserErrorsAreFilteredFromSentry() {
     let unexpectedError = NSError(domain: NSCocoaErrorDomain, code: CocoaError.coderValueNotFound.rawValue, userInfo: nil)
     #expect(ErrorLogger.shouldReport(unexpectedError))
 }
-

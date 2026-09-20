@@ -24,18 +24,27 @@ func DiscoverDeviceSelectors() ([]DeviceSelector, error) {
 	seen := make(map[DeviceSelector]struct{})
 	selectors := make([]DeviceSelector, 0, len(devs))
 	var claimError error
+	var probeError error
 	for _, candidate := range devs {
 		candidate.MTPDebug = false
 		candidate.USBDebug = false
 		candidate.DataDebug = false
 		if err := candidate.Open(); err != nil {
+			if probeError == nil {
+				probeError = err
+			}
 			if isUSBClaimError(err) {
 				claimError = err
 			}
 			candidate.Done()
 			continue
 		}
-		if err := candidate.OpenSession(); err != nil {
+		// Configure handles Android's SessionAlreadyOpened response by closing
+		// the stale session and opening a fresh one.
+		if err := candidate.Configure(); err != nil {
+			if probeError == nil {
+				probeError = err
+			}
 			if isUSBClaimError(err) {
 				claimError = err
 			}
@@ -45,6 +54,9 @@ func DiscoverDeviceSelectors() ([]DeviceSelector, error) {
 		}
 		var deviceInfo DeviceInfo
 		if err := candidate.GetDeviceInfo(&deviceInfo); err != nil {
+			if probeError == nil {
+				probeError = err
+			}
 			if isUSBClaimError(err) {
 				claimError = err
 			}
@@ -56,6 +68,9 @@ func DiscoverDeviceSelectors() ([]DeviceSelector, error) {
 		candidate.Close()
 		candidate.Done()
 		if err != nil {
+			if probeError == nil {
+				probeError = err
+			}
 			continue
 		}
 		selector := DeviceSelector{
@@ -70,6 +85,9 @@ func DiscoverDeviceSelectors() ([]DeviceSelector, error) {
 	}
 	if len(selectors) == 0 && claimError != nil {
 		return nil, fmt.Errorf("MTP interface probe failed: %w", claimError)
+	}
+	if len(selectors) == 0 && probeError != nil {
+		return nil, fmt.Errorf("MTP interface probe failed: %w", probeError)
 	}
 	return selectors, nil
 }

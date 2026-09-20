@@ -18,17 +18,20 @@ private actor RecordingMTPBridge: MTPBridge {
     private let failListingAfterMutation: Bool
     private let initializeDelay: UInt64
     private let cancelInitialize: Bool
+    private let cancelListing: Bool
 
     init(
         files: [GoFileInfo] = [],
         failListingAfterMutation: Bool = false,
         initializeDelay: UInt64 = 0,
-        cancelInitialize: Bool = false
+        cancelInitialize: Bool = false,
+        cancelListing: Bool = false
     ) {
         self.files = files
         self.failListingAfterMutation = failListingAfterMutation
         self.initializeDelay = initializeDelay
         self.cancelInitialize = cancelInitialize
+        self.cancelListing = cancelListing
     }
 
     func initialize(selector: MTPDeviceSelector) async throws -> GoDeviceInfoData {
@@ -78,6 +81,13 @@ private actor RecordingMTPBridge: MTPBridge {
 
     func listDirectory(storageId: UInt32, path: String, recursive: Bool, skipHidden: Bool) async throws -> [GoFileInfo] {
         listDirectoryCalls += 1
+        if cancelListing {
+            throw KalamError.nativeOperationFailed(
+                operation: "list_directory",
+                errorType: "ErrorTransferCancelled",
+                message: "transfer cancelled"
+            )
+        }
         if failListingAfterMutation && makeDirectoryCalls > 0 {
             throw KalamError.timedOut("directory walk after mutation")
         }
@@ -184,6 +194,27 @@ func emptyDirectoryResponsesDecodeAsAnEmptyCollection() throws {
 }
 
 @Test
+func mtpSelectorPreservesSerialNumber() throws {
+    let payload = #"{"error":"","errorType":"","data":[{"vendorId":3725,"productId":8192,"serialNumber":"device-serial"}]}"#.data(using: .utf8)!
+    let result = try JSONDecoder().decode(GoMTPDevicesResult.self, from: payload)
+
+    #expect(result.data.count == 1)
+    #expect(result.data[0].serialNumber == "device-serial")
+}
+
+@Test @MainActor
+func cancelledDirectoryRefreshPreservesConnectionAndErrorState() async {
+    let manager = MTPDeviceManager(bridge: RecordingMTPBridge(cancelListing: true))
+    _ = await manager.connectDevice(selector: MTPDeviceSelector(vendorId: 0x1234, productId: 0x5678, serialNumber: ""))
+
+    manager.errorMessage = nil
+    await manager.refreshFiles()
+
+    #expect(manager.isConnected)
+    #expect(manager.errorMessage == nil)
+}
+
+@Test
 func mutationResponsesPreserveNativeObjectIdentifiers() throws {
     let payload = #"{"error":"","errorType":"","data":true,"objectId":42}"#.data(using: .utf8)!
     let result = try JSONDecoder().decode(GoSimpleResult.self, from: payload)
@@ -216,7 +247,7 @@ func invalidLocalFilenamesAreRejectedWithoutRenaming() {
 @Test
 func connectionStatesExposeActionableStatus() {
     #expect(MTPConnectionState.usbAbsent.title == "USB device not connected")
-    #expect(MTPConnectionState.deviceFound.detail == "Checking for an MTP interface…")
+    #expect(MTPConnectionState.deviceFound.detail.contains("Select File Transfer (MTP)"))
     #expect(MTPConnectionState.connecting(attempt: 2).title == "Connecting, attempt 2 of 2")
     #expect(MTPConnectionState.connected.detail == "Connected via USB")
 }

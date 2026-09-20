@@ -228,6 +228,7 @@ public final class MTPDeviceManager: ObservableObject {
     func invalidateConnection(message: String) {
         connectionGeneration &+= 1
         refreshGeneration &+= 1
+        MTPConnectionCoordinator.shared.markSessionLost(message: message)
         let invalidatedGeneration = connectionGeneration
         directoryCoordinator.invalidateSnapshot()
 
@@ -439,6 +440,10 @@ public final class MTPDeviceManager: ObservableObject {
         } catch {
             guard generation == refreshGeneration,
                   currentDirectoryRefreshRequest() == request else { return false }
+            if isMTPTransferCancellation(error) {
+                errorMessage = nil
+                return false
+            }
             directoryCoordinator.recordFailedRefresh(for: request)
             ErrorLogger.log(
                 error,

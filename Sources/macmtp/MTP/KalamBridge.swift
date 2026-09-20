@@ -60,6 +60,12 @@ func isMTPTransportFailure(_ error: Error) -> Bool {
             || normalized.contains("no mtp device")
             || normalized.contains("errormtpdetectfailed")
             || normalized.contains("timed out")
+            || normalized.contains("eof")
+            || normalized.contains("end of file")
+            || normalized.contains("got type")
+            || normalized.contains("malformed")
+            || normalized.contains("sessionalreadyopened")
+            || normalized.contains("session already open")
             || normalized.contains("broken pipe")
             || normalized.contains("device disconnected")
     case .nativeOperationFailed(_, let errorType, let message):
@@ -70,6 +76,12 @@ func isMTPTransportFailure(_ error: Error) -> Bool {
             || normalized.contains("no mtp device")
             || normalized.contains("errormtpdetectfailed")
             || normalized.contains("timed out")
+            || normalized.contains("eof")
+            || normalized.contains("end of file")
+            || normalized.contains("got type")
+            || normalized.contains("malformed")
+            || normalized.contains("sessionalreadyopened")
+            || normalized.contains("session already open")
             || normalized.contains("broken pipe")
             || normalized.contains("device disconnected")
     default:
@@ -628,7 +640,11 @@ public actor KalamBridge {
             DiscoverMTPDevices()
         }
         return result.data.map {
-            MTPDeviceSelector(vendorId: $0.vendorId, productId: $0.productId, serialNumber: "")
+            MTPDeviceSelector(
+                vendorId: $0.vendorId,
+                productId: $0.productId,
+                serialNumber: $0.serialNumber
+            )
         }
     }
 

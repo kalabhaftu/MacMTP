@@ -895,7 +895,7 @@ struct FileExplorerPane: View {
                 .frame(maxWidth: 320, alignment: .leading)
             }
 
-            if !isLocal {
+            if !isLocal && connectionCoordinator.state != .connected {
                 Button(action: { onConnect?() }) {
                     Label("Retry Connection", systemImage: "arrow.clockwise")
                 }

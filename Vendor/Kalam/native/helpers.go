@@ -146,6 +146,9 @@ func _walk(storageId uint32, fullPath string, recursive, skipDisallowedFiles, sk
 	}
 
 	_, _, _, err = mtpx.Walk(container.dev, storageId, fullPath, recursive, skipDisallowedFiles, skipHiddenFiles, func(objectId uint32, fi *mtpx.FileInfo, err error) error {
+		if transferCancellationRequested() {
+			return mtpx.ErrTransferCancelled
+		}
 		if err != nil {
 			return err
 		}
