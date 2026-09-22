@@ -98,6 +98,13 @@ func isMTPCancellationRecoveryFailure(_ error: Error) -> Bool {
         || message.contains("cancellation requires reconnect")
 }
 
+func shouldAutomaticallyReconnectMTP(_ error: Error) -> Bool {
+    if isMTPCancellationRecoveryFailure(error) {
+        return true
+    }
+    return isMTPTransportFailure(error) && !isMTPTransferCancellation(error)
+}
+
 func shouldSignalNativeCancellation(after error: Error) -> Bool {
     guard let kalamError = error as? KalamError else { return false }
     if case .timedOut = kalamError { return true }

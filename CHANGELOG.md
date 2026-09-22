@@ -8,6 +8,8 @@
 - Selected native MTP devices by the detected USB vendor, product, and serial identity, removed the pre-session device-info probe, and hardened interface/session cleanup.
 - Reworked upload packet framing and partial-write handling so SendObject reports payload bytes accurately and handles endpoint-sized packets consistently.
 - Drain stale MTP bulk and event data after cancellation, verify the session before reuse, and automatically recover stale startup sessions without manual replug recovery.
+- Reduce large-folder upload traffic with bounded batches and per-directory lookup caching, allow slower Android SendObject responses, and automatically reconnect after recoverable native USB timeouts.
+- Restored the required USB short-packet terminator for packet-aligned SendObject uploads to prevent final-file hangs on Android devices.
 - Added invalid local filename rejection and updated support guidance for launch-time detection and transfer failures.
 
 ## 1.7.1 - 2026-09-14

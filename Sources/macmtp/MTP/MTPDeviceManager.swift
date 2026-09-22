@@ -309,7 +309,10 @@ public final class MTPDeviceManager: ObservableObject {
         } catch {
             ErrorLogger.log(error, message: "Failed to refresh storages")
             if isMTPTransportFailure(error) {
-                invalidateConnection(message: "The MTP connection was lost. Reconnect your Android device and try again.")
+                invalidateConnection(
+                    message: "The MTP connection was lost. Reconnect your Android device and try again.",
+                    reconnectAutomatically: shouldAutomaticallyReconnectMTP(error)
+                )
             }
         }
     }
@@ -470,7 +473,10 @@ public final class MTPDeviceManager: ObservableObject {
                 ]
             )
             if isMTPTransportFailure(error) {
-                invalidateConnection(message: "MTP device disconnected or connection lost.")
+                invalidateConnection(
+                    message: "MTP device disconnected or connection lost.",
+                    reconnectAutomatically: shouldAutomaticallyReconnectMTP(error)
+                )
             } else {
                 if let snapshot = directoryCoordinator.snapshot(for: request) {
                     // A failed refresh may only restore the same storage/path/

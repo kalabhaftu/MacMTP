@@ -166,7 +166,8 @@ public final class FileTransferService: ObservableObject {
                     activeBatch?.state = .failed(error.localizedDescription)
                     if isMTPTransportFailure(error) {
                         MTPDeviceManager.shared.invalidateConnection(
-                            message: "The MTP connection stopped responding. Reconnect your Android device and try again."
+                            message: "The MTP connection stopped responding. Reconnect your Android device and try again.",
+                            reconnectAutomatically: shouldAutomaticallyReconnectMTP(error)
                         )
                     }
                     postTransferNotification(
@@ -398,9 +399,9 @@ public final class FileTransferService: ObservableObject {
             groups[destParent, default: []].append(index)
         }
         
-        // Keep native calls to one file so pause, cancellation, and failures are
-        // observed at the next file boundary instead of after a large batch.
-        let chunkSize = 1
+        // Bound batches so native directory caches survive across files while
+        // progress callbacks still observe cancellation during each file.
+        let chunkSize = 16
         
         var terminalTransferError: Error?
 
@@ -459,9 +460,13 @@ public final class FileTransferService: ObservableObject {
                         }
                     }
                     let throttler = ProgressThrottler()
+                    let progressIndices = chunkIndices.reduce(into: [String: Int]()) { result, index in
+                        result[batch.items[index].destinationPath] = index
+                    }
                     let handleProgress: @Sendable (GoTransferProgressInfo) -> Void = { [weak self] progressInfo in
                         guard let self = self else { return }
-                        guard let index = chunkIndices.first else { return }
+                        let index = progressIndices[progressInfo.fullPath] ?? chunkIndices.first
+                        guard let index else { return }
                         let sent = progressInfo.activeFileSize.sent
                         let total = progressInfo.activeFileSize.total
                         let speedMB = progressInfo.speed
@@ -562,7 +567,7 @@ public final class FileTransferService: ObservableObject {
 
         if let terminalTransferError {
             let message = formatTransferError(terminalTransferError)
-            let reconnectAutomatically = isMTPCancellationRecoveryFailure(terminalTransferError)
+            let reconnectAutomatically = shouldAutomaticallyReconnectMTP(terminalTransferError)
             for index in batch.items.indices where !batch.items[index].status.isTerminal {
                 var item = batch.items[index]
                 item.markFailed(message)

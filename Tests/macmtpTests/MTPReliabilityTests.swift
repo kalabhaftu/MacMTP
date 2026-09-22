@@ -473,6 +473,29 @@ func cancellationTransportResetTriggersAutomaticReconnect() {
 }
 
 @Test
+func transportTimeoutTriggersAutomaticReconnect() {
+    let timeout = KalamError.nativeOperationFailed(
+        operation: "SendObject",
+        errorType: "ErrorFileTransfer",
+        message: "LIBUSB_ERROR_TIMEOUT"
+    )
+    let cancellation = KalamError.nativeOperationFailed(
+        operation: "SendObject",
+        errorType: "ErrorTransferCancelled",
+        message: "transfer cancelled"
+    )
+    let staleHandle = KalamError.nativeOperationFailed(
+        operation: "GetObjectHandles",
+        errorType: "ErrorDeviceLocked",
+        message: "device is not open"
+    )
+
+    #expect(shouldAutomaticallyReconnectMTP(timeout))
+    #expect(shouldAutomaticallyReconnectMTP(staleHandle))
+    #expect(!shouldAutomaticallyReconnectMTP(cancellation))
+}
+
+@Test
 func unchangedUSBInventoryDoesNotNeedAnotherConnectionGeneration() {
     let identity = USBDeviceIdentity(vendorID: 0x0e8d, productID: 0x2008, locationID: 1, serialNumber: "phone")
     #expect(!usbInventoryChanged(previous: [identity], current: [identity]))

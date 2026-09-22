@@ -819,6 +819,33 @@ func (d *Device) dataPrint(ep byte, data []byte) {
 	hexDump(data)
 }
 
+func writeUSBPacket(write func([]byte) (int, error), packet []byte) (int64, error) {
+	if len(packet) == 0 {
+		actual, err := write(packet)
+		if err != nil {
+			return int64(actual), err
+		}
+		if actual != 0 {
+			return int64(actual), fmt.Errorf("USB bulk zero-length write returned %d bytes", actual)
+		}
+		return 0, nil
+	}
+
+	var written int64
+	for len(packet) > 0 {
+		actual, err := write(packet)
+		written += int64(actual)
+		if err != nil {
+			return written, err
+		}
+		if actual <= 0 {
+			return written, fmt.Errorf("USB bulk write made no progress")
+		}
+		packet = packet[actual:]
+	}
+	return written, nil
+}
+
 // bulkWrite returns the number of non-header bytes written.
 func (d *Device) bulkWrite(hdr *usbBulkHeader, r io.Reader, size int64, req *Container, progressCb ProgressFunc) (n int64, err error) {
 	totalSize := size
@@ -827,19 +854,9 @@ func (d *Device) bulkWrite(hdr *usbBulkHeader, r io.Reader, size int64, req *Con
 		return 0, fmt.Errorf("invalid USB bulk OUT packet size %d", packetSize)
 	}
 	writePacket := func(packet []byte) (int64, error) {
-		var written int64
-		for len(packet) > 0 {
-			actual, writeErr := d.h.BulkTransfer(d.sendEP, packet, d.Timeout)
-			written += int64(actual)
-			if writeErr != nil {
-				return written, writeErr
-			}
-			if actual <= 0 {
-				return written, fmt.Errorf("USB bulk write made no progress")
-			}
-			packet = packet[actual:]
-		}
-		return written, nil
+		return writeUSBPacket(func(data []byte) (int, error) {
+			return d.h.BulkTransfer(d.sendEP, data, d.Timeout)
+		}, packet)
 	}
 
 	if hdr != nil {

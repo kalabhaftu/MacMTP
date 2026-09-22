@@ -1096,6 +1096,10 @@ struct ContentView: View {
             var hadError: String?
             var didCopy = false
             for item in items {
+                guard PathValidation.isValidLocalFilename(item.name) else {
+                    hadError = "Cannot copy '\(item.name)': the filename is invalid on macOS."
+                    continue
+                }
                 let validation = PathValidation.isSafeToTransfer(sourcePath: item.path, destinationDir: destination)
                 guard validation.isSafe else {
                     if let reason = validation.reason, reason != "Item is already located in the destination folder." {
