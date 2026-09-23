@@ -12,20 +12,37 @@ type DeviceSelector struct {
 	VendorID     uint16
 	ProductID    uint16
 	SerialNumber string
+	Manufacturer string
+	Model        string
 }
 
 func DiscoverDeviceSelectors() ([]DeviceSelector, error) {
+	return discoverDeviceSelectors(nil)
+}
+
+// DiscoverDeviceSelectorsExcept probes available MTP devices without touching
+// the supplied active handle. Discovery runs while the app keeps one session
+// open; probing that same USB address can otherwise steal its interface.
+func DiscoverDeviceSelectorsExcept(skip *Device) ([]DeviceSelector, error) {
+	return discoverDeviceSelectors(skip)
+}
+
+func discoverDeviceSelectors(skip *Device) ([]DeviceSelector, error) {
 	c := usb.NewContext()
 	devs, err := FindDevices(c)
 	if err != nil {
 		return nil, err
 	}
 
-	seen := make(map[DeviceSelector]struct{})
+	seen := make(map[string]struct{})
 	selectors := make([]DeviceSelector, 0, len(devs))
 	var claimError error
 	var probeError error
 	for _, candidate := range devs {
+		if skip != nil && sameUSBDevice(candidate, skip) {
+			candidate.Done()
+			continue
+		}
 		candidate.MTPDebug = false
 		candidate.USBDebug = false
 		candidate.DataDebug = false
@@ -77,9 +94,12 @@ func DiscoverDeviceSelectors() ([]DeviceSelector, error) {
 			VendorID:     info.IdVendor,
 			ProductID:    info.IdProduct,
 			SerialNumber: info.SerialNumber,
+			Manufacturer: deviceInfo.Manufacturer,
+			Model:        deviceInfo.Model,
 		}
-		if _, exists := seen[selector]; !exists {
-			seen[selector] = struct{}{}
+		key := fmt.Sprintf("%04x:%04x:%s", selector.VendorID, selector.ProductID, selector.SerialNumber)
+		if _, exists := seen[key]; !exists {
+			seen[key] = struct{}{}
 			selectors = append(selectors, selector)
 		}
 	}
@@ -90,6 +110,14 @@ func DiscoverDeviceSelectors() ([]DeviceSelector, error) {
 		return nil, fmt.Errorf("MTP interface probe failed: %w", probeError)
 	}
 	return selectors, nil
+}
+
+func sameUSBDevice(lhs, rhs *Device) bool {
+	if lhs == nil || rhs == nil || lhs.dev == nil || rhs.dev == nil {
+		return false
+	}
+	return lhs.dev.GetBusNumber() == rhs.dev.GetBusNumber() &&
+		lhs.dev.GetDeviceAddress() == rhs.dev.GetDeviceAddress()
 }
 
 func isUSBClaimError(err error) bool {

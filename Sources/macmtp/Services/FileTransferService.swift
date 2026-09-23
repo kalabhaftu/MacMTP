@@ -40,7 +40,7 @@ public final class FileTransferService: ObservableObject {
     private var cutSourcePaths: [String] = []
     
     private var verifiedDirectories = Set<String>()
-    private var transferInFlight = false
+    @Published private(set) var transferInFlight = false
 
     public var isTransferInFlight: Bool {
         transferInFlight
@@ -155,12 +155,7 @@ public final class FileTransferService: ObservableObject {
                     )
                     // Auto-dismiss cancelled transfer progress bar after 1.5 seconds.
                     let cancelledBatch = self.activeBatch
-                    Task {
-                        try? await Task.sleep(nanoseconds: 1_500_000_000)
-                        if self.activeBatch === cancelledBatch {
-                            self.activeBatch = nil
-                        }
-                    }
+                    self.dismissBatchWhenTransferSettles(cancelledBatch, after: 1_500_000_000)
                 } else {
                     ErrorLogger.log(error, message: "File transfer failed")
                     activeBatch?.state = .failed(error.localizedDescription)
@@ -177,12 +172,7 @@ public final class FileTransferService: ObservableObject {
                     )
                     // Auto-dismiss failed transfer progress bar after 3 seconds.
                     let failedBatch = self.activeBatch
-                    Task {
-                        try? await Task.sleep(nanoseconds: 3_000_000_000)
-                        if self.activeBatch === failedBatch {
-                            self.activeBatch = nil
-                        }
-                    }
+                    self.dismissBatchWhenTransferSettles(failedBatch, after: 3_000_000_000)
                 }
                 isCutOperation = false
                 cutSourcePaths = []
@@ -414,13 +404,19 @@ public final class FileTransferService: ObservableObject {
             } catch {
                 ErrorLogger.log(error, message: "FileTransferService: Failed to create parent directory")
                 let formattedErr = formatTransferError(error)
-                for idx in indices {
-                    var itm = batch.items[idx]
-                    itm.markFailed(formattedErr)
-                    batch.items[idx] = itm
+                if !shouldPresentAsCancelledAfterRecoveryFailure(error, cancelRequested: cancelRequested)
+                    && !isMTPTransferCancellation(error) {
+                    for idx in indices {
+                        var itm = batch.items[idx]
+                        itm.markFailed(formattedErr)
+                        batch.items[idx] = itm
+                    }
                 }
                 if isMTPTransportFailure(error) {
                     terminalTransferError = error
+                    break queueLoop
+                }
+                if cancelRequested || isMTPTransferCancellation(error) {
                     break queueLoop
                 }
                 continue
@@ -508,13 +504,6 @@ public final class FileTransferService: ObservableObject {
                     
                 } catch {
                     if isMTPTransferCancellation(error) {
-                        for idx in chunkIndices {
-                            var itm = batch.items[idx]
-                            if itm.status != .completed {
-                                itm.markFailed("Transfer cancelled")
-                                batch.items[idx] = itm
-                            }
-                        }
                         break queueLoop
                     }
 
@@ -550,11 +539,17 @@ public final class FileTransferService: ObservableObject {
                             ]
                         )
                     }
-                    for idx in chunkIndices {
-                        var itm = batch.items[idx]
-                        if itm.status != .completed && itm.bytesTransferred < itm.fileSize {
-                            itm.markFailed(error.localizedDescription)
-                            batch.items[idx] = itm
+                    let cancellationRecoveryFailure = shouldPresentAsCancelledAfterRecoveryFailure(
+                        error,
+                        cancelRequested: cancelRequested
+                    )
+                    if !cancellationRecoveryFailure {
+                        for idx in chunkIndices {
+                            var itm = batch.items[idx]
+                            if itm.status != .completed && itm.bytesTransferred < itm.fileSize {
+                                itm.markFailed(error.localizedDescription)
+                                batch.items[idx] = itm
+                            }
                         }
                     }
                     if isMTPTransportFailure(error) {
@@ -568,10 +563,16 @@ public final class FileTransferService: ObservableObject {
         if let terminalTransferError {
             let message = formatTransferError(terminalTransferError)
             let reconnectAutomatically = shouldAutomaticallyReconnectMTP(terminalTransferError)
-            for index in batch.items.indices where !batch.items[index].status.isTerminal {
-                var item = batch.items[index]
-                item.markFailed(message)
-                batch.items[index] = item
+            let cancellationRecoveryFailure = shouldPresentAsCancelledAfterRecoveryFailure(
+                terminalTransferError,
+                cancelRequested: cancelRequested
+            )
+            if !cancellationRecoveryFailure {
+                for index in batch.items.indices where !batch.items[index].status.isTerminal {
+                    var item = batch.items[index]
+                    item.markFailed(message)
+                    batch.items[index] = item
+                }
             }
             MTPDeviceManager.shared.invalidateConnection(
                 message: reconnectAutomatically
@@ -582,14 +583,23 @@ public final class FileTransferService: ObservableObject {
         }
         
         if let terminalTransferError {
-            batch.complete()
             let title = batch.completedFileCount == 0 ? "Transfer Failed" : "Transfer Aborted"
             let errorDetail = formatTransferError(terminalTransferError)
-            postTransferNotification(
-                title: title,
-                body: "\(batch.completedFileCount) of \(batch.totalFileCount) files copied. \(errorDetail)",
-                isError: true
-            )
+            if shouldPresentAsCancelledAfterRecoveryFailure(terminalTransferError, cancelRequested: cancelRequested) {
+                batch.finishCancellation()
+                postTransferNotification(
+                    title: "Transfer Cancelled",
+                    body: "\(batch.completedFileCount) of \(batch.totalFileCount) files copied. Session recovery failed; reconnecting.",
+                    isError: true
+                )
+            } else {
+                batch.complete()
+                postTransferNotification(
+                    title: title,
+                    body: "\(batch.completedFileCount) of \(batch.totalFileCount) files copied. \(errorDetail)",
+                    isError: true
+                )
+            }
         } else if cancelRequested {
             batch.finishCancellation()
             let completed = batch.totalBytesTransferred > 0
@@ -655,9 +665,18 @@ public final class FileTransferService: ObservableObject {
         }
         
         let completedBatch = batch
-        Task {
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
-            if self.activeBatch === completedBatch {
+        dismissBatchWhenTransferSettles(completedBatch, after: 3_000_000_000)
+    }
+
+    private func dismissBatchWhenTransferSettles(_ batch: TransferBatch?, after delay: UInt64) {
+        guard let batch else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: delay)
+            while self.transferInFlight {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+            if self.activeBatch === batch {
                 self.activeBatch = nil
             }
         }

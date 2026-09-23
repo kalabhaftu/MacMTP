@@ -203,7 +203,7 @@ public struct ErrorLogger {
     }
 
     static func shouldReport(_ error: Error) -> Bool {
-        if isMTPTransferCancellation(error) {
+        if isMTPTransferCancellation(error) || isMTPCancellationRecoveryFailure(error) {
             return false
         }
 
@@ -235,7 +235,8 @@ public struct ErrorLogger {
             case CocoaError.fileWriteNoPermission.rawValue,
                  CocoaError.fileReadNoPermission.rawValue,
                  CocoaError.userCancelled.rawValue,
-                 CocoaError.fileWriteFileExists.rawValue:
+                 CocoaError.fileWriteFileExists.rawValue,
+                 NSFileWriteOutOfSpaceError:
                 return false
             default:
                 break

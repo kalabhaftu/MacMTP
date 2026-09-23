@@ -90,6 +90,8 @@ type DeviceSelector struct {
 	VendorID     uint16 `json:"vendorId"`
 	ProductID    uint16 `json:"productId"`
 	SerialNumber string `json:"serialNumber"`
+	Manufacturer string `json:"manufacturer,omitempty"`
+	Model        string `json:"model,omitempty"`
 }
 
 type MTPDevicesResult struct {

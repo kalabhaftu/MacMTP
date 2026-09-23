@@ -4,11 +4,52 @@ public struct MTPDeviceSelector: Encodable, Sendable, Equatable, Hashable {
     public let vendorId: UInt16
     public let productId: UInt16
     public let serialNumber: String
+    public let manufacturer: String
+    public let model: String
 
-    public init(vendorId: UInt16, productId: UInt16, serialNumber: String) {
+    private enum CodingKeys: String, CodingKey {
+        case vendorId
+        case productId
+        case serialNumber
+    }
+
+    public init(
+        vendorId: UInt16,
+        productId: UInt16,
+        serialNumber: String,
+        manufacturer: String = "",
+        model: String = ""
+    ) {
         self.vendorId = vendorId
         self.productId = productId
         self.serialNumber = serialNumber
+        self.manufacturer = manufacturer
+        self.model = model
+    }
+
+    public var displayName: String {
+        let manufacturer = manufacturer.trimmingCharacters(in: .whitespacesAndNewlines)
+        let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !manufacturer.isEmpty && !model.isEmpty {
+            return model.localizedCaseInsensitiveContains(manufacturer)
+                ? model
+                : "\(manufacturer) \(model)"
+        }
+        if !model.isEmpty { return model }
+        if !manufacturer.isEmpty { return manufacturer }
+        return String(format: "MTP 0x%04x:0x%04x", vendorId, productId)
+    }
+
+    public static func == (lhs: MTPDeviceSelector, rhs: MTPDeviceSelector) -> Bool {
+        lhs.vendorId == rhs.vendorId
+            && lhs.productId == rhs.productId
+            && lhs.serialNumber == rhs.serialNumber
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(vendorId)
+        hasher.combine(productId)
+        hasher.combine(serialNumber)
     }
 }
 

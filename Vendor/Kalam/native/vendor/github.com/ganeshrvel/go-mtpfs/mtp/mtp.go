@@ -376,26 +376,73 @@ func (d *Device) recoverCancelledTransaction(transactionID uint32) error {
 	return awaitCancelRecovery(drain, readStatus, clearHalts, d.verifyTransactionSync, cancelRecoveryTimeout)
 }
 
-func (d *Device) resetTransport() error {
-	if d.h == nil {
-		return nil
+func (d *Device) resetTransportOnFreshHandle() error {
+	// A stalled Android MTP interface can keep returning the old bulk stream
+	// forever.  Do not issue DEVICE_RESET on that handle: close it first and
+	// reopen the selector-backed device so the reset is session-less.
+	if d.dev == nil {
+		return fmt.Errorf("device descriptor is unavailable")
 	}
-	if err := d.h.ControlTransfer(
-		byte(usb.REQUEST_TYPE_CLASS|usb.RECIPIENT_INTERFACE),
-		mtpRequestReset,
-		0,
-		uint16(d.ifaceDescr.InterfaceNumber),
-		nil,
-		d.Timeout,
-	); err != nil {
-		return err
+	return resetFreshHandleOrder(nil,
+		func() error {
+			d.session = nil
+			return d.Close()
+		},
+		func() error { return d.Open() },
+		func() error {
+			return d.h.ControlTransfer(
+				byte(usb.REQUEST_TYPE_CLASS|usb.RECIPIENT_INTERFACE),
+				mtpRequestReset,
+				0,
+				uint16(d.ifaceDescr.InterfaceNumber),
+				nil,
+				d.Timeout,
+			)
+		},
+		func() error { return d.clearBulkHalts() },
+		func() error {
+			_, err := d.drainCancelPipes()
+			return err
+		},
+		func() error {
+			d.session = nil
+			return d.Close()
+		},
+	)
+}
+
+// resetFreshHandleOrder is kept separate so recovery sequencing stays
+// regression-testable without requiring a physical MTP device.
+func resetFreshHandleOrder(events *[]string, closeStale, openFresh, reset, clearHalts, drain, closeFresh func() error) error {
+	appendEvent := func(event string) {
+		if events != nil {
+			*events = append(*events, event)
+		}
 	}
-	clearErr := d.clearBulkHalts()
-	_, drainErr := d.drainCancelPipes()
-	if clearErr != nil {
-		return clearErr
+	appendEvent("close-stale")
+	if err := closeStale(); err != nil {
+		return fmt.Errorf("close stale MTP handle: %w", err)
 	}
-	return drainErr
+	appendEvent("open-fresh")
+	if err := openFresh(); err != nil {
+		return fmt.Errorf("open fresh MTP handle: %w", err)
+	}
+	for _, step := range []struct {
+		name string
+		fn   func() error
+	}{
+		{"device-reset", reset},
+		{"clear-halts", clearHalts},
+		{"drain", drain},
+	} {
+		appendEvent(step.name)
+		if err := step.fn(); err != nil {
+			_ = closeFresh()
+			return err
+		}
+	}
+	appendEvent("close-fresh")
+	return closeFresh()
 }
 
 func (d *Device) recoverTransferError(transactionID uint32, err error) error {
@@ -406,9 +453,8 @@ func (d *Device) recoverTransferError(transactionID uint32, err error) error {
 		log.Printf("MTP cancellation recovery completed transaction=0x%x", transactionID)
 		return ErrTransferCancelled
 	} else {
-		resetErr := d.resetTransport()
+		resetErr := d.resetTransportOnFreshHandle()
 		d.session = nil
-		_ = d.Abort()
 		return SyncError(fmt.Sprintf(
 			"MTP cancellation recovery failed transaction=0x%x: %v; device reset=%v",
 			transactionID,
@@ -1007,8 +1053,8 @@ func (d *Device) bulkRead(w io.Writer, progressCb ProgressFunc) (n int64, lastPa
 	return n, buf[:0], err
 }
 
-// Configure is a robust version of OpenSession. On failure, it asks the MTP
-// interface to reset its session state, then reopens the same USB handle.
+// Configure is a robust version of OpenSession. On failure, it closes the
+// stale handle, resets a fresh session-less handle, then retries OpenSession.
 func (d *Device) Configure() error {
 	if d.h == nil {
 		if err := d.Open(); err != nil {
@@ -1034,9 +1080,8 @@ func (d *Device) Configure() error {
 				return fmt.Errorf("opening for MTP reset: %w", openErr)
 			}
 		}
-		resetErr := d.resetTransport()
+		resetErr := d.resetTransportOnFreshHandle()
 		d.session = nil
-		_ = d.Close()
 		time.Sleep(250 * time.Millisecond)
 		if openErr := d.Open(); openErr != nil {
 			return fmt.Errorf("opening after MTP reset (reset=%v): %w", resetErr, openErr)

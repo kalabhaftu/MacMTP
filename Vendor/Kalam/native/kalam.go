@@ -138,7 +138,7 @@ func DiscoverMTPDevices() {
 	lockMtp()
 	defer unlockMtp()
 
-	selectors, err := mtp.DiscoverDeviceSelectors()
+	selectors, err := mtp.DiscoverDeviceSelectorsExcept(container.dev)
 	if err != nil {
 		send_to_js.SendError(err)
 		return

@@ -98,6 +98,10 @@ func isMTPCancellationRecoveryFailure(_ error: Error) -> Bool {
         || message.contains("cancellation requires reconnect")
 }
 
+func shouldPresentAsCancelledAfterRecoveryFailure(_ error: Error, cancelRequested: Bool) -> Bool {
+    cancelRequested && isMTPCancellationRecoveryFailure(error)
+}
+
 func shouldAutomaticallyReconnectMTP(_ error: Error) -> Bool {
     if isMTPCancellationRecoveryFailure(error) {
         return true
@@ -112,7 +116,7 @@ func shouldSignalNativeCancellation(after error: Error) -> Bool {
 }
 
 func shouldReportMTPTransportFailure(_ error: Error, connectionIsActive: Bool) -> Bool {
-    if isMTPTransferCancellation(error) {
+    if isMTPTransferCancellation(error) || isMTPCancellationRecoveryFailure(error) {
         return false
     }
     return !isMTPTransportFailure(error) || connectionIsActive
@@ -665,7 +669,9 @@ public actor KalamBridge {
             MTPDeviceSelector(
                 vendorId: $0.vendorId,
                 productId: $0.productId,
-                serialNumber: $0.serialNumber
+                serialNumber: $0.serialNumber,
+                manufacturer: $0.manufacturer ?? "",
+                model: $0.model ?? ""
             )
         }
     }

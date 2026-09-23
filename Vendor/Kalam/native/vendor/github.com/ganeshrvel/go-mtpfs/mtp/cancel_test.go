@@ -126,3 +126,47 @@ func TestCancelRecoveryVerificationFailureIsNotSuccess(t *testing.T) {
 		t.Fatalf("verification failure = %v", err)
 	}
 }
+
+func TestFreshHandleResetClosesBeforeResetAndDrainsBeforeClose(t *testing.T) {
+	var events []string
+	step := func(name string) func() error {
+		return func() error { return nil }
+	}
+	if err := resetFreshHandleOrder(
+		&events,
+		step("close-stale"),
+		step("open-fresh"),
+		step("device-reset"),
+		step("clear-halts"),
+		step("drain"),
+		step("close-fresh"),
+	); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"close-stale", "open-fresh", "device-reset", "clear-halts", "drain", "close-fresh"}
+	if !bytes.Equal([]byte(strings.Join(events, ",")), []byte(strings.Join(want, ","))) {
+		t.Fatalf("fresh reset order = %v, want %v", events, want)
+	}
+}
+
+func TestFreshHandleResetClosesAfterRecoveryStepFailure(t *testing.T) {
+	var events []string
+	err := resetFreshHandleOrder(
+		&events,
+		func() error { return nil },
+		func() error { return nil },
+		func() error { return fmt.Errorf("reset timeout") },
+		func() error { return nil },
+		func() error { return nil },
+		func() error {
+			events = append(events, "closed")
+			return nil
+		},
+	)
+	if err == nil || !strings.Contains(err.Error(), "reset timeout") {
+		t.Fatalf("reset failure = %v", err)
+	}
+	if !bytes.Contains([]byte(strings.Join(events, ",")), []byte("closed")) {
+		t.Fatalf("fresh handle was not closed after reset failure: %v", events)
+	}
+}

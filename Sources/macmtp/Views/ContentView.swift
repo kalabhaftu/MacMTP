@@ -394,7 +394,12 @@ struct ContentView: View {
                 Task {
                     await MTPDeviceManager.shared.selectStorage(storageId)
                 }
-            }
+            },
+            onMTPDeviceSelected: { selector in
+                guard !screenshotMode else { return }
+                MTPConnectionCoordinator.shared.switchToDevice(selector)
+            },
+            showMTPDevicePicker: !screenshotMode
         )
         .frame(minWidth: 180, idealWidth: 220, maxWidth: 280)
         .layoutPriority(0)
@@ -874,6 +879,7 @@ struct ContentView: View {
             NotificationCenter.default.post(name: .localDirectoryNeedsRefresh, object: nil)
         case .mtp:
             Task {
+                MTPConnectionCoordinator.shared.refreshAvailableDevices()
                 await MTPDeviceManager.shared.refreshFiles()
             }
         }

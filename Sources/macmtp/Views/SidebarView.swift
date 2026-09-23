@@ -52,6 +52,12 @@ struct SidebarView: View {
     var mtpDeviceName: String = ""
     var mtpStorages: [MTPStorageInfo] = []
     var onMTPStorageSelected: ((UInt32) -> Void)? = nil
+    var onMTPDeviceSelected: ((MTPDeviceSelector) -> Void)? = nil
+    var showMTPDevicePicker: Bool = true
+
+    @ObservedObject private var connectionCoordinator = MTPConnectionCoordinator.shared
+    @ObservedObject private var mtpManager = MTPDeviceManager.shared
+    @ObservedObject private var transferService = FileTransferService.shared
     
     @State private var quickLinks: [SidebarItem] = FinderFavoritesResolver.resolveFavorites()
     @State private var volumes: [SidebarItem] = []
@@ -72,6 +78,40 @@ struct SidebarView: View {
                 }
             }
             
+            if showMTPDevicePicker && !connectionCoordinator.availableMTPDevices.isEmpty {
+                Section(header: sectionHeader("Android Devices", icon: "ipad.and.iphone")) {
+                    ForEach(connectionCoordinator.availableMTPDevices, id: \.self) { selector in
+                        Button(action: {
+                            onMTPDeviceSelected?(selector)
+                        }) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "iphone.gen3")
+                                    .foregroundColor(mtpManager.activeSelector == selector ? .accentColor : .secondary)
+                                    .font(.system(size: 13 * appFontScale))
+                                Text(selector.displayName)
+                                    .font(.system(size: 12 * appFontScale, weight: mtpManager.activeSelector == selector ? .semibold : .regular))
+                                    .lineLimit(1)
+                                Spacer()
+                                if mtpManager.activeSelector == selector {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundColor(.accentColor)
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(transferService.isTransferInFlight || mtpManager.isConnectionRecoveryInFlight)
+                        .help(
+                            transferService.isTransferInFlight
+                                ? "Finish or cancel the active transfer first"
+                                : mtpManager.isConnectionRecoveryInFlight
+                                    ? "Waiting for the MTP session to finish cleaning up"
+                                    : "Switch to \(selector.displayName)"
+                        )
+                    }
+                }
+            }
+
             if isMTPConnected {
                 let deviceSectionTitle = mtpDeviceName.isEmpty ? "Android Device" : mtpDeviceName
                 Section(header: sectionHeader(deviceSectionTitle, icon: "ipad.and.iphone")) {

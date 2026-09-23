@@ -47,6 +47,8 @@ public struct GoMTPDeviceSelector: Decodable, Sendable {
     public let vendorId: UInt16
     public let productId: UInt16
     public let serialNumber: String
+    public let manufacturer: String?
+    public let model: String?
 }
 
 public struct GoMTPDevicesResult: Decodable, Sendable {

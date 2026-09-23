@@ -10,6 +10,10 @@
 - Drain stale MTP bulk and event data after cancellation, verify the session before reuse, and automatically recover stale startup sessions without manual replug recovery.
 - Reduce large-folder upload traffic with bounded batches and per-directory lookup caching, allow slower Android SendObject responses, and automatically reconnect after recoverable native USB timeouts.
 - Restored the required USB short-packet terminator for packet-aligned SendObject uploads to prevent final-file hangs on Android devices.
+- Added switchable multi-device discovery and fresh-handle Samsung cancellation recovery with bounded automatic reconnect.
+- Preserve failed MTP selectors during passive USB discovery, keep the active device stable, and make failed-device retry and handoff bounded.
+- Publish transfer cleanup state so device switching re-enables when cancellation or recovery settles.
+- Report user-cancelled transfers as cancelled even when native session recovery times out.
 - Added invalid local filename rejection and updated support guidance for launch-time detection and transfer failures.
 
 ## 1.7.1 - 2026-09-14
