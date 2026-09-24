@@ -99,7 +99,7 @@ public struct FinderFavoritesResolver {
         case "pictures":
             return "photo.fill.on.rectangle.fill"
         case "applications":
-            return "app.fill"
+            return "square.grid.2x2.fill"
         default:
             return "folder.fill"
         }
