@@ -40,7 +40,7 @@ public final class FileTransferService: ObservableObject {
     private var cutSourcePaths: [String] = []
     
     private var verifiedDirectories = Set<String>()
-    private var transferInFlight = false
+    @Published private(set) var transferInFlight = false
 
     public var isTransferInFlight: Bool {
         transferInFlight
@@ -153,12 +153,16 @@ public final class FileTransferService: ObservableObject {
                         body: "The transfer stopped before the native session was reused.",
                         isError: false
                     )
+                    // Auto-dismiss cancelled transfer progress bar after 1.5 seconds.
+                    let cancelledBatch = self.activeBatch
+                    self.dismissBatchWhenTransferSettles(cancelledBatch, after: 1_500_000_000)
                 } else {
                     ErrorLogger.log(error, message: "File transfer failed")
                     activeBatch?.state = .failed(error.localizedDescription)
                     if isMTPTransportFailure(error) {
                         MTPDeviceManager.shared.invalidateConnection(
-                            message: "The MTP connection stopped responding. Reconnect your Android device and try again."
+                            message: "The MTP connection stopped responding. Reconnect your Android device and try again.",
+                            reconnectAutomatically: shouldAutomaticallyReconnectMTP(error)
                         )
                     }
                     postTransferNotification(
@@ -166,6 +170,9 @@ public final class FileTransferService: ObservableObject {
                         body: error.localizedDescription,
                         isError: true
                     )
+                    // Auto-dismiss failed transfer progress bar after 3 seconds.
+                    let failedBatch = self.activeBatch
+                    self.dismissBatchWhenTransferSettles(failedBatch, after: 3_000_000_000)
                 }
                 isCutOperation = false
                 cutSourcePaths = []
@@ -382,9 +389,9 @@ public final class FileTransferService: ObservableObject {
             groups[destParent, default: []].append(index)
         }
         
-        // Keep native calls to one file so pause, cancellation, and failures are
-        // observed at the next file boundary instead of after a large batch.
-        let chunkSize = 1
+        // Bound batches so native directory caches survive across files while
+        // progress callbacks still observe cancellation during each file.
+        let chunkSize = 16
         
         var terminalTransferError: Error?
 
@@ -397,13 +404,19 @@ public final class FileTransferService: ObservableObject {
             } catch {
                 ErrorLogger.log(error, message: "FileTransferService: Failed to create parent directory")
                 let formattedErr = formatTransferError(error)
-                for idx in indices {
-                    var itm = batch.items[idx]
-                    itm.markFailed(formattedErr)
-                    batch.items[idx] = itm
+                if !shouldPresentAsCancelledAfterRecoveryFailure(error, cancelRequested: cancelRequested)
+                    && !isMTPTransferCancellation(error) {
+                    for idx in indices {
+                        var itm = batch.items[idx]
+                        itm.markFailed(formattedErr)
+                        batch.items[idx] = itm
+                    }
                 }
                 if isMTPTransportFailure(error) {
                     terminalTransferError = error
+                    break queueLoop
+                }
+                if cancelRequested || isMTPTransferCancellation(error) {
                     break queueLoop
                 }
                 continue
@@ -443,9 +456,13 @@ public final class FileTransferService: ObservableObject {
                         }
                     }
                     let throttler = ProgressThrottler()
+                    let progressIndices = chunkIndices.reduce(into: [String: Int]()) { result, index in
+                        result[batch.items[index].destinationPath] = index
+                    }
                     let handleProgress: @Sendable (GoTransferProgressInfo) -> Void = { [weak self] progressInfo in
                         guard let self = self else { return }
-                        guard let index = chunkIndices.first else { return }
+                        let index = progressIndices[progressInfo.fullPath] ?? chunkIndices.first
+                        guard let index else { return }
                         let sent = progressInfo.activeFileSize.sent
                         let total = progressInfo.activeFileSize.total
                         let speedMB = progressInfo.speed
@@ -487,13 +504,6 @@ public final class FileTransferService: ObservableObject {
                     
                 } catch {
                     if isMTPTransferCancellation(error) {
-                        for idx in chunkIndices {
-                            var itm = batch.items[idx]
-                            if itm.status != .completed {
-                                itm.markFailed("Transfer cancelled")
-                                batch.items[idx] = itm
-                            }
-                        }
                         break queueLoop
                     }
 
@@ -529,11 +539,17 @@ public final class FileTransferService: ObservableObject {
                             ]
                         )
                     }
-                    for idx in chunkIndices {
-                        var itm = batch.items[idx]
-                        if itm.status != .completed && itm.bytesTransferred < itm.fileSize {
-                            itm.markFailed(error.localizedDescription)
-                            batch.items[idx] = itm
+                    let cancellationRecoveryFailure = shouldPresentAsCancelledAfterRecoveryFailure(
+                        error,
+                        cancelRequested: cancelRequested
+                    )
+                    if !cancellationRecoveryFailure {
+                        for idx in chunkIndices {
+                            var itm = batch.items[idx]
+                            if itm.status != .completed && itm.bytesTransferred < itm.fileSize {
+                                itm.markFailed(error.localizedDescription)
+                                batch.items[idx] = itm
+                            }
                         }
                     }
                     if isMTPTransportFailure(error) {
@@ -546,25 +562,44 @@ public final class FileTransferService: ObservableObject {
 
         if let terminalTransferError {
             let message = formatTransferError(terminalTransferError)
-            for index in batch.items.indices where !batch.items[index].status.isTerminal {
-                var item = batch.items[index]
-                item.markFailed(message)
-                batch.items[index] = item
+            let reconnectAutomatically = shouldAutomaticallyReconnectMTP(terminalTransferError)
+            let cancellationRecoveryFailure = shouldPresentAsCancelledAfterRecoveryFailure(
+                terminalTransferError,
+                cancelRequested: cancelRequested
+            )
+            if !cancellationRecoveryFailure {
+                for index in batch.items.indices where !batch.items[index].status.isTerminal {
+                    var item = batch.items[index]
+                    item.markFailed(message)
+                    batch.items[index] = item
+                }
             }
             MTPDeviceManager.shared.invalidateConnection(
-                message: "The MTP connection stopped responding. Reconnect your Android device and try again."
+                message: reconnectAutomatically
+                    ? "Transfer cancellation interrupted the MTP session. Reconnecting…"
+                    : "The MTP connection stopped responding. Reconnect your Android device and try again.",
+                reconnectAutomatically: reconnectAutomatically
             )
         }
         
         if let terminalTransferError {
-            batch.complete()
             let title = batch.completedFileCount == 0 ? "Transfer Failed" : "Transfer Aborted"
             let errorDetail = formatTransferError(terminalTransferError)
-            postTransferNotification(
-                title: title,
-                body: "\(batch.completedFileCount) of \(batch.totalFileCount) files copied. \(errorDetail)",
-                isError: true
-            )
+            if shouldPresentAsCancelledAfterRecoveryFailure(terminalTransferError, cancelRequested: cancelRequested) {
+                batch.finishCancellation()
+                postTransferNotification(
+                    title: "Transfer Cancelled",
+                    body: "\(batch.completedFileCount) of \(batch.totalFileCount) files copied. Session recovery failed; reconnecting.",
+                    isError: true
+                )
+            } else {
+                batch.complete()
+                postTransferNotification(
+                    title: title,
+                    body: "\(batch.completedFileCount) of \(batch.totalFileCount) files copied. \(errorDetail)",
+                    isError: true
+                )
+            }
         } else if cancelRequested {
             batch.finishCancellation()
             let completed = batch.totalBytesTransferred > 0
@@ -630,9 +665,18 @@ public final class FileTransferService: ObservableObject {
         }
         
         let completedBatch = batch
-        Task {
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
-            if self.activeBatch === completedBatch {
+        dismissBatchWhenTransferSettles(completedBatch, after: 3_000_000_000)
+    }
+
+    private func dismissBatchWhenTransferSettles(_ batch: TransferBatch?, after delay: UInt64) {
+        guard let batch else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: delay)
+            while self.transferInFlight {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+            if self.activeBatch === batch {
                 self.activeBatch = nil
             }
         }

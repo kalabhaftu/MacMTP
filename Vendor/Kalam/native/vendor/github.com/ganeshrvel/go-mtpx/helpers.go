@@ -113,6 +113,100 @@ func GetObjectFromParentIdAndFilename(dev *mtp.Device, storageId uint32, parentI
 	return nil, FileNotFoundError{error: fmt.Errorf("file not found: %s", filename)}
 }
 
+// objectNameCache keeps one directory's filename-to-object mapping for a
+// bounded operation (conflict scans and uploads). MTP devices are sensitive to
+// repeated GetObjectPropValue requests, especially for directories with many
+// children.
+type objectNameCache struct {
+	byParent map[uint32]map[string]uint32
+}
+
+func newObjectNameCache() *objectNameCache {
+	return &objectNameCache{byParent: make(map[uint32]map[string]uint32)}
+}
+
+func (c *objectNameCache) lookup(dev *mtp.Device, storageId, parentId uint32, filename string) (*FileInfo, error) {
+	names, ok := c.byParent[parentId]
+	if !ok {
+		handles := mtp.Uint32Array{}
+		if err := dev.GetObjectHandles(storageId, mtp.GOH_ALL_ASSOCS, parentId, &handles); err != nil {
+			return nil, FileObjectError{error: err}
+		}
+
+		names = make(map[string]uint32, len(handles.Values))
+		for _, objectId := range handles.Values {
+			var val mtp.StringValue
+			if err := dev.GetObjectPropValue(objectId, mtp.OPC_ObjectFileName, &val); err != nil {
+				return nil, FileObjectError{error: err}
+			}
+			names[strings.ToLower(val.Value)] = objectId
+		}
+		c.byParent[parentId] = names
+	}
+
+	objectId, ok := names[strings.ToLower(filename)]
+	if !ok {
+		return nil, FileNotFoundError{error: fmt.Errorf("file not found: %s", filename)}
+	}
+
+	fi, err := GetObjectFromObjectId(dev, objectId, "")
+	if err != nil {
+		return nil, FileObjectError{error: err}
+	}
+	if !strings.EqualFold(fi.Name, filename) {
+		return nil, FileNotFoundError{error: fmt.Errorf("file not found: %s", filename)}
+	}
+	return fi, nil
+}
+
+func (c *objectNameCache) forget(parentId uint32, filename string) {
+	if names, ok := c.byParent[parentId]; ok {
+		delete(names, strings.ToLower(filename))
+	}
+}
+
+func getObjectFromPathWithCache(dev *mtp.Device, storageId uint32, fullPath string, cache *objectNameCache) (*FileInfo, error) {
+	if fullPath == "" {
+		return nil, InvalidPathError{error: fmt.Errorf("path does not Exists. path: %s", fullPath)}
+	}
+
+	_filePath := fixSlash(fullPath)
+	if _filePath == PathSep {
+		return GetObjectFromObjectId(dev, ParentObjectId, "")
+	}
+
+	splittedFilePath := strings.Split(_filePath, PathSep)
+	objectId := uint32(ParentObjectId)
+	var fi *FileInfo
+	for i, fName := range splittedFilePath[1:] {
+		current, err := cache.lookup(dev, storageId, objectId, fName)
+		if err != nil {
+			if _, ok := err.(FileNotFoundError); ok {
+				return nil, InvalidPathError{error: fmt.Errorf("path not found: %s\nreason: %v", fullPath, err.Error())}
+			}
+			return nil, err
+		}
+		if !current.IsDir && i < len(splittedFilePath)-2 {
+			return nil, InvalidPathError{error: fmt.Errorf("path not found: %s", fullPath)}
+		}
+		fi = current
+		objectId = current.ObjectId
+	}
+
+	if fi == nil {
+		return nil, InvalidPathError{error: fmt.Errorf("file not found: %s", fullPath)}
+	}
+	fi.FullPath = _filePath
+	return fi, nil
+}
+
+func getObjectFromObjectIdOrPathWithCache(dev *mtp.Device, storageId uint32, fileProp FileProp, cache *objectNameCache) (*FileInfo, error) {
+	if fileProp.ObjectId != 0 {
+		return GetObjectFromObjectId(dev, fileProp.ObjectId, fileProp.FullPath)
+	}
+	return getObjectFromPathWithCache(dev, storageId, fileProp.FullPath, cache)
+}
+
 // fetch the object information using [fullPath]
 // Since the [parentPath] is unavailable here the [fullPath] property of the resulting object [FileInfo] may not be valid.
 func GetObjectFromPath(dev *mtp.Device, storageId uint32, fullPath string) (fInfo *FileInfo, err error) {
@@ -228,6 +322,11 @@ func handleMakeDirectory(dev *mtp.Device, storageId, parentId uint32, filename s
 // helper function to create a device file
 func handleMakeFile(dev *mtp.Device, storageId uint32, obj *mtp.ObjectInfo, fInfo *os.FileInfo, fileBuf *os.File, overwriteExisting bool, progressCb SizeProgressCb) (objectId uint32, err error) {
 	fi, err := GetObjectFromParentIdAndFilename(dev, storageId, obj.ParentObject, obj.Filename)
+	return handleMakeFileWithExisting(dev, storageId, obj, fInfo, fileBuf, overwriteExisting, fi, err, progressCb)
+}
+
+func handleMakeFileWithExisting(dev *mtp.Device, storageId uint32, obj *mtp.ObjectInfo, fInfo *os.FileInfo, fileBuf *os.File, overwriteExisting bool, fi *FileInfo, lookupErr error, progressCb SizeProgressCb) (objectId uint32, err error) {
+	err = lookupErr
 
 	// file Exists
 	if err == nil {

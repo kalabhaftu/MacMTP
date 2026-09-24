@@ -28,7 +28,9 @@ func abortIfTransferCancelled() error {
 	if !transferCancellationRequested() {
 		return nil
 	}
-	_ = _abort()
+	// Only signal cancellation. Do NOT call _abort() here — that would
+	// nil out container.dev and break any subsequent operation (refresh,
+	// directory listing) on the still-live USB connection.
 	return mtpx.ErrTransferCancelled
 }
 

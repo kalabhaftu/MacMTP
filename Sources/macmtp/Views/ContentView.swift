@@ -394,7 +394,12 @@ struct ContentView: View {
                 Task {
                     await MTPDeviceManager.shared.selectStorage(storageId)
                 }
-            }
+            },
+            onMTPDeviceSelected: { selector in
+                guard !screenshotMode else { return }
+                MTPConnectionCoordinator.shared.switchToDevice(selector)
+            },
+            showMTPDevicePicker: !screenshotMode
         )
         .frame(minWidth: 180, idealWidth: 220, maxWidth: 280)
         .layoutPriority(0)
@@ -874,6 +879,7 @@ struct ContentView: View {
             NotificationCenter.default.post(name: .localDirectoryNeedsRefresh, object: nil)
         case .mtp:
             Task {
+                MTPConnectionCoordinator.shared.refreshAvailableDevices()
                 await MTPDeviceManager.shared.refreshFiles()
             }
         }
@@ -1096,6 +1102,10 @@ struct ContentView: View {
             var hadError: String?
             var didCopy = false
             for item in items {
+                guard PathValidation.isValidLocalFilename(item.name) else {
+                    hadError = "Cannot copy '\(item.name)': the filename is invalid on macOS."
+                    continue
+                }
                 let validation = PathValidation.isSafeToTransfer(sourcePath: item.path, destinationDir: destination)
                 guard validation.isSafe else {
                     if let reason = validation.reason, reason != "Item is already located in the destination folder." {

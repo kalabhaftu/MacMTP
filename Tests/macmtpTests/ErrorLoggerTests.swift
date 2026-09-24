@@ -89,6 +89,24 @@ func transferCancellationIsRecognizedAsExpectedCompletion() {
 }
 
 @Test
+func expectedCancellationRecoveryAndDiskFullDoNotCreateSentryIssues() {
+    let recoveryFailure = KalamError.nativeOperationFailed(
+        operation: "transfer",
+        errorType: "ErrorFileTransfer",
+        message: "MTP cancellation recovery failed: device status did not recover: LIBUSB_ERROR_TIMEOUT"
+    )
+    let diskFull = NSError(
+        domain: NSCocoaErrorDomain,
+        code: Int(NSFileWriteOutOfSpaceError),
+        userInfo: [NSLocalizedDescriptionKey: "There isn't enough space."]
+    )
+
+    #expect(!ErrorLogger.shouldReport(recoveryFailure))
+    #expect(!shouldReportMTPTransportFailure(recoveryFailure, connectionIsActive: true))
+    #expect(!ErrorLogger.shouldReport(diskFull))
+}
+
+@Test
 func transferCompletionRequiresValidJSONAndPreservesNativeErrors() {
     guard case .success = decodeMTPTransferCompletion(#"{"data":true}"#) else {
         Issue.record("Expected a valid transfer completion")

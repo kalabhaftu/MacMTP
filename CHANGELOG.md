@@ -2,12 +2,23 @@
 
 ## Unreleased
 
+## 1.7.2 - 2026-09-24
+
 ### MTP Connection and Transfer Reliability
 - Reworked USB detection and MTP session ownership into one serialized coordinator with explicit connection states, capped recovery, stale-session cancellation, and structured Terminal diagnostics.
 - Added a post-failure recovery for macOS Image Capture daemons that can hold the MTP interface (`ptpcamerad` and `mscamerad-xpc`), using exact-name release and an immediate single retry.
 - Selected native MTP devices by the detected USB vendor, product, and serial identity, removed the pre-session device-info probe, and hardened interface/session cleanup.
 - Reworked upload packet framing and partial-write handling so SendObject reports payload bytes accurately and handles endpoint-sized packets consistently.
+- Drain stale MTP bulk and event data after cancellation, verify the session before reuse, and automatically recover stale startup sessions without manual replug recovery.
+- Reduce large-folder upload traffic with bounded batches and per-directory lookup caching, allow slower Android SendObject responses, and automatically reconnect after recoverable native USB timeouts.
+- Restored the required USB short-packet terminator for packet-aligned SendObject uploads to prevent final-file hangs on Android devices.
+- Added switchable multi-device discovery and fresh-handle Samsung cancellation recovery with bounded automatic reconnect.
+- Preserve failed MTP selectors during passive USB discovery, keep the active device stable, and make failed-device retry and handoff bounded.
+- Publish transfer cleanup state so device switching re-enables when cancellation or recovery settles.
+- Report user-cancelled transfers as cancelled even when native session recovery times out.
 - Added invalid local filename rejection and updated support guidance for launch-time detection and transfer failures.
+- Use a grid icon for the Applications Finder favorite.
+- Preserve the arm64 build while packaging the universal release after the x86_64 clean build.
 
 ## 1.7.1 - 2026-09-14
 

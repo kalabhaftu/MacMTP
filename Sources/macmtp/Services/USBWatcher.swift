@@ -1,4 +1,5 @@
 import Foundation
+import CKalam
 import IOKit
 import IOKit.usb
 
@@ -146,6 +147,11 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
     public func stopWatching() {
         guard isWatching || notificationPort != nil || addedIterator != 0 || removedIterator != 0 else { return }
         cleanupWatchingResources()
+    }
+
+    @discardableResult
+    func reenumerateMTPDevices() -> Int32 {
+        macmtp_reenumerate_mtp_devices()
     }
 
     private func cleanupWatchingResources() {

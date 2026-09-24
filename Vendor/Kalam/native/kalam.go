@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"github.com/ganeshrvel/go-mtpfs/mtp"
 	"github.com/ganeshrvel/go-mtpx"
@@ -139,7 +138,7 @@ func DiscoverMTPDevices() {
 	lockMtp()
 	defer unlockMtp()
 
-	selectors, err := mtp.DiscoverDeviceSelectors()
+	selectors, err := mtp.DiscoverDeviceSelectorsExcept(container.dev)
 	if err != nil {
 		send_to_js.SendError(err)
 		return
@@ -498,13 +497,10 @@ func UploadFiles(uploadFilesInputJson *C.char) {
 
 			return nil
 		})
-	if cancelledErr := abortIfTransferCancelled(); cancelledErr != nil {
-		err = cancelledErr
+	if err == nil {
+		err = abortIfTransferCancelled()
 	}
 	if err != nil {
-		if errors.Is(err, mtpx.ErrTransferCancelled) {
-			_ = _abort()
-		}
 		send_to_js.SendTransferError(err)
 
 		return
@@ -604,13 +600,10 @@ func DownloadFiles(downloadFilesInputJson *C.char) {
 
 			return nil
 		})
-	if cancelledErr := abortIfTransferCancelled(); cancelledErr != nil {
-		err = cancelledErr
+	if err == nil {
+		err = abortIfTransferCancelled()
 	}
 	if err != nil {
-		if errors.Is(err, mtpx.ErrTransferCancelled) {
-			_ = _abort()
-		}
 		send_to_js.SendTransferError(err)
 
 		return

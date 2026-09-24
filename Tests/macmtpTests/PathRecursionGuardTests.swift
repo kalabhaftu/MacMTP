@@ -80,4 +80,9 @@ struct PathRecursionGuardTests {
             #expect(!fav.iconName.isEmpty)
         }
     }
+
+    @Test
+    func applicationsFavoriteUsesGridIcon() {
+        #expect(FinderFavoritesResolver.iconForPath(url: URL(fileURLWithPath: "/Applications")) == "square.grid.2x2.fill")
+    }
 }

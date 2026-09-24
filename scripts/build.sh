@@ -199,6 +199,11 @@ build_swift_arch() {
     lib_dir="$(libusb_lib_dir_for "$pc_dir")"
     triple="$(triple_for "$arch")"
 
+    # SwiftPM does not track the externally rebuilt Go archive as a linker
+    # input; clean its incremental products or it can ship the previous native
+    # transport implementation.
+    swift package clean >/dev/null
+
     echo "  Building Swift target for $arch using libusb from $lib_dir" >&2
     if [[ "$config" == "release" ]]; then
         MACMTP_LIBUSB_LIB_DIR="$lib_dir" swift build -c release --triple "$triple" \
@@ -257,11 +262,14 @@ echo ""
 echo "Step 2: Build Swift"
 if [[ "$BUILD_UNIVERSAL" == true ]]; then
     ARM_BIN="$(build_swift_arch arm64 release)"
+    ARM_BIN_COPY="$PROJECT_ROOT/.build/universal/macmtp-arm64"
+    mkdir -p "$(dirname "$ARM_BIN_COPY")"
+    cp "$ARM_BIN" "$ARM_BIN_COPY"
     X86_BIN="$(build_swift_arch x86_64 release)"
-    rewrite_libusb_in_binary "$ARM_BIN"
+    rewrite_libusb_in_binary "$ARM_BIN_COPY"
     rewrite_libusb_in_binary "$X86_BIN"
     mkdir -p "$PROJECT_ROOT/.build/universal"
-    lipo -create -output "$PROJECT_ROOT/.build/universal/macmtp" "$ARM_BIN" "$X86_BIN"
+    lipo -create -output "$PROJECT_ROOT/.build/universal/macmtp" "$ARM_BIN_COPY" "$X86_BIN"
     SWIFT_BIN="$PROJECT_ROOT/.build/universal/macmtp"
 else
     SWIFT_BIN="$(build_swift_arch "$TARGET_ARCH" "$BUILD_MODE")"

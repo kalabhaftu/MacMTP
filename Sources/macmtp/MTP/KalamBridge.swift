@@ -47,6 +47,9 @@ public enum KalamError: Error, LocalizedError {
 }
 
 func isMTPTransportFailure(_ error: Error) -> Bool {
+    if isMTPCancellationRecoveryFailure(error) {
+        return true
+    }
     guard let kalamError = error as? KalamError else { return false }
 
     switch kalamError {
@@ -89,8 +92,31 @@ func isMTPTransportFailure(_ error: Error) -> Bool {
     }
 }
 
+func isMTPCancellationRecoveryFailure(_ error: Error) -> Bool {
+    let message = error.localizedDescription.lowercased()
+    return message.contains("cancellation recovery failed")
+        || message.contains("cancellation requires reconnect")
+}
+
+func shouldPresentAsCancelledAfterRecoveryFailure(_ error: Error, cancelRequested: Bool) -> Bool {
+    cancelRequested && isMTPCancellationRecoveryFailure(error)
+}
+
+func shouldAutomaticallyReconnectMTP(_ error: Error) -> Bool {
+    if isMTPCancellationRecoveryFailure(error) {
+        return true
+    }
+    return isMTPTransportFailure(error) && !isMTPTransferCancellation(error)
+}
+
+func shouldSignalNativeCancellation(after error: Error) -> Bool {
+    guard let kalamError = error as? KalamError else { return false }
+    if case .timedOut = kalamError { return true }
+    return false
+}
+
 func shouldReportMTPTransportFailure(_ error: Error, connectionIsActive: Bool) -> Bool {
-    if isMTPTransferCancellation(error) {
+    if isMTPTransferCancellation(error) || isMTPCancellationRecoveryFailure(error) {
         return false
     }
     return !isMTPTransportFailure(error) || connectionIsActive
@@ -643,7 +669,9 @@ public actor KalamBridge {
             MTPDeviceSelector(
                 vendorId: $0.vendorId,
                 productId: $0.productId,
-                serialNumber: $0.serialNumber
+                serialNumber: $0.serialNumber,
+                manufacturer: $0.manufacturer ?? "",
+                model: $0.model ?? ""
             )
         }
     }
@@ -850,7 +878,9 @@ public actor KalamBridge {
                 _ = try await group.next()!
             } catch {
                 KalamRegistry.shared.failTransfer(with: error)
-                cancelTransfer()
+                if shouldSignalNativeCancellation(after: error) {
+                    cancelTransfer()
+                }
                 throw error
             }
         }
@@ -938,7 +968,9 @@ public actor KalamBridge {
                 _ = try await group.next()!
             } catch {
                 KalamRegistry.shared.failTransfer(with: error)
-                cancelTransfer()
+                if shouldSignalNativeCancellation(after: error) {
+                    cancelTransfer()
+                }
                 throw error
             }
         }

@@ -83,6 +83,8 @@ func SendMTPDevices(selectors []mtp.DeviceSelector) {
 			VendorID:     selector.VendorID,
 			ProductID:    selector.ProductID,
 			SerialNumber: selector.SerialNumber,
+			Manufacturer: selector.Manufacturer,
+			Model:        selector.Model,
 		})
 	}
 	C.call_done(C.CString(toJson(MTPDevicesResult{Data: data})))

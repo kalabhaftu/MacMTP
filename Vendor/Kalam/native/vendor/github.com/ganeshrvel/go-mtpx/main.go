@@ -188,8 +188,9 @@ func Walk(dev *mtp.Device, storageId uint32, fullPath string, recursive, skipDis
 // returns Exists: bool, isDir: bool, objectId: uint32
 // Since the [parentPath] is unavailable here the [fullPath] property of the resulting object [FileInfo] may not be valid.
 func FileExists(dev *mtp.Device, storageId uint32, fileProps []FileProp) (fc []FileExistsContainer, err error) {
+	cache := newObjectNameCache()
 	for _, fileProp := range fileProps {
-		fi, err := GetObjectFromObjectIdOrPath(dev, storageId, fileProp)
+		fi, err := getObjectFromObjectIdOrPathWithCache(dev, storageId, fileProp, cache)
 
 		c := FileExistsContainer{}
 		if err != nil {
@@ -367,13 +368,17 @@ func UploadFiles(dev *mtp.Device, storageId uint32, sources []string, destinatio
 	pInfo.TotalDirectories = totalDirectories
 	pInfo.BulkFileSize.Total = totalSize
 
+	// Keep lookups alive for the whole bounded upload call. Swift batches files
+	// by destination so a large folder does not repeatedly scan the same MTP
+	// directory before every SendObject.
+	existingObjects := newObjectNameCache()
+	destinationFilesDict := map[string]uint32{
+		_destination: destParentId,
+	}
+
 	for _, source := range sources {
 		_source := fixSlash(source)
 		sourceParentPath := filepath.Dir(_source)
-
-		destinationFilesDict := map[string]uint32{
-			_destination: destParentId,
-		}
 
 		// walk through the source
 		err = filepath.Walk(_source,
@@ -447,13 +452,22 @@ func UploadFiles(dev *mtp.Device, storageId uint32, sources []string, destinatio
 						return err
 					}
 
-					// append the current objectId to [destinationFilesDict]
-					destinationFilesDict[destinationFilePath] = objId
+					// cache the resolved parent for the remaining files in this directory
+					destinationFilesDict[destinationParentPath] = objId
 
 					fileParentId = objId
 				}
 
 				// read the local file
+				existing, lookupErr := existingObjects.lookup(dev, storageId, fileParentId, name)
+				if lookupErr != nil {
+					switch lookupErr.(type) {
+					case FileNotFoundError:
+					default:
+						return lookupErr
+					}
+				}
+
 				fileBuf, err := os.Open(sourceFilePath)
 				if err != nil {
 					return InvalidPathError{error: err}
@@ -498,9 +512,9 @@ func UploadFiles(dev *mtp.Device, storageId uint32, sources []string, destinatio
 
 					// create file
 					var prevSentSize int64 = 0
-					objId, err := handleMakeFile(
+					objId, err := handleMakeFileWithExisting(
 						dev, storageId, &fObj, &fInfo, fileBuf,
-						true,
+						true, existing, lookupErr,
 						func(total, sent int64, objId uint32, err error) error {
 							if err != nil {
 								return err
@@ -540,6 +554,7 @@ func UploadFiles(dev *mtp.Device, storageId uint32, sources []string, destinatio
 
 					// append the current objectId to [destinationFilesDict]
 					destinationFilesDict[destinationFilePath] = objId
+					existingObjects.forget(fileParentId, name)
 
 					return nil
 				}()

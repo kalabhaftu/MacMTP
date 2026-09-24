@@ -15,6 +15,8 @@ private actor RecordingMTPBridge: MTPBridge {
     private(set) var existenceChecks = 0
     private(set) var makeDirectoryCalls = 0
     private(set) var listDirectoryCalls = 0
+    private(set) var initializeCalls: [MTPDeviceSelector] = []
+    private(set) var disposeCalls = 0
     private let failListingAfterMutation: Bool
     private let initializeDelay: UInt64
     private let cancelInitialize: Bool
@@ -35,6 +37,7 @@ private actor RecordingMTPBridge: MTPBridge {
     }
 
     func initialize(selector: MTPDeviceSelector) async throws -> GoDeviceInfoData {
+        initializeCalls.append(selector)
         if cancelInitialize {
             throw CancellationError()
         }
@@ -77,7 +80,9 @@ private actor RecordingMTPBridge: MTPBridge {
         )]
     }
 
-    func dispose() async throws {}
+    func dispose() async throws {
+        disposeCalls += 1
+    }
 
     func listDirectory(storageId: UInt32, path: String, recursive: Bool, skipHidden: Bool) async throws -> [GoFileInfo] {
         listDirectoryCalls += 1
@@ -200,6 +205,84 @@ func mtpSelectorPreservesSerialNumber() throws {
 
     #expect(result.data.count == 1)
     #expect(result.data[0].serialNumber == "device-serial")
+}
+
+@Test
+func mtpSelectorPreservesDisplayMetadata() throws {
+    let payload = #"{"error":"","errorType":"","data":[{"vendorId":1256,"productId":26720,"serialNumber":"samsung","manufacturer":"samsung","model":"SM-M055F"}]}"#.data(using: .utf8)!
+    let result = try JSONDecoder().decode(GoMTPDevicesResult.self, from: payload)
+    let selector = MTPDeviceSelector(
+        vendorId: result.data[0].vendorId,
+        productId: result.data[0].productId,
+        serialNumber: result.data[0].serialNumber,
+        manufacturer: result.data[0].manufacturer ?? "",
+        model: result.data[0].model ?? ""
+    )
+
+    #expect(selector.displayName == "samsung SM-M055F")
+}
+
+@Test
+func mtpSelectorIdentityIgnoresDisplayMetadataChanges() {
+    let old = MTPDeviceSelector(
+        vendorId: 0x04e8,
+        productId: 0x6860,
+        serialNumber: "samsung",
+        manufacturer: "Samsung",
+        model: "SM-M055F"
+    )
+    let refreshed = MTPDeviceSelector(
+        vendorId: 0x04e8,
+        productId: 0x6860,
+        serialNumber: "samsung",
+        manufacturer: "SAMSUNG",
+        model: "Galaxy M05"
+    )
+
+    #expect(old == refreshed)
+    #expect(Set([old, refreshed]).count == 1)
+}
+
+@Test
+func failedMTPSelectorsStayListedWithoutReplacingTheActiveDevice() {
+    let samsung = MTPDeviceSelector(vendorId: 0x04e8, productId: 0x6860, serialNumber: "samsung", model: "Samsung")
+    let tecno = MTPDeviceSelector(vendorId: 0x0e8d, productId: 0x2008, serialNumber: "tecno", model: "TECNO")
+    let inventory: Set<USBDeviceIdentity> = [
+        USBDeviceIdentity(vendorID: samsung.vendorId, productID: samsung.productId, locationID: 1, serialNumber: samsung.serialNumber),
+        USBDeviceIdentity(vendorID: tecno.vendorId, productID: tecno.productId, locationID: 2, serialNumber: tecno.serialNumber)
+    ]
+
+    let merged = mergeMTPSelectors(
+        discovered: [tecno],
+        active: samsung,
+        activeConnected: true,
+        failed: [samsung],
+        inventory: inventory
+    )
+
+    #expect(merged == Set([samsung, tecno]))
+}
+
+@Test
+func failedMTPSelectorsAreRetriedAfterHealthyCandidates() {
+    let failed = MTPDeviceSelector(vendorId: 0x04e8, productId: 0x6860, serialNumber: "samsung", model: "Samsung")
+    let healthy = MTPDeviceSelector(vendorId: 0x0e8d, productId: 0x2008, serialNumber: "tecno", model: "TECNO")
+
+    #expect(orderedMTPConnectionCandidates([failed, healthy], failed: [failed]) == [healthy, failed])
+}
+
+@Test @MainActor
+func switchingDevicesDisposesTheOldSessionBeforeInitializingTheNewOne() async {
+    let bridge = RecordingMTPBridge()
+    let manager = MTPDeviceManager(bridge: bridge)
+    let first = MTPDeviceSelector(vendorId: 0x1234, productId: 0x5678, serialNumber: "first", model: "First")
+    let second = MTPDeviceSelector(vendorId: 0x04e8, productId: 0x6860, serialNumber: "second", model: "Second")
+
+    #expect(await manager.connectDevice(selector: first))
+    #expect(await manager.switchDevice(to: second))
+    #expect(manager.activeSelector == second)
+    #expect(await bridge.disposeCalls == 1)
+    #expect(await bridge.initializeCalls == [first, second])
 }
 
 @Test @MainActor
@@ -437,6 +520,65 @@ func duplicateUSBNotificationsDoNotScheduleAnotherDevice() {
 
     #expect(newlyAttachedUSBIdentities([identity, identity], known: []) == [identity])
     #expect(newlyAttachedUSBIdentities([identity, otherIdentity], known: [identity]) == [otherIdentity])
+}
+
+@Test
+func failedConnectionRetriesWhenThePhoneIsReattached() {
+    let phone = USBDeviceIdentity(vendorID: 0x0e8d, productID: 0x2008, locationID: 1, serialNumber: "phone")
+    let accessory = USBDeviceIdentity(vendorID: 0x1234, productID: 0x5678, locationID: 2, serialNumber: "accessory")
+
+    #expect(newlyAttachedUSBIdentities([accessory], known: [phone, accessory]).isEmpty)
+    #expect(newlyAttachedUSBIdentities([phone, accessory], known: [accessory]) == [phone])
+}
+
+@Test
+func cancellationTransportResetTriggersAutomaticReconnect() {
+    let recoveryFailure = KalamError.nativeOperationFailed(
+        operation: "transfer",
+        errorType: "ErrorFileTransfer",
+        message: "MTP cancellation recovery failed transaction=0x17: verify MTP session after cancellation: got stale response container; device reset=<nil>"
+    )
+    let legacyRecoveryFailure = KalamError.nativeOperationFailed(
+        operation: "transfer",
+        errorType: "ErrorFileTransfer",
+        message: "MTP cancellation requires reconnect transaction=0x17 reset=<nil>"
+    )
+    let expectedCancellation = KalamError.nativeOperationFailed(
+        operation: "transfer",
+        errorType: "ErrorTransferCancelled",
+        message: "transfer cancelled"
+    )
+
+    #expect(isMTPCancellationRecoveryFailure(recoveryFailure))
+    #expect(isMTPTransportFailure(recoveryFailure))
+    #expect(isMTPCancellationRecoveryFailure(legacyRecoveryFailure))
+    #expect(!isMTPCancellationRecoveryFailure(expectedCancellation))
+    #expect(shouldPresentAsCancelledAfterRecoveryFailure(recoveryFailure, cancelRequested: true))
+    #expect(!shouldPresentAsCancelledAfterRecoveryFailure(recoveryFailure, cancelRequested: false))
+    #expect(!shouldPresentAsCancelledAfterRecoveryFailure(expectedCancellation, cancelRequested: true))
+}
+
+@Test
+func transportTimeoutTriggersAutomaticReconnect() {
+    let timeout = KalamError.nativeOperationFailed(
+        operation: "SendObject",
+        errorType: "ErrorFileTransfer",
+        message: "LIBUSB_ERROR_TIMEOUT"
+    )
+    let cancellation = KalamError.nativeOperationFailed(
+        operation: "SendObject",
+        errorType: "ErrorTransferCancelled",
+        message: "transfer cancelled"
+    )
+    let staleHandle = KalamError.nativeOperationFailed(
+        operation: "GetObjectHandles",
+        errorType: "ErrorDeviceLocked",
+        message: "device is not open"
+    )
+
+    #expect(shouldAutomaticallyReconnectMTP(timeout))
+    #expect(shouldAutomaticallyReconnectMTP(staleHandle))
+    #expect(!shouldAutomaticallyReconnectMTP(cancellation))
 }
 
 @Test

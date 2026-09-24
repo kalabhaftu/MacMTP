@@ -17,6 +17,9 @@ public final class MTPDeviceManager: ObservableObject {
     @Published public var errorMessage: String?
     @Published public private(set) var connectionState: MTPConnectionState = .usbAbsent
     @Published public private(set) var canRetryConnection = false
+    @Published public private(set) var activeSelector: MTPDeviceSelector?
+
+    @Published private(set) var isConnectionRecoveryInFlight = false
 
 
     private var backHistory: [String] = []
@@ -33,6 +36,8 @@ public final class MTPDeviceManager: ObservableObject {
     }()
     private var refreshGeneration: UInt64 = 0
     private var connectionGeneration: UInt64 = 0
+    private var invalidationTask: Task<Void, Never>?
+    private var reconnectAfterInvalidation = false
     private let directoryCoordinator = MTPDirectoryCoordinator()
     private var displayedDirectoryKey: MTPDirectoryRefreshKey?
 
@@ -52,10 +57,10 @@ public final class MTPDeviceManager: ObservableObject {
 
     @discardableResult
     public func connectDevice() async -> Bool {
-        guard let selectors = try? await bridge.discoverMTPDevices(), selectors.count == 1 else {
+        guard let selectors = try? await bridge.discoverMTPDevices(), let selector = selectors.first else {
             return false
         }
-        return await connectDevice(selector: selectors[0])
+        return await connectDevice(selector: selector)
     }
 
     func discoverMTPDevices() async throws -> [MTPDeviceSelector] {
@@ -99,6 +104,7 @@ public final class MTPDeviceManager: ObservableObject {
             self.deviceInfo = mappedDevInfo
             self.storages = mappedStorages
             self.isConnected = true
+            self.activeSelector = selector
             self.connectionState = .connected
             
             if let firstStorage = mappedStorages.first {
@@ -174,6 +180,7 @@ public final class MTPDeviceManager: ObservableObject {
                 self.errorMessage = "Failed to connect: \(error.localizedDescription)"
             }
             self.isConnected = false
+            self.activeSelector = nil
             self.connectionState = .failed(
                 message: self.errorMessage ?? "The MTP session could not be opened.",
                 technicalDetails: error.localizedDescription
@@ -210,6 +217,7 @@ public final class MTPDeviceManager: ObservableObject {
             ErrorLogger.log(error, message: "Failed to dispose MTP device cleanly")
         }
         self.isConnected = false
+        self.activeSelector = nil
         self.connectionState = .usbAbsent
         self.canRetryConnection = false
         self.deviceInfo = nil
@@ -225,10 +233,36 @@ public final class MTPDeviceManager: ObservableObject {
         self.isLoading = false
     }
 
-    func invalidateConnection(message: String) {
+    @discardableResult
+    func switchDevice(to selector: MTPDeviceSelector) async -> Bool {
+        guard !isConnectionRecoveryInFlight else {
+            errorMessage = "The previous MTP session is still cleaning up. Try again shortly."
+            return false
+        }
+        guard !FileTransferService.shared.isTransferInFlight else {
+            errorMessage = "Finish or cancel the active transfer before switching devices."
+            return false
+        }
+        guard activeSelector != selector || !isConnected else { return true }
+        if isConnected || isLoading {
+            await disconnectDevice()
+        }
+        return await connectDevice(selector: selector)
+    }
+
+    func invalidateConnection(message: String, reconnectAutomatically: Bool = false) {
+        if invalidationTask != nil {
+            reconnectAfterInvalidation = reconnectAfterInvalidation || reconnectAutomatically
+            errorMessage = message
+            connectionState = .failed(message: message, technicalDetails: message)
+            return
+        }
+
+        reconnectAfterInvalidation = reconnectAutomatically
         connectionGeneration &+= 1
         refreshGeneration &+= 1
-        MTPConnectionCoordinator.shared.markSessionLost(message: message)
+        let failedSelector = activeSelector
+        MTPConnectionCoordinator.shared.markSessionLost(message: message, failedSelector: failedSelector)
         let invalidatedGeneration = connectionGeneration
         directoryCoordinator.invalidateSnapshot()
 
@@ -242,6 +276,7 @@ public final class MTPDeviceManager: ObservableObject {
         }
 
         isConnected = false
+        activeSelector = nil
         deviceInfo = nil
         storages = []
         selectedStorageId = nil
@@ -257,17 +292,53 @@ public final class MTPDeviceManager: ObservableObject {
         errorMessage = message
         connectionState = .failed(message: message, technicalDetails: message)
 
-        Task { @MainActor [weak self] in
+        isConnectionRecoveryInFlight = true
+        invalidationTask = Task { @MainActor [weak self] in
             guard let self else { return }
+            defer {
+                self.invalidationTask = nil
+                self.isConnectionRecoveryInFlight = false
+                self.reconnectAfterInvalidation = false
+            }
+            let cleanupDeadline = Date().addingTimeInterval(10)
+            while FileTransferService.shared.isTransferInFlight {
+                if Date() >= cleanupDeadline {
+                    ErrorLogger.logMessage(
+                        "Timed out waiting for MTP transfer cleanup",
+                        level: .warning,
+                        userInfo: [
+                            "event": "mtp_transfer_cleanup_timeout",
+                            "session_generation": Int64(invalidatedGeneration)
+                        ]
+                    )
+                    break
+                }
+                try? await Task.sleep(nanoseconds: 50_000_000)
+            }
             try? await bridge.dispose()
             guard self.connectionGeneration == invalidatedGeneration else { return }
+            let shouldReconnect = self.reconnectAfterInvalidation
+            var reconnectStarted = false
+            if shouldReconnect {
+                // Samsung devices can keep the interface wedged briefly after a
+                // failed cancellation reset. Let macOS and Android settle before
+                // discovery opens a fresh handle.
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                guard self.connectionGeneration == invalidatedGeneration else { return }
+                self.invalidationTask = nil
+                self.isConnectionRecoveryInFlight = false
+                if case .failed = MTPConnectionCoordinator.shared.state {
+                    MTPConnectionCoordinator.shared.retry()
+                    reconnectStarted = true
+                }
+            }
             ErrorLogger.logMessage(
                 "MTP connection invalidated",
                 level: .warning,
                 userInfo: [
                     "operation": "connection",
                     "operation_phase": "connection",
-                    "reconnect_result": "manual_retry_required",
+                    "reconnect_result": reconnectStarted ? "automatic_retry_started" : "manual_retry_required",
                     "session_generation": Int64(invalidatedGeneration),
                 ]
             )
@@ -301,7 +372,10 @@ public final class MTPDeviceManager: ObservableObject {
         } catch {
             ErrorLogger.log(error, message: "Failed to refresh storages")
             if isMTPTransportFailure(error) {
-                invalidateConnection(message: "The MTP connection was lost. Reconnect your Android device and try again.")
+                invalidateConnection(
+                    message: "The MTP connection was lost. Reconnect your Android device and try again.",
+                    reconnectAutomatically: shouldAutomaticallyReconnectMTP(error)
+                )
             }
         }
     }
@@ -462,7 +536,10 @@ public final class MTPDeviceManager: ObservableObject {
                 ]
             )
             if isMTPTransportFailure(error) {
-                invalidateConnection(message: "MTP device disconnected or connection lost.")
+                invalidateConnection(
+                    message: "MTP device disconnected or connection lost.",
+                    reconnectAutomatically: shouldAutomaticallyReconnectMTP(error)
+                )
             } else {
                 if let snapshot = directoryCoordinator.snapshot(for: request) {
                     // A failed refresh may only restore the same storage/path/

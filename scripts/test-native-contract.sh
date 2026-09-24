@@ -31,4 +31,9 @@ require_pattern 'func Initialize\(inputJSON \*C.char\)' "$KALAM_SOURCE"
 require_pattern 'func DiscoverMTPDevices' "$KALAM_SOURCE"
 require_pattern 'ErrorTransferCancelled' "$ROOT_DIR/Vendor/Kalam/native/send_to_js/enums.go"
 
+(
+    cd "$ROOT_DIR/Vendor/Kalam/native"
+    go test -mod=vendor ./... github.com/ganeshrvel/go-mtpfs/mtp github.com/ganeshrvel/go-mtpx
+)
+
 echo "Verified native collection and mutation response contract."

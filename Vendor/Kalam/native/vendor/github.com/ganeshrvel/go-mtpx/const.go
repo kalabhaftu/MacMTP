@@ -9,7 +9,10 @@ const PathSep = string(os.PathSeparator)
 
 const ParentObjectId = mtp.GOH_ROOT_PARENT
 
-const devTimeout = 15000
+// Android can spend longer finalizing a large SendObject after the payload is
+// complete (media indexing and storage flush). Keep USB operations bounded but
+// allow that response time before declaring the session dead.
+const devTimeout = 30000
 
 const newLocalDirectoryMode = 0755
 
