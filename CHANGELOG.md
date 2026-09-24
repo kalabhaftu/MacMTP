@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+
+## 1.7.3 - 2026-09-24
+
+### MTP Transfer Reliability
 - Keep large-folder MTP transfers alive with activity-based watchdogs and native traversal heartbeats instead of a fixed wall-clock timeout.
 
 ## 1.7.2 - 2026-09-24

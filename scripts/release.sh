@@ -14,7 +14,7 @@ for env_file in "$PROJECT_ROOT/.env" "$PROJECT_ROOT/.env.sentry"; do
 done
 
 APP_NAME="macMTP"
-VERSION="1.7.2"
+VERSION="1.7.3"
 RELEASE_DIR="$PROJECT_ROOT/release"
 APP_BUNDLE="$PROJECT_ROOT/$APP_NAME.app"
 APP_DSYM="$PROJECT_ROOT/$APP_NAME.app.dSYM"
