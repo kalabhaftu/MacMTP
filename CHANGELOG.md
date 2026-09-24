@@ -18,6 +18,7 @@
 - Report user-cancelled transfers as cancelled even when native session recovery times out.
 - Added invalid local filename rejection and updated support guidance for launch-time detection and transfer failures.
 - Use a grid icon for the Applications Finder favorite.
+- Preserve the arm64 build while packaging the universal release after the x86_64 clean build.
 
 ## 1.7.1 - 2026-09-14
 
