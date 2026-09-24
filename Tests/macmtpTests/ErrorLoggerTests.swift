@@ -89,7 +89,7 @@ func transferCancellationIsRecognizedAsExpectedCompletion() {
 }
 
 @Test
-func expectedCancellationRecoveryAndDiskFullDoNotCreateSentryIssues() {
+func cancellationRecoveryFailuresAreReportedButDiskFullIsFiltered() {
     let recoveryFailure = KalamError.nativeOperationFailed(
         operation: "transfer",
         errorType: "ErrorFileTransfer",
@@ -101,8 +101,8 @@ func expectedCancellationRecoveryAndDiskFullDoNotCreateSentryIssues() {
         userInfo: [NSLocalizedDescriptionKey: "There isn't enough space."]
     )
 
-    #expect(!ErrorLogger.shouldReport(recoveryFailure))
-    #expect(!shouldReportMTPTransportFailure(recoveryFailure, connectionIsActive: true))
+    #expect(ErrorLogger.shouldReport(recoveryFailure))
+    #expect(shouldReportMTPTransportFailure(recoveryFailure, connectionIsActive: true))
     #expect(!ErrorLogger.shouldReport(diskFull))
 }
 

@@ -116,7 +116,7 @@ func shouldSignalNativeCancellation(after error: Error) -> Bool {
 }
 
 func shouldReportMTPTransportFailure(_ error: Error, connectionIsActive: Bool) -> Bool {
-    if isMTPTransferCancellation(error) || isMTPCancellationRecoveryFailure(error) {
+    if isMTPTransferCancellation(error) {
         return false
     }
     return !isMTPTransportFailure(error) || connectionIsActive
