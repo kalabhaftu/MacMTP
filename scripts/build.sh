@@ -262,14 +262,16 @@ echo ""
 echo "Step 2: Build Swift"
 if [[ "$BUILD_UNIVERSAL" == true ]]; then
     ARM_BIN="$(build_swift_arch arm64 release)"
-    ARM_BIN_COPY="$PROJECT_ROOT/.build/universal/macmtp-arm64"
-    mkdir -p "$(dirname "$ARM_BIN_COPY")"
+    # Keep the first architecture outside .build: the second SwiftPM clean
+    # removes the entire build tree before compiling x86_64.
+    ARM_BIN_COPY="$(mktemp "${TMPDIR:-/tmp}/macmtp-arm64.XXXXXX")"
     cp "$ARM_BIN" "$ARM_BIN_COPY"
     X86_BIN="$(build_swift_arch x86_64 release)"
     rewrite_libusb_in_binary "$ARM_BIN_COPY"
     rewrite_libusb_in_binary "$X86_BIN"
     mkdir -p "$PROJECT_ROOT/.build/universal"
     lipo -create -output "$PROJECT_ROOT/.build/universal/macmtp" "$ARM_BIN_COPY" "$X86_BIN"
+    rm -f "$ARM_BIN_COPY"
     SWIFT_BIN="$PROJECT_ROOT/.build/universal/macmtp"
 else
     SWIFT_BIN="$(build_swift_arch "$TARGET_ARCH" "$BUILD_MODE")"

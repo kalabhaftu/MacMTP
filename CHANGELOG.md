@@ -19,6 +19,7 @@
 - Added invalid local filename rejection and updated support guidance for launch-time detection and transfer failures.
 - Use a grid icon for the Applications Finder favorite.
 - Preserve the arm64 build while packaging the universal release after the x86_64 clean build.
+- Report failed MTP cancellation recovery to Sentry with its native transport details while keeping user cancellations quiet.
 
 ## 1.7.1 - 2026-09-14
 

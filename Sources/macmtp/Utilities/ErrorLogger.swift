@@ -203,7 +203,9 @@ public struct ErrorLogger {
     }
 
     static func shouldReport(_ error: Error) -> Bool {
-        if isMTPTransferCancellation(error) || isMTPCancellationRecoveryFailure(error) {
+        // A user cancellation is expected; failed recovery is a transport bug
+        // and must remain visible with its native status/reset details.
+        if isMTPTransferCancellation(error) {
             return false
         }
 
