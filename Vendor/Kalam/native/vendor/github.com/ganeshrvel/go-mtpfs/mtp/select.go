@@ -35,6 +35,8 @@ func discoverDeviceSelectors(skip *Device) ([]DeviceSelector, error) {
 	}
 
 	seen := make(map[string]struct{})
+	openedVIDPIDs := make(map[string]struct{})
+	failedFallbacks := make(map[string]DeviceSelector)
 	selectors := make([]DeviceSelector, 0, len(devs))
 	var claimError error
 	var probeError error
@@ -53,31 +55,11 @@ func discoverDeviceSelectors(skip *Device) ([]DeviceSelector, error) {
 			if isUSBClaimError(err) {
 				claimError = err
 			}
-			candidate.Done()
-			continue
-		}
-		// Configure handles Android's SessionAlreadyOpened response by closing
-		// the stale session and opening a fresh one.
-		if err := candidate.Configure(); err != nil {
-			if probeError == nil {
-				probeError = err
+			selector := DeviceSelector{
+				VendorID:  candidate.devDescr.IdVendor,
+				ProductID: candidate.devDescr.IdProduct,
 			}
-			if isUSBClaimError(err) {
-				claimError = err
-			}
-			candidate.Close()
-			candidate.Done()
-			continue
-		}
-		var deviceInfo DeviceInfo
-		if err := candidate.GetDeviceInfo(&deviceInfo); err != nil {
-			if probeError == nil {
-				probeError = err
-			}
-			if isUSBClaimError(err) {
-				claimError = err
-			}
-			candidate.Close()
+			failedFallbacks[fmt.Sprintf("%04x:%04x", selector.VendorID, selector.ProductID)] = selector
 			candidate.Done()
 			continue
 		}
@@ -88,18 +70,29 @@ func discoverDeviceSelectors(skip *Device) ([]DeviceSelector, error) {
 			if probeError == nil {
 				probeError = err
 			}
+			selector := DeviceSelector{
+				VendorID:  candidate.devDescr.IdVendor,
+				ProductID: candidate.devDescr.IdProduct,
+			}
+			failedFallbacks[fmt.Sprintf("%04x:%04x", selector.VendorID, selector.ProductID)] = selector
 			continue
 		}
 		selector := DeviceSelector{
 			VendorID:     info.IdVendor,
 			ProductID:    info.IdProduct,
 			SerialNumber: info.SerialNumber,
-			Manufacturer: deviceInfo.Manufacturer,
-			Model:        deviceInfo.Model,
+			Manufacturer: info.Manufacturer,
+			Model:        info.Product,
 		}
+		openedVIDPIDs[fmt.Sprintf("%04x:%04x", selector.VendorID, selector.ProductID)] = struct{}{}
 		key := fmt.Sprintf("%04x:%04x:%s", selector.VendorID, selector.ProductID, selector.SerialNumber)
 		if _, exists := seen[key]; !exists {
 			seen[key] = struct{}{}
+			selectors = append(selectors, selector)
+		}
+	}
+	for vidPID, selector := range failedFallbacks {
+		if _, opened := openedVIDPIDs[vidPID]; !opened {
 			selectors = append(selectors, selector)
 		}
 	}
@@ -305,6 +298,7 @@ func SelectDeviceWithSelector(selector DeviceSelector, allowDebugging bool) (*De
 	}
 
 	var matching []*Device
+	var matchingError error
 	for _, candidate := range devs {
 		if candidate.devDescr.IdVendor != selector.VendorID || candidate.devDescr.IdProduct != selector.ProductID {
 			candidate.Done()
@@ -314,12 +308,23 @@ func SelectDeviceWithSelector(selector DeviceSelector, allowDebugging bool) (*De
 		candidate.DataDebug = allowDebugging
 		candidate.MTPDebug = allowDebugging
 		if err := candidate.Open(); err != nil {
+			if matchingError == nil {
+				matchingError = err
+			}
 			candidate.Done()
 			continue
 		}
 		if selector.SerialNumber != "" {
 			info, infoErr := candidate.GetUsbInfo()
-			if infoErr != nil || !selectorMatches(selector, info.IdVendor, info.IdProduct, info.SerialNumber) {
+			if infoErr != nil {
+				if matchingError == nil {
+					matchingError = infoErr
+				}
+				candidate.Close()
+				candidate.Done()
+				continue
+			}
+			if !selectorMatches(selector, info.IdVendor, info.IdProduct, info.SerialNumber) {
 				candidate.Close()
 				candidate.Done()
 				continue
@@ -328,6 +333,9 @@ func SelectDeviceWithSelector(selector DeviceSelector, allowDebugging bool) (*De
 		matching = append(matching, candidate)
 	}
 
+	if len(matching) == 0 && matchingError != nil {
+		return nil, fmt.Errorf("opening MTP device vendor=0x%04x product=0x%04x: %w", selector.VendorID, selector.ProductID, matchingError)
+	}
 	if len(matching) == 0 {
 		return nil, fmt.Errorf("no MTP device matched vendor=0x%04x product=0x%04x", selector.VendorID, selector.ProductID)
 	}

@@ -74,7 +74,8 @@ public struct ErrorLogger {
             code: originalError.code,
             userInfo: [NSLocalizedDescriptionKey: reportDescription]
         )
-        let extras = sanitizedExtras(userInfo)
+        var extras = sanitizedExtras(userInfo)
+        extras["source_revision"] = AppVersion.sourceRevision
 
         SentrySDK.capture(error: reportError) { scope in
             scope.setTag(value: String(describing: type(of: error)), key: "error_type")
@@ -110,7 +111,8 @@ public struct ErrorLogger {
         systemLogger.log(level: logLevel, "\(sanitizedMessage, privacy: .public)")
         guard ensureStarted() else { return }
 
-        let extras = sanitizedExtras(userInfo)
+        var extras = sanitizedExtras(userInfo)
+        extras["source_revision"] = AppVersion.sourceRevision
         let fields = extras.keys.sorted().map { "\($0)=\(String(describing: extras[$0]!))" }.joined(separator: " ")
         writeTerminal("MTP event=\(sanitizedMessage) level=\(level.rawValue)\(fields.isEmpty ? "" : " \(fields)")")
         let breadcrumb = Breadcrumb(level: level, category: "macmtp")
@@ -204,7 +206,7 @@ public struct ErrorLogger {
 
     static func shouldReport(_ error: Error) -> Bool {
         // A user cancellation is expected; failed recovery is a transport bug
-        // and must remain visible with its native status/reset details.
+        // and must remain visible with its native recovery details.
         if isMTPTransferCancellation(error) {
             return false
         }
@@ -343,6 +345,8 @@ public struct ErrorLogger {
             "connection_state",
             "initial_scan",
             "reconnect_result",
+            "selected_vid_pid",
+            "source_revision",
         ]
         for key in keys {
             guard let value = extras[key] else { continue }

@@ -133,15 +133,7 @@ public final class MTPDeviceManager: ObservableObject {
             let isNoStorageError = errLower.contains("no storage found")
             let isMultipleDeviceError = errLower.contains("errormultipledevice")
                 || errLower.contains("more than 1 device")
-            let isDeviceNotFound = errLower.contains("no mtp device")
-                || errLower.contains("no mtp devices found")
-                || errLower.contains("no mtp device matched")
-                || errLower.contains("no device found")
-                || errLower.contains("mtp detect failed")
-                || errLower.contains("errormtpdetectfailed")
-                || errLower.contains("busy")
-                || errLower.contains("libusb_error_no_device")
-                || errLower.contains("libusb_error_not_found")
+            let isDeviceNotFound = isMTPDeviceUnavailable(error)
 
             let isExpectedUserCondition = isNoStorageError || isDeviceNotFound || isMultipleDeviceError
             canRetryConnection = isMTPTransportFailure(error) && !isDeviceNotFound
@@ -262,6 +254,7 @@ public final class MTPDeviceManager: ObservableObject {
         connectionGeneration &+= 1
         refreshGeneration &+= 1
         let failedSelector = activeSelector
+        let recoveryStarted = Date()
         MTPConnectionCoordinator.shared.markSessionLost(message: message, failedSelector: failedSelector)
         let invalidatedGeneration = connectionGeneration
         directoryCoordinator.invalidateSnapshot()
@@ -320,10 +313,6 @@ public final class MTPDeviceManager: ObservableObject {
             let shouldReconnect = self.reconnectAfterInvalidation
             var reconnectStarted = false
             if shouldReconnect {
-                // Samsung devices can keep the interface wedged briefly after a
-                // failed cancellation reset. Let macOS and Android settle before
-                // discovery opens a fresh handle.
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
                 guard self.connectionGeneration == invalidatedGeneration else { return }
                 self.invalidationTask = nil
                 self.isConnectionRecoveryInFlight = false
@@ -340,6 +329,10 @@ public final class MTPDeviceManager: ObservableObject {
                     "operation_phase": "connection",
                     "reconnect_result": reconnectStarted ? "automatic_retry_started" : "manual_retry_required",
                     "session_generation": Int64(invalidatedGeneration),
+                    "recovery_duration_ms": Int(Date().timeIntervalSince(recoveryStarted) * 1_000),
+                    "selected_vid_pid": failedSelector.map {
+                        String(format: "0x%04x:0x%04x", $0.vendorId, $0.productId)
+                    } ?? "unknown"
                 ]
             )
         }

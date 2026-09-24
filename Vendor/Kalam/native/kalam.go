@@ -86,6 +86,41 @@ func snapshotProgress(p *mtpx.ProgressInfo) *mtpx.ProgressInfo {
 	return &snapshot
 }
 
+func startProgressReporter(progressMu *sync.RWMutex, progress *interface{}) func() {
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				progressMu.RLock()
+				current := *progress
+				progressMu.RUnlock()
+				switch v := current.(type) {
+				case UploadPreprocessContainer:
+					send_to_js.SendUploadFilesPreprocess(v.fi, v.fullPath)
+				case DownloadPreprocessContainer:
+					send_to_js.SendDownloadFilesPreprocess(v.fi)
+				case ProgressContainer:
+					send_to_js.SendTransferFilesProgress(v.pInfo)
+				case nil:
+				default:
+					log.Panicln("unimplemented transfer progress type")
+				}
+			}
+		}
+	}()
+	return func() {
+		close(done)
+		<-stopped
+	}
+}
+
 //export Initialize
 func Initialize(inputJSON *C.char) {
 	lockMtp()
@@ -426,35 +461,7 @@ func UploadFiles(uploadFilesInputJson *C.char) {
 
 	var pInterface interface{}
 	var progressMu sync.RWMutex
-
-	done := make(chan struct{})
-	defer close(done)
-	go func() {
-		ticker := time.NewTicker(500 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-done:
-				return
-			case <-ticker.C:
-				progressMu.RLock()
-				progress := pInterface
-				progressMu.RUnlock()
-				if progress != nil {
-					switch v := progress.(type) {
-					case UploadPreprocessContainer:
-						send_to_js.SendUploadFilesPreprocess(v.fi, v.fullPath)
-
-					case ProgressContainer:
-						send_to_js.SendTransferFilesProgress(v.pInfo)
-
-					default:
-						log.Panicln("unimplemented UploadFiles.pInterface type")
-					}
-				}
-			}
-		}
-	}()
+	stopProgressReporter := startProgressReporter(&progressMu, &pInterface)
 
 	err = _uploadFiles(i.StorageId, i.Sources, i.Destination, i.PreprocessFiles,
 		func(fi *os.FileInfo, fullPath string, err error) error {
@@ -497,6 +504,7 @@ func UploadFiles(uploadFilesInputJson *C.char) {
 
 			return nil
 		})
+	stopProgressReporter()
 	if err == nil {
 		err = abortIfTransferCancelled()
 	}
@@ -530,35 +538,7 @@ func DownloadFiles(downloadFilesInputJson *C.char) {
 
 	var pInterface interface{}
 	var progressMu sync.RWMutex
-
-	done := make(chan struct{})
-	defer close(done)
-	go func() {
-		ticker := time.NewTicker(500 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-done:
-				return
-			case <-ticker.C:
-				progressMu.RLock()
-				progress := pInterface
-				progressMu.RUnlock()
-				if progress != nil {
-					switch v := progress.(type) {
-					case DownloadPreprocessContainer:
-						send_to_js.SendDownloadFilesPreprocess(v.fi)
-
-					case ProgressContainer:
-						send_to_js.SendTransferFilesProgress(v.pInfo)
-
-					default:
-						log.Panicln("unimplemented DownloadFiles.pInterface type")
-					}
-				}
-			}
-		}
-	}()
+	stopProgressReporter := startProgressReporter(&progressMu, &pInterface)
 
 	err = _downloadFiles(i.StorageId, i.Sources, i.Destination, i.PreprocessFiles,
 		func(fi *mtpx.FileInfo, err error) error {
@@ -600,6 +580,7 @@ func DownloadFiles(downloadFilesInputJson *C.char) {
 
 			return nil
 		})
+	stopProgressReporter()
 	if err == nil {
 		err = abortIfTransferCancelled()
 	}

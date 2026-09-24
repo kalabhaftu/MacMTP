@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- Download MTP files in bounded partial-object transactions so cancellation completes between transactions, preserves the native session, and retries quietly without resetting Android's USB transport.
 
 ## 1.7.3 - 2026-09-24
 

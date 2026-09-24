@@ -524,11 +524,15 @@ public final class FileTransferService: ObservableObject {
                             message: "FileTransferService: File copy failed for chunk",
                             userInfo: [
                                 "operation": "transfer",
+                                "operation_phase": "transfer",
                                 "total_files": batch.totalFileCount,
                                 "completed_files": batch.completedFileCount,
                                 "bytes_transferred": batch.totalBytesTransferred,
                                 "connection_active": MTPDeviceManager.shared.isConnected,
-                                "native_error_type": nativeErrorType(for: error)
+                                "native_error_type": nativeErrorType(for: error),
+                                "selected_vid_pid": MTPDeviceManager.shared.activeSelector.map {
+                                    String(format: "0x%04x:0x%04x", $0.vendorId, $0.productId)
+                                } ?? "unknown"
                             ]
                         )
                     } else {

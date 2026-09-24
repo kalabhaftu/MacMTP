@@ -295,6 +295,10 @@ else
     exit 1
 fi
 
+SOURCE_REVISION="${MACMTP_SOURCE_REVISION:-$(git -C "$PROJECT_ROOT" rev-parse --short=12 HEAD)}"
+/usr/libexec/PlistBuddy -c "Add :SourceRevision string $SOURCE_REVISION" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null \
+    || /usr/libexec/PlistBuddy -c "Set :SourceRevision $SOURCE_REVISION" "$APP_BUNDLE/Contents/Info.plist"
+
 if [[ -n "${SENTRY_DSN:-}" ]]; then
     /usr/libexec/PlistBuddy -c "Add :SentryDSN string $SENTRY_DSN" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null \
         || /usr/libexec/PlistBuddy -c "Set :SentryDSN $SENTRY_DSN" "$APP_BUNDLE/Contents/Info.plist"

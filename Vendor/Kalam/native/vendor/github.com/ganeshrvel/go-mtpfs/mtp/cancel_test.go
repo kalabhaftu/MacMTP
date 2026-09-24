@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ganeshrvel/usb"
 )
 
 func TestCancelRequestDataUsesCurrentTransaction(t *testing.T) {
@@ -97,6 +99,22 @@ func TestCancelRecoveryStopsBeforeStatusWhenDrainFails(t *testing.T) {
 	}
 }
 
+func TestDrainTimeoutWithReceivedBytesIsNotMistakenForIdle(t *testing.T) {
+	_, err := drainUntilIdle(0x81, 1, time.Millisecond, time.Millisecond, func(byte, []byte, int) (int, error) {
+		return 1, usb.ERROR_TIMEOUT
+	})
+	if err == nil || !strings.Contains(err.Error(), "did not become idle") {
+		t.Fatalf("drain result = %v, want bounded failure", err)
+	}
+
+	drained, err := drainUntilIdle(0x81, 1, time.Second, time.Millisecond, func(byte, []byte, int) (int, error) {
+		return 0, usb.ERROR_TIMEOUT
+	})
+	if err != nil || drained != 0 {
+		t.Fatalf("idle drain = (%d, %v), want (0, nil)", drained, err)
+	}
+}
+
 func TestClearEndpointHaltsAttemptsBothEndpoints(t *testing.T) {
 	var endpoints []byte
 	err := clearEndpointHalts(func(endpoint byte) error {
@@ -127,46 +145,13 @@ func TestCancelRecoveryVerificationFailureIsNotSuccess(t *testing.T) {
 	}
 }
 
-func TestFreshHandleResetClosesBeforeResetAndDrainsBeforeClose(t *testing.T) {
-	var events []string
-	step := func(name string) func() error {
-		return func() error { return nil }
+func TestStandardPartialObjectRequestUsesStandardOpcode(t *testing.T) {
+	req := partialObjectRequest(7, 11, 13)
+	if req.Code != OC_GetPartialObject {
+		t.Fatalf("opcode = 0x%x, want 0x%x", req.Code, OC_GetPartialObject)
 	}
-	if err := resetFreshHandleOrder(
-		&events,
-		step("close-stale"),
-		step("open-fresh"),
-		step("device-reset"),
-		step("clear-halts"),
-		step("drain"),
-		step("close-fresh"),
-	); err != nil {
-		t.Fatal(err)
-	}
-	want := []string{"close-stale", "open-fresh", "device-reset", "clear-halts", "drain", "close-fresh"}
-	if !bytes.Equal([]byte(strings.Join(events, ",")), []byte(strings.Join(want, ","))) {
-		t.Fatalf("fresh reset order = %v, want %v", events, want)
-	}
-}
-
-func TestFreshHandleResetClosesAfterRecoveryStepFailure(t *testing.T) {
-	var events []string
-	err := resetFreshHandleOrder(
-		&events,
-		func() error { return nil },
-		func() error { return nil },
-		func() error { return fmt.Errorf("reset timeout") },
-		func() error { return nil },
-		func() error { return nil },
-		func() error {
-			events = append(events, "closed")
-			return nil
-		},
-	)
-	if err == nil || !strings.Contains(err.Error(), "reset timeout") {
-		t.Fatalf("reset failure = %v", err)
-	}
-	if !bytes.Contains([]byte(strings.Join(events, ",")), []byte("closed")) {
-		t.Fatalf("fresh handle was not closed after reset failure: %v", events)
+	want := []uint32{7, 11, 13}
+	if fmt.Sprint(req.Param) != fmt.Sprint(want) {
+		t.Fatalf("params = %v, want %v", req.Param, want)
 	}
 }

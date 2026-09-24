@@ -4,11 +4,75 @@ import (
 	"errors"
 	"fmt"
 	"github.com/ganeshrvel/go-mtpfs/mtp"
+	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 )
+
+const downloadWindowSize uint32 = 8 << 20
+
+type partialDownloadMode uint8
+
+const (
+	fullObjectDownload partialDownloadMode = iota
+	android64PartialDownload
+	standardPartialDownload
+)
+
+func selectPartialDownloadMode(total int64, supports func(uint16) bool) partialDownloadMode {
+	if supports(mtp.OC_ANDROID_GET_PARTIAL_OBJECT64) {
+		return android64PartialDownload
+	}
+	if total <= math.MaxUint32 && supports(mtp.OC_GetPartialObject) {
+		return standardPartialDownload
+	}
+	return fullObjectDownload
+}
+
+type countingWriter struct {
+	io.Writer
+	written int64
+}
+
+func (w *countingWriter) Write(p []byte) (int, error) {
+	n, err := w.Writer.Write(p)
+	w.written += int64(n)
+	return n, err
+}
+
+func downloadObjectInWindows(total int64, destination io.Writer, read func(int64, uint32, io.Writer) error, progress func(int64) error) error {
+	if total < 0 {
+		return fmt.Errorf("negative MTP object size %d", total)
+	}
+	var offset int64
+	if err := progress(0); err != nil {
+		return err
+	}
+	for offset < total {
+		requestSize := int64(downloadWindowSize)
+		if remaining := total - offset; remaining < requestSize {
+			requestSize = remaining
+		}
+		counter := &countingWriter{Writer: destination}
+		if err := read(offset, uint32(requestSize), counter); err != nil {
+			return err
+		}
+		if counter.written <= 0 {
+			return fmt.Errorf("MTP partial read returned zero bytes at offset %d of %d", offset, total)
+		}
+		if counter.written > requestSize || counter.written > total-offset {
+			return fmt.Errorf("MTP partial read returned %d bytes for a %d-byte request", counter.written, requestSize)
+		}
+		offset += counter.written
+		if err := progress(offset); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // GetFileSize - fetch the file size of the object
 func GetFileSize(dev *mtp.Device, obj *mtp.ObjectInfo, objectId uint32, isDir bool) (int64, error) {
@@ -380,16 +444,27 @@ func handleMakeLocalFile(dev *mtp.Device, fi *FileInfo, destination string, prog
 	}
 	defer f.Close()
 
-	var totalSent int64 = 0
-	err = dev.GetObject(fi.ObjectId, f, func(sent int64) error {
+	var totalSent int64
+	reportProgress := func(sent int64) error {
 		if err := progressCb(fi.Size, sent, fi.ObjectId, err); err != nil {
 			return err
 		}
 
 		totalSent = sent
-
 		return nil
-	})
+	}
+	switch selectPartialDownloadMode(fi.Size, dev.SupportsOperation) {
+	case android64PartialDownload:
+		err = downloadObjectInWindows(fi.Size, f, func(offset int64, size uint32, w io.Writer) error {
+			return dev.AndroidGetPartialObject64(fi.ObjectId, w, offset, size)
+		}, reportProgress)
+	case standardPartialDownload:
+		err = downloadObjectInWindows(fi.Size, f, func(offset int64, size uint32, w io.Writer) error {
+			return dev.GetPartialObject(fi.ObjectId, w, uint32(offset), size)
+		}, reportProgress)
+	default:
+		err = dev.GetObject(fi.ObjectId, f, reportProgress)
+	}
 	if err != nil {
 		return err
 	}
@@ -679,7 +754,7 @@ func processDownloadFilesError(dfProps *processDownloadFilesProps, err error) (b
 	return bulkFilesSent, bulkSizeSent, err
 }
 
-//Restore modified timestamp of the file
+// Restore modified timestamp of the file
 func restoreLocalFileTimestamp(destination string, modTime time.Time) (err error) {
 	currentTime := time.Now().Local()
 

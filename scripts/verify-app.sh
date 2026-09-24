@@ -67,6 +67,10 @@ esac
     echo "ERROR: Bundle version is not semantic-version shaped." >&2
     exit 1
 }
+[[ "$(plist_value SourceRevision)" =~ ^[0-9a-f]{7,40}$ ]] || {
+    echo "ERROR: Bundle source revision is missing or invalid." >&2
+    exit 1
+}
 
 if ! otool -L "$EXECUTABLE" | grep -Fq '@executable_path/libusb.dylib'; then
     echo "ERROR: Executable does not use the bundled libusb path." >&2

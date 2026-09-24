@@ -19,6 +19,7 @@ RELEASE_DIR="$PROJECT_ROOT/release"
 APP_BUNDLE="$PROJECT_ROOT/$APP_NAME.app"
 APP_DSYM="$PROJECT_ROOT/$APP_NAME.app.dSYM"
 VERIFY_SCRIPT="$SCRIPT_DIR/verify-app.sh"
+BUILD_NUMBER="${MACMTP_BUILD_NUMBER:-$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PROJECT_ROOT/Resources/Info.plist")}"
 TARGETS=()
 
 usage() {
@@ -90,7 +91,7 @@ mkdir -p "$RELEASE_DIR"
 
 set_version() {
     /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP_BUNDLE/Contents/Info.plist"
-    /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$APP_BUNDLE/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$APP_BUNDLE/Contents/Info.plist"
     local signing_identity="${MACMTP_SIGNING_IDENTITY:--}"
     local signing_options=(--force --deep)
     if [[ "$signing_identity" != "-" ]]; then

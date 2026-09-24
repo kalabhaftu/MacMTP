@@ -12,6 +12,12 @@ public struct AppVersion {
             ?? "development"
     }
 
+    public static var sourceRevision: String {
+        Bundle.main.object(forInfoDictionaryKey: "SourceRevision") as? String
+            ?? ProcessInfo.processInfo.environment["MACMTP_SOURCE_REVISION"]
+            ?? "development"
+    }
+
     public static var sentryRelease: String {
         let bundleIdentifier = Bundle.main.bundleIdentifier ?? "com.macmtp.app"
         return "\(bundleIdentifier)@\(current)+\(build)"

@@ -271,6 +271,29 @@ func failedMTPSelectorsAreRetriedAfterHealthyCandidates() {
     #expect(orderedMTPConnectionCandidates([failed, healthy], failed: [failed]) == [healthy, failed])
 }
 
+@Test
+func matchedSelectorOpenTimeoutRemainsRetryable() {
+    let timeout = KalamError.nativeOperationFailed(
+        operation: "initialize",
+        errorType: "ErrorMtpDetectFailed",
+        message: "opening MTP device vendor=0x04e8 product=0x6860: LIBUSB_ERROR_TIMEOUT"
+    )
+    let absent = KalamError.nativeOperationFailed(
+        operation: "initialize",
+        errorType: "ErrorMtpDetectFailed",
+        message: "no MTP device matched vendor=0x04e8 product=0x6860"
+    )
+
+    #expect(!isMTPDeviceUnavailable(timeout))
+    #expect(isMTPDeviceUnavailable(absent))
+}
+
+@Test
+func mtpRecoveryRetriesUseQuietBoundedBackoff() {
+    #expect(mtpRecoveryDelayNanoseconds(attempt: 1) == 2_000_000_000)
+    #expect(mtpRecoveryDelayNanoseconds(attempt: 2) == 4_000_000_000)
+}
+
 @Test @MainActor
 func switchingDevicesDisposesTheOldSessionBeforeInitializingTheNewOne() async {
     let bridge = RecordingMTPBridge()
@@ -532,11 +555,11 @@ func failedConnectionRetriesWhenThePhoneIsReattached() {
 }
 
 @Test
-func cancellationTransportResetTriggersAutomaticReconnect() {
+func cancellationRecoveryFailureTriggersAutomaticReconnect() {
     let recoveryFailure = KalamError.nativeOperationFailed(
         operation: "transfer",
         errorType: "ErrorFileTransfer",
-        message: "MTP cancellation recovery failed transaction=0x17: verify MTP session after cancellation: got stale response container; device reset=<nil>"
+        message: "MTP cancellation recovery failed transaction=0x17: verify MTP session after cancellation: got stale response container; transport closed for quiet reopen"
     )
     let legacyRecoveryFailure = KalamError.nativeOperationFailed(
         operation: "transfer",

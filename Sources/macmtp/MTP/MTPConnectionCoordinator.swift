@@ -12,6 +12,15 @@ func mergeMTPSelectors(
         merged.insert(active)
     }
     for selector in failed where selectorIsPresent(selector, in: inventory) {
+        if selector.serialNumber.isEmpty,
+           merged.contains(where: { $0.vendorId == selector.vendorId && $0.productId == selector.productId }) {
+            continue
+        }
+        if !selector.serialNumber.isEmpty {
+            merged = Set(merged.filter {
+                !($0.vendorId == selector.vendorId && $0.productId == selector.productId && $0.serialNumber.isEmpty)
+            })
+        }
         merged.insert(selector)
     }
     return merged
@@ -29,6 +38,10 @@ func orderedMTPConnectionCandidates(
         return lhs.serialNumber < rhs.serialNumber
     }
     return ordered.filter { !failed.contains($0) } + ordered.filter { failed.contains($0) }
+}
+
+func mtpRecoveryDelayNanoseconds(attempt: Int) -> UInt64 {
+    attempt <= 1 ? 2_000_000_000 : 4_000_000_000
 }
 
 private func selectorIsPresent(_ selector: MTPDeviceSelector, in inventory: Set<USBDeviceIdentity>) -> Bool {
@@ -169,7 +182,11 @@ final class MTPConnectionCoordinator: ObservableObject {
         state = .connecting(attempt: 1)
         discoveryTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            defer { self.discoveryTask = nil }
+            defer {
+                if self.generation == token {
+                    self.discoveryTask = nil
+                }
+            }
             let connected = await MTPDeviceManager.shared.switchDevice(to: selector)
             guard self.generation == token, !Task.isCancelled else { return }
             if connected {
@@ -234,12 +251,20 @@ final class MTPConnectionCoordinator: ObservableObject {
         let token = generation
         discoveryTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            defer { self.discoveryTask = nil }
+            defer {
+                if self.generation == token {
+                    self.discoveryTask = nil
+                }
+            }
 
             let maxAttempts = MTPDeviceManager.shared.isConnected ? 1 : 2
             for attempt in 1...maxAttempts {
                 guard self.generation == token, !Task.isCancelled else { return }
                 let passiveProbe = MTPDeviceManager.shared.isConnected
+                if !passiveProbe, !self.failedSelectors.isEmpty {
+                    try? await Task.sleep(nanoseconds: mtpRecoveryDelayNanoseconds(attempt: attempt))
+                    guard self.generation == token, !Task.isCancelled else { return }
+                }
                 if !passiveProbe {
                     self.state = .connecting(attempt: attempt)
                     ErrorLogger.logMessage(
@@ -284,7 +309,7 @@ final class MTPConnectionCoordinator: ObservableObject {
                             "state": mergedSelectors.isEmpty ? "mtp_unavailable" : "mtp_candidate_found",
                             "candidate_count": mergedSelectors.count,
                             "candidate_vid_pids": mergedSelectors
-                                .map { String(format: "0x%04x:0x%04x:%@", $0.vendorId, $0.productId, $0.serialNumber.isEmpty ? "no-serial" : $0.serialNumber) }
+                                .map { String(format: "0x%04x:0x%04x", $0.vendorId, $0.productId) }
                                 .joined(separator: ","),
                             "generation": Int64(token),
                             "attempt": attempt
@@ -313,22 +338,7 @@ final class MTPConnectionCoordinator: ObservableObject {
                     guard !orderedSelectors.isEmpty else { return }
 
                     let candidates = orderedMTPConnectionCandidates(orderedSelectors, failed: self.failedSelectors)
-                    var connected = false
-                    for candidate in candidates {
-                        guard self.generation == token, !Task.isCancelled else { return }
-                        if MTPDeviceManager.shared.isConnected {
-                            let settleDeadline = Date().addingTimeInterval(10)
-                            while FileTransferService.shared.isTransferInFlight {
-                                if Date() >= settleDeadline { break }
-                                try? await Task.sleep(nanoseconds: 50_000_000)
-                            }
-                        }
-                        if await MTPDeviceManager.shared.switchDevice(to: candidate) {
-                            self.failedSelectors.remove(candidate)
-                            connected = true
-                            break
-                        }
-                    }
+                    let connected = await self.connectFirstAvailable(candidates, token: token)
 
                     if connected {
                         guard self.generation == token else { return }
@@ -340,7 +350,10 @@ final class MTPConnectionCoordinator: ObservableObject {
                                 "event": "connection_ready",
                                 "state": "connected",
                                 "generation": Int64(token),
-                                "attempt": attempt
+                                "attempt": attempt,
+                                "selected_vid_pid": MTPDeviceManager.shared.activeSelector.map {
+                                    String(format: "0x%04x:0x%04x", $0.vendorId, $0.productId)
+                                } ?? "unknown"
                             ]
                         )
                         return
@@ -373,6 +386,14 @@ final class MTPConnectionCoordinator: ObservableObject {
                         self.state = .connected
                         return
                     }
+                    let retained = self.sortSelectors(self.failedSelectors.filter {
+                        selectorIsPresent($0, in: self.lastUSBInventory)
+                    })
+                    if !retained.isEmpty,
+                       await self.connectFirstAvailable(retained, token: token) {
+                        self.state = .connected
+                        return
+                    }
                     guard attempt == 1, isTransientProbeFailure(error) else {
                         self.state = .failed(
                             message: "MTP discovery failed: \(error.localizedDescription)",
@@ -383,9 +404,20 @@ final class MTPConnectionCoordinator: ObservableObject {
                     self.releaseMTPInterfaceClaimantsIfNeeded()
                 }
 
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
+    }
+
+    private func connectFirstAvailable(_ candidates: [MTPDeviceSelector], token: UInt64) async -> Bool {
+        for candidate in candidates {
+            guard generation == token, !Task.isCancelled else { return false }
+            if await MTPDeviceManager.shared.switchDevice(to: candidate) {
+                failedSelectors.remove(candidate)
+                return true
+            }
+            failedSelectors.insert(candidate)
+        }
+        return false
     }
 
     private func isTransientProbeFailure(_ error: Error) -> Bool {
@@ -401,7 +433,6 @@ final class MTPConnectionCoordinator: ObservableObject {
             || details.contains("malformed")
             || details.contains("stale")
             || details.contains("unexpected data")
-            || details.contains("after usb reset")
             || details.contains("transaction id mismatch")
             || details.contains("got type")
     }
