@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.7.2 - 2026-09-24
+
 ### MTP Connection and Transfer Reliability
 - Reworked USB detection and MTP session ownership into one serialized coordinator with explicit connection states, capped recovery, stale-session cancellation, and structured Terminal diagnostics.
 - Added a post-failure recovery for macOS Image Capture daemons that can hold the MTP interface (`ptpcamerad` and `mscamerad-xpc`), using exact-name release and an immediate single retry.
@@ -15,6 +17,7 @@
 - Publish transfer cleanup state so device switching re-enables when cancellation or recovery settles.
 - Report user-cancelled transfers as cancelled even when native session recovery times out.
 - Added invalid local filename rejection and updated support guidance for launch-time detection and transfer failures.
+- Use a grid icon for the Applications Finder favorite.
 
 ## 1.7.1 - 2026-09-14
 
