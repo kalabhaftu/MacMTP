@@ -22,6 +22,13 @@ struct USBDeviceIdentity: Hashable, Sendable {
     }
 }
 
+struct USBDeviceNames: Equatable, Sendable {
+    let vendorID: UInt16
+    let productID: UInt16
+    let manufacturer: String
+    let product: String
+}
+
 struct USBConnectionLifecycle: Equatable {
     private(set) var generation: UInt64 = 0
 
@@ -69,6 +76,7 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
     private var isWatching = false
     private var knownDeviceIdentities: Set<USBDeviceIdentity> = []
     private var availableDeviceIdentities: Set<USBDeviceIdentity> = []
+    private var availableDeviceNames: [USBDeviceNames] = []
     
     
     private init() {}
@@ -157,6 +165,7 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
     private func cleanupWatchingResources() {
         knownDeviceIdentities.removeAll()
         availableDeviceIdentities.removeAll()
+        availableDeviceNames.removeAll()
         MTPConnectionCoordinator.shared.updateAvailableDevices([])
         
         if let source = runLoopSource {
@@ -193,10 +202,12 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         }
         
         knownDeviceIdentities.formUnion(identities)
-        let allDeviceIdentities = connectedDeviceIdentities()
-        availableDeviceIdentities = allDeviceIdentities
+        let inventory = connectedUSBDeviceInventory()
+        availableDeviceIdentities = inventory.identities
+        availableDeviceNames = inventory.names
         MTPConnectionCoordinator.shared.updateAvailableDevices(
             availableDeviceIdentities,
+            usbNames: availableDeviceNames,
             startAutomatically: UserDefaults.standard.object(forKey: "autoDetectDevice") as? Bool ?? true
         )
         ErrorLogger.logMessage(
@@ -207,7 +218,7 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
                 "state": availableDeviceIdentities.isEmpty ? "usb_absent" : "usb_detected",
                 "initial_scan": isInitialScan,
                 "usb_device_count": availableDeviceIdentities.count,
-                "usb_vendor_ids": Array(Set(allDeviceIdentities.map(\.vendorID))).sorted()
+                "usb_vendor_ids": Array(Set(inventory.identities.map(\.vendorID))).sorted()
             ]
         )
     }
@@ -225,11 +236,13 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         guard !isInitialScan else { return }
         
         try? await Task.sleep(nanoseconds: 150_000_000)
-        let allDeviceIdentities = connectedDeviceIdentities()
-        availableDeviceIdentities = allDeviceIdentities
+        let inventory = connectedUSBDeviceInventory()
+        availableDeviceIdentities = inventory.identities
+        availableDeviceNames = inventory.names
         knownDeviceIdentities = availableDeviceIdentities
         MTPConnectionCoordinator.shared.updateAvailableDevices(
             availableDeviceIdentities,
+            usbNames: availableDeviceNames,
             startAutomatically: UserDefaults.standard.object(forKey: "autoDetectDevice") as? Bool ?? true
         )
         ErrorLogger.logMessage(
@@ -239,7 +252,7 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
                 "event": "usb_inventory_changed",
                 "state": availableDeviceIdentities.isEmpty ? "usb_absent" : "usb_detected",
                 "usb_device_count": availableDeviceIdentities.count,
-                "usb_vendor_ids": Array(Set(allDeviceIdentities.map(\.vendorID))).sorted()
+                "usb_vendor_ids": Array(Set(inventory.identities.map(\.vendorID))).sorted()
             ]
         )
     }
@@ -258,36 +271,42 @@ public final class USBWatcher: ObservableObject, @unchecked Sendable {
         )
     }
 
-    private func getDeviceName(device: io_object_t) -> String? {
-        var nameChar = [CChar](repeating: 0, count: 128)
-        let result = IORegistryEntryGetName(device, &nameChar)
-        if result == kIOReturnSuccess {
-            return String(decoding: nameChar.map { UInt8(bitPattern: $0) }, as: UTF8.self)
-                .trimmingCharacters(in: .controlCharacters)
-        }
-        return nil
+    private func deviceNames(for device: io_object_t) -> USBDeviceNames? {
+        let vendorID = (IORegistryEntryCreateCFProperty(device, "idVendor" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? NSNumber)?.uint16Value
+        let productID = (IORegistryEntryCreateCFProperty(device, "idProduct" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? NSNumber)?.uint16Value
+        guard let vendorID, let productID else { return nil }
+        return USBDeviceNames(
+            vendorID: vendorID,
+            productID: productID,
+            manufacturer: IORegistryEntryCreateCFProperty(device, "USB Vendor Name" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? String ?? "",
+            product: IORegistryEntryCreateCFProperty(device, "USB Product Name" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? String ?? ""
+        )
     }
 
-    private func connectedDeviceIdentities() -> Set<USBDeviceIdentity> {
+    private func connectedUSBDeviceInventory() -> (identities: Set<USBDeviceIdentity>, names: [USBDeviceNames]) {
         guard let matchingDict = IOServiceMatching(kIOUSBDeviceClassName) as? [String: Any] else {
-            return []
+            return ([], [])
         }
 
         var iterator: io_iterator_t = 0
         let result = IOServiceGetMatchingServices(kIOMainPortDefault, matchingDict as CFDictionary, &iterator)
 
         if result != kIOReturnSuccess {
-            return []
+            return ([], [])
         }
         defer { IOObjectRelease(iterator) }
 
         var identities: Set<USBDeviceIdentity> = []
+        var names: [USBDeviceNames] = []
         while case let device = IOIteratorNext(iterator), device != 0 {
             defer { IOObjectRelease(device) }
             if let identity = deviceIdentity(for: device) {
                 identities.insert(identity)
             }
+            if let deviceNames = deviceNames(for: device) {
+                names.append(deviceNames)
+            }
         }
-        return identities
+        return (identities, names)
     }
 }

@@ -244,6 +244,69 @@ func mtpSelectorIdentityIgnoresDisplayMetadataChanges() {
 }
 
 @Test
+func usbRegistryNamesFillOnlyMissingSelectorNames() {
+    let unnamed = MTPDeviceSelector(vendorId: 0x04e8, productId: 0x6860, serialNumber: "samsung")
+    let nativeNamed = MTPDeviceSelector(
+        vendorId: 0x0e8d,
+        productId: 0x2008,
+        serialNumber: "tecno",
+        manufacturer: "TECNO",
+        model: "KI7"
+    )
+    let usbNames = [
+        USBDeviceNames(vendorID: 0x04e8, productID: 0x6860, manufacturer: "SAMSUNG", product: "SAMSUNG_Android"),
+        USBDeviceNames(vendorID: 0x0e8d, productID: 0x2008, manufacturer: "USB TECNO", product: "USB KI7")
+    ]
+
+    let named = fillMissingMTPSelectorNames([unnamed, nativeNamed], from: usbNames)
+    let samsung = named.first { $0.vendorId == 0x04e8 && $0.productId == 0x6860 }
+    let tecno = named.first { $0.vendorId == 0x0e8d && $0.productId == 0x2008 }
+    #expect(samsung?.manufacturer == "SAMSUNG")
+    #expect(samsung?.model == "SAMSUNG_Android")
+    #expect(tecno?.manufacturer == "TECNO")
+    #expect(tecno?.model == "KI7")
+    #expect(MTPDeviceSelector(vendorId: 1, productId: 2, serialNumber: "").displayName == "MTP 0x0001:0x0002")
+}
+
+@Test
+func usbNameMetadataDoesNotChangeUSBDeviceIdentity() {
+    let previous = USBDeviceIdentity(vendorID: 0x04e8, productID: 0x6860, locationID: 1, serialNumber: "samsung")
+    let refreshed = USBDeviceIdentity(vendorID: 0x04e8, productID: 0x6860, locationID: 1, serialNumber: "samsung")
+    let oldNames = USBDeviceNames(vendorID: 0x04e8, productID: 0x6860, manufacturer: "SAMSUNG", product: "SAMSUNG_Android")
+    let newNames = USBDeviceNames(vendorID: 0x04e8, productID: 0x6860, manufacturer: "Samsung", product: "SM-M055F")
+
+    #expect(oldNames != newNames)
+    #expect(previous == refreshed)
+    #expect(!usbInventoryChanged(previous: [previous], current: [refreshed]))
+}
+
+@Test
+func activeMTPModelReplacesGenericUSBProductName() {
+    let samsung = MTPDeviceSelector(
+        vendorId: 0x04e8,
+        productId: 0x6860,
+        serialNumber: "samsung",
+        manufacturer: "SAMSUNG",
+        model: "SAMSUNG_Android"
+    )
+    let deviceInfo = MTPDeviceInfo(
+        manufacturer: "Samsung",
+        model: "SM-M055F",
+        serialNumber: "samsung",
+        deviceVersion: "1.0",
+        storages: []
+    )
+    let active = fillMissingMTPSelectorNames(
+        [samsung],
+        from: [],
+        activeSelector: samsung,
+        activeDeviceInfo: deviceInfo
+    ).first
+
+    #expect(active?.displayName == "Samsung SM-M055F")
+}
+
+@Test
 func failedMTPSelectorsStayListedWithoutReplacingTheActiveDevice() {
     let samsung = MTPDeviceSelector(vendorId: 0x04e8, productId: 0x6860, serialNumber: "samsung", model: "Samsung")
     let tecno = MTPDeviceSelector(vendorId: 0x0e8d, productId: 0x2008, serialNumber: "tecno", model: "TECNO")

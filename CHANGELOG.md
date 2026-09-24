@@ -1,12 +1,13 @@
 # Changelog
 
 ## Unreleased
-- Download MTP files in bounded partial-object transactions so cancellation completes between transactions, preserves the native session, and retries quietly without resetting Android's USB transport.
 
 ## 1.7.3 - 2026-09-24
 
 ### MTP Transfer Reliability
 - Keep large-folder MTP transfers alive with activity-based watchdogs and native traversal heartbeats instead of a fixed wall-clock timeout.
+- Download MTP files in bounded partial-object transactions so cancellation completes between transactions, preserves the native session, and retries quietly without resetting Android's USB transport.
+- Show the active phone's MTP model in the device list and fall back to USB registry names when discovery cannot open it.
 
 ## 1.7.2 - 2026-09-24
 

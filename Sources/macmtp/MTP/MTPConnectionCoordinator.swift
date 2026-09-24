@@ -40,6 +40,36 @@ func orderedMTPConnectionCandidates(
     return ordered.filter { !failed.contains($0) } + ordered.filter { failed.contains($0) }
 }
 
+func fillMissingMTPSelectorNames(
+    _ selectors: Set<MTPDeviceSelector>,
+    from usbNames: [USBDeviceNames],
+    activeSelector: MTPDeviceSelector? = nil,
+    activeDeviceInfo: MTPDeviceInfo? = nil
+) -> Set<MTPDeviceSelector> {
+    Set(selectors.map { selector in
+        let isActive = selector == activeSelector
+        let usbDeviceNames = usbNames.first(where: {
+            $0.vendorID == selector.vendorId && $0.productID == selector.productId
+        })
+        let nativeManufacturer = isActive ? activeDeviceInfo?.manufacturer : nil
+        let nativeModel = isActive ? activeDeviceInfo?.model : nil
+        let manufacturer = nativeManufacturer.flatMap { $0.isEmpty ? nil : $0 }
+            ?? (selector.manufacturer.isEmpty ? usbDeviceNames?.manufacturer : selector.manufacturer)
+            ?? ""
+        let model = nativeModel.flatMap { $0.isEmpty ? nil : $0 }
+            ?? (selector.model.isEmpty ? usbDeviceNames?.product : selector.model)
+            ?? ""
+
+        return MTPDeviceSelector(
+            vendorId: selector.vendorId,
+            productId: selector.productId,
+            serialNumber: selector.serialNumber,
+            manufacturer: manufacturer,
+            model: model
+        )
+    })
+}
+
 func mtpRecoveryDelayNanoseconds(attempt: Int) -> UInt64 {
     attempt <= 1 ? 2_000_000_000 : 4_000_000_000
 }
@@ -95,14 +125,24 @@ final class MTPConnectionCoordinator: ObservableObject {
     private var discoveryTask: Task<Void, Never>?
     private var pendingEmptyAvailabilityTask: Task<Void, Never>?
     private var lastUSBInventory: Set<USBDeviceIdentity> = []
+    private var usbDeviceNames: [USBDeviceNames] = []
     private var claimantRecoveryUsed = false
     private var failedSelectors: Set<MTPDeviceSelector> = []
 
     private init() {}
 
-    func updateAvailableDevices(_ devices: Set<USBDeviceIdentity>, startAutomatically: Bool = true) {
+    func updateAvailableDevices(
+        _ devices: Set<USBDeviceIdentity>,
+        usbNames: [USBDeviceNames] = [],
+        startAutomatically: Bool = true
+    ) {
+        usbDeviceNames = usbNames
         let hasNewDevice = !newlyAttachedUSBIdentities(Array(devices), known: lastUSBInventory).isEmpty
-        guard usbInventoryChanged(previous: lastUSBInventory, current: devices) else { return }
+        guard usbInventoryChanged(previous: lastUSBInventory, current: devices) else {
+            availableDevices = applyCurrentDeviceNames(availableDevices)
+            availableMTPDevices = sortSelectors(Array(availableDevices))
+            return
+        }
         lastUSBInventory = devices
         if devices.isEmpty {
             pendingEmptyAvailabilityTask?.cancel()
@@ -191,6 +231,7 @@ final class MTPConnectionCoordinator: ObservableObject {
             guard self.generation == token, !Task.isCancelled else { return }
             if connected {
                 self.failedSelectors.remove(selector)
+                self.refreshSelectorDisplayNames()
                 self.state = .connected
             } else {
                 self.failedSelectors.insert(selector)
@@ -198,6 +239,7 @@ final class MTPConnectionCoordinator: ObservableObject {
                    previousSelector != selector,
                    selectorIsPresent(previousSelector, in: self.lastUSBInventory),
                    await MTPDeviceManager.shared.switchDevice(to: previousSelector) {
+                    self.refreshSelectorDisplayNames()
                     self.state = .connected
                     return
                 }
@@ -299,16 +341,17 @@ final class MTPConnectionCoordinator: ObservableObject {
                         failed: self.failedSelectors,
                         inventory: self.lastUSBInventory
                     )
-                    self.availableDevices = mergedSelectors
-                    self.availableMTPDevices = self.sortSelectors(Array(mergedSelectors))
+                    let namedSelectors = self.applyCurrentDeviceNames(mergedSelectors)
+                    self.availableDevices = namedSelectors
+                    self.availableMTPDevices = self.sortSelectors(Array(namedSelectors))
                     ErrorLogger.logMessage(
                         "MTP candidate discovery completed",
                         level: .info,
                         userInfo: [
                             "event": "mtp_probe_result",
-                            "state": mergedSelectors.isEmpty ? "mtp_unavailable" : "mtp_candidate_found",
-                            "candidate_count": mergedSelectors.count,
-                            "candidate_vid_pids": mergedSelectors
+                            "state": namedSelectors.isEmpty ? "mtp_unavailable" : "mtp_candidate_found",
+                            "candidate_count": namedSelectors.count,
+                            "candidate_vid_pids": namedSelectors
                                 .map { String(format: "0x%04x:0x%04x", $0.vendorId, $0.productId) }
                                 .joined(separator: ","),
                             "generation": Int64(token),
@@ -321,7 +364,7 @@ final class MTPConnectionCoordinator: ObservableObject {
                         return
                     }
 
-                    if mergedSelectors.isEmpty {
+                    if namedSelectors.isEmpty {
                         if MTPDeviceManager.shared.isConnected {
                             self.state = .connected
                             return
@@ -334,7 +377,7 @@ final class MTPConnectionCoordinator: ObservableObject {
                         continue
                     }
 
-                    let orderedSelectors = self.sortSelectors(Array(mergedSelectors))
+                    let orderedSelectors = self.sortSelectors(Array(namedSelectors))
                     guard !orderedSelectors.isEmpty else { return }
 
                     let candidates = orderedMTPConnectionCandidates(orderedSelectors, failed: self.failedSelectors)
@@ -413,11 +456,26 @@ final class MTPConnectionCoordinator: ObservableObject {
             guard generation == token, !Task.isCancelled else { return false }
             if await MTPDeviceManager.shared.switchDevice(to: candidate) {
                 failedSelectors.remove(candidate)
+                refreshSelectorDisplayNames()
                 return true
             }
             failedSelectors.insert(candidate)
         }
         return false
+    }
+
+    private func applyCurrentDeviceNames(_ selectors: Set<MTPDeviceSelector>) -> Set<MTPDeviceSelector> {
+        fillMissingMTPSelectorNames(
+            selectors,
+            from: usbDeviceNames,
+            activeSelector: MTPDeviceManager.shared.activeSelector,
+            activeDeviceInfo: MTPDeviceManager.shared.deviceInfo
+        )
+    }
+
+    private func refreshSelectorDisplayNames() {
+        availableDevices = applyCurrentDeviceNames(availableDevices)
+        availableMTPDevices = sortSelectors(Array(availableDevices))
     }
 
     private func isTransientProbeFailure(_ error: Error) -> Bool {
