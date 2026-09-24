@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- Keep large-folder MTP transfers alive with activity-based watchdogs and native traversal heartbeats instead of a fixed wall-clock timeout.
 
 ## 1.7.2 - 2026-09-24
 

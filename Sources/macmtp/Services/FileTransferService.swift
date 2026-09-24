@@ -461,6 +461,10 @@ public final class FileTransferService: ObservableObject {
                     }
                     let handleProgress: @Sendable (GoTransferProgressInfo) -> Void = { [weak self] progressInfo in
                         guard let self = self else { return }
+                        // Native emits empty-path heartbeats while it is walking
+                        // a large source. They feed the transfer watchdog but
+                        // must not move a visible file to 0-byte progress.
+                        guard !progressInfo.fullPath.isEmpty else { return }
                         let index = progressIndices[progressInfo.fullPath] ?? chunkIndices.first
                         guard let index else { return }
                         let sent = progressInfo.activeFileSize.sent

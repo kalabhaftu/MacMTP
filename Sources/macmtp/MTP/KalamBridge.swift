@@ -115,6 +115,10 @@ func shouldSignalNativeCancellation(after error: Error) -> Bool {
     return false
 }
 
+func transferActivityExpired(lastActivity: UInt64, now: UInt64, timeout: UInt64) -> Bool {
+    now >= lastActivity && now - lastActivity >= timeout
+}
+
 func shouldReportMTPTransportFailure(_ error: Error, connectionIsActive: Bool) -> Bool {
     if isMTPTransferCancellation(error) {
         return false
@@ -301,6 +305,7 @@ final class KalamRegistry: @unchecked Sendable {
     private var doneOperationID: String?
     private var transferContinuation: CheckedContinuation<Void, Error>?
     private var transferOperationID: String?
+    private var transferLastActivity: UInt64?
     
     private var preprocessCallback: ((String) -> Void)?
     private var progressCallback: ((String) -> Void)?
@@ -335,6 +340,7 @@ final class KalamRegistry: @unchecked Sendable {
         }
         transferContinuation = continuation
         transferOperationID = operationID
+        transferLastActivity = DispatchTime.now().uptimeNanoseconds
         preprocessCallback = preprocess
         progressCallback = progress
         transferDoneCallback = done
@@ -380,6 +386,7 @@ final class KalamRegistry: @unchecked Sendable {
         let continuation = transferContinuation
         transferContinuation = nil
         transferOperationID = nil
+        transferLastActivity = nil
         preprocessCallback = nil
         progressCallback = nil
         transferDoneCallback = nil
@@ -393,6 +400,15 @@ final class KalamRegistry: @unchecked Sendable {
         }
     }
 
+    func transferHasBeenIdle(operationID: String, for nanoseconds: UInt64) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard transferOperationID == operationID,
+              let lastActivity = transferLastActivity else { return false }
+        let now = DispatchTime.now().uptimeNanoseconds
+        return transferActivityExpired(lastActivity: lastActivity, now: now, timeout: nanoseconds)
+    }
+
     func triggerPreprocess(_ json: String) {
         let cb: ((String) -> Void)?
         lock.lock()
@@ -400,6 +416,7 @@ final class KalamRegistry: @unchecked Sendable {
             lock.unlock()
             return
         }
+        transferLastActivity = DispatchTime.now().uptimeNanoseconds
         cb = preprocessCallback
         lock.unlock()
         cb?(json)
@@ -412,6 +429,7 @@ final class KalamRegistry: @unchecked Sendable {
             lock.unlock()
             return
         }
+        transferLastActivity = DispatchTime.now().uptimeNanoseconds
         cb = progressCallback
         lock.unlock()
         cb?(json)
@@ -424,6 +442,7 @@ final class KalamRegistry: @unchecked Sendable {
             lock.unlock()
             return
         }
+        transferLastActivity = DispatchTime.now().uptimeNanoseconds
         cb = transferDoneCallback
         lock.unlock()
         cb?(json)
@@ -548,6 +567,18 @@ public actor KalamBridge {
     }
 
     private static let callbackTimeoutNanoseconds: UInt64 = 60_000_000_000
+
+    private func waitForTransferActivity(operationName: String, operationID: String) async throws -> Void {
+        while true {
+            try await Task.sleep(nanoseconds: 1_000_000_000)
+            if KalamRegistry.shared.transferHasBeenIdle(
+                operationID: operationID,
+                for: Self.callbackTimeoutNanoseconds
+            ) {
+                throw KalamError.timedOut(operationName)
+            }
+        }
+    }
 
     private func waitForDone(operationName: String, startOperation: @escaping @Sendable (String) -> Void) async throws -> String {
         let operationID = UUID().uuidString
@@ -869,8 +900,7 @@ public actor KalamBridge {
                 }
             }
             group.addTask {
-                try await Task.sleep(nanoseconds: Self.callbackTimeoutNanoseconds)
-                throw KalamError.timedOut("upload")
+                try await self.waitForTransferActivity(operationName: "upload", operationID: operationID)
             }
             defer { group.cancelAll() }
 
@@ -959,8 +989,7 @@ public actor KalamBridge {
                 }
             }
             group.addTask {
-                try await Task.sleep(nanoseconds: Self.callbackTimeoutNanoseconds)
-                throw KalamError.timedOut("download")
+                try await self.waitForTransferActivity(operationName: "download", operationID: operationID)
             }
             defer { group.cancelAll() }
 

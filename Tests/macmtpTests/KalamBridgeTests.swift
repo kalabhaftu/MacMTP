@@ -25,6 +25,13 @@ func completedNativeCancellationIsNotRearmedByTheBridge() {
 }
 
 @Test
+func transferWatchdogUsesInactivityInsteadOfWallClockAge() {
+    #expect(!transferActivityExpired(lastActivity: 100, now: 500, timeout: 401))
+    #expect(transferActivityExpired(lastActivity: 100, now: 501, timeout: 401))
+    #expect(!transferActivityExpired(lastActivity: 600, now: 500, timeout: 1))
+}
+
+@Test
 func lateDoneCallbackAfterContinuationCleanupIsIgnored() async {
     do {
         _ = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in

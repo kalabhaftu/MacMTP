@@ -314,6 +314,12 @@ func UploadFiles(dev *mtp.Device, storageId uint32, sources []string, destinatio
 		BulkFileSize:      &TransferSizeInfo{},
 		Status:            InProgress,
 	}
+	// Keep the Swift watchdog alive while local traversal has not reached a file yet.
+	if progressCb != nil {
+		if err := progressCb(&pInfo, nil); err != nil {
+			return 0, bulkFilesSent, bulkSizeSent, err
+		}
+	}
 
 	// if [preprocessFiles] is true then fetch the total number of files from the file tree
 	// total number of files in the current upload session
@@ -619,6 +625,12 @@ func DownloadFiles(dev *mtp.Device, storageId uint32, sources []string, destinat
 		ActiveFileSize:    &TransferSizeInfo{},
 		BulkFileSize:      &TransferSizeInfo{},
 		Status:            InProgress,
+	}
+	// Keep the Swift watchdog alive while Android directory traversal has not reached a file yet.
+	if progressCb != nil {
+		if err := progressCb(&pInfo, nil); err != nil {
+			return bulkFilesSent, bulkSizeSent, err
+		}
 	}
 
 	// if [preprocessFiles] is true then fetch the total number of files from the file tree
