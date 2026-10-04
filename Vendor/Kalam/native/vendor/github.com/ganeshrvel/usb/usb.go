@@ -699,17 +699,26 @@ func (h *DeviceHandle) GetStringDescriptorASCII(descIndex byte) (string, error) 
 
 func (h *DeviceHandle) ControlTransfer(reqType, req byte, value, index uint16,
 	data []byte, timeout int) error {
+	_, err := h.ControlTransferCount(reqType, req, value, index, data, timeout)
+	return err
+}
+
+func (h *DeviceHandle) ControlTransferCount(reqType, req byte, value, index uint16,
+	data []byte, timeout int) (int, error) {
 	var ptr *byte
 	if len(data) > 0 {
 		ptr = &data[0]
 	}
 	if len(data) > 0xffff {
-		return fmt.Errorf("overflow")
+		return 0, fmt.Errorf("overflow")
 	}
-	err := C.libusb_control_transfer(h.me(),
+	transferred := C.libusb_control_transfer(h.me(),
 		C.uint8_t(reqType), C.uint8_t(req), C.uint16_t(value), C.uint16_t(index),
 		(*C.uchar)(ptr), C.uint16_t(len(data)), C.uint(timeout))
-	return toErr(err)
+	if err := toErr(transferred); err != nil {
+		return 0, err
+	}
+	return int(transferred), nil
 }
 
 func (h *DeviceHandle) BulkTransfer(endpoint byte, data []byte, timeout int) (actual int, err error) {
@@ -731,7 +740,7 @@ func (h *DeviceHandle) InterruptTransfer(endpoint byte, data []byte, timeout int
 	}
 
 	var n C.int
-	e := C.libusb_bulk_transfer(h.me(), C.uchar(endpoint), (*C.uchar)(ptr),
+	e := C.libusb_interrupt_transfer(h.me(), C.uchar(endpoint), (*C.uchar)(ptr),
 		C.int(len(data)), &n, C.uint(timeout))
 	return int(n), toErr(e)
 }

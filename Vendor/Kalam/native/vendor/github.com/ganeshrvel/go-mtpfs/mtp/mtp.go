@@ -44,7 +44,8 @@ type Device struct {
 	// If set, send header in separate write.
 	SeparateHeader bool
 
-	session *sessionData
+	session             *sessionData
+	operationsSupported []uint16
 }
 
 type UsbDeviceInfo struct {
@@ -74,12 +75,12 @@ var ErrTransferCancelled = errors.New("transfer cancelled")
 
 const (
 	mtpRequestCancel          = 0x64
-	mtpRequestReset           = 0x66
 	mtpRequestGetDeviceStatus = 0x67
 	cancelDrainIdleTimeout    = 300 * time.Millisecond
 	cancelDrainMaxDuration    = 2 * time.Second
 	cancelRecoveryTimeout     = 2 * time.Second
 	cancelRecoveryPollDelay   = 50 * time.Millisecond
+	cancelControlTimeoutMS    = 2_000
 )
 
 func isMTPInterfaceString(value string) bool {
@@ -120,13 +121,7 @@ func (d *Device) Close() error {
 		var req, rep Container
 		req.Code = OC_CloseSession
 		// RunTransaction runs close, so can't use CloseSession().
-
-		if err := d.runTransaction(&req, &rep, nil, nil, 0, EmptyProgressFunc); err != nil {
-			err := d.h.Reset()
-			if d.USBDebug {
-				log.Printf("USB: Reset, err: %v", err)
-			}
-		}
+		_ = d.runTransaction(&req, &rep, nil, nil, 0, EmptyProgressFunc)
 	}
 
 	if d.claimed {
@@ -147,14 +142,6 @@ func (d *Device) Close() error {
 
 // Abort closes a broken transport without resetting the physical USB bus.
 func (d *Device) Abort() error {
-	if d.h != nil {
-		if err := d.h.ClearHalt(d.sendEP); err != nil && d.USBDebug {
-			log.Printf("USB: ClearHalt(sendEP) after abort, err: %v", err)
-		}
-		if err := d.h.ClearHalt(d.fetchEP); err != nil && d.USBDebug {
-			log.Printf("USB: ClearHalt(fetchEP) after abort, err: %v", err)
-		}
-	}
 	d.session = nil
 	return d.Close()
 }
@@ -263,17 +250,20 @@ func (d *Device) drainEndpoint(endpoint byte, interrupt bool) (int64, error) {
 			packetSize = size
 		}
 	}
-	buffer := make([]byte, packetSize)
-	// Android can leave the canceled data container queued even after the
-	// class status request reports OK. Drain immediately after cancellation;
-	// delaying this until after GetDeviceStatus lets stale bytes poison the
-	// next MTP transaction.
-	deadline := time.Now().Add(cancelDrainMaxDuration)
-	var drained int64
+	transfer := d.h.BulkTransfer
+	if interrupt {
+		transfer = d.h.InterruptTransfer
+	}
+	return drainUntilIdle(endpoint, packetSize, cancelDrainMaxDuration, cancelDrainIdleTimeout, transfer)
+}
 
+func drainUntilIdle(endpoint byte, packetSize int, maxDuration, idleTimeout time.Duration, transfer func(byte, []byte, int) (int, error)) (int64, error) {
+	buffer := make([]byte, packetSize)
+	deadline := time.Now().Add(maxDuration)
+	var drained int64
 	for time.Now().Before(deadline) {
 		remaining := time.Until(deadline)
-		timeout := cancelDrainIdleTimeout
+		timeout := idleTimeout
 		if remaining < timeout {
 			timeout = remaining
 		}
@@ -282,17 +272,14 @@ func (d *Device) drainEndpoint(endpoint byte, interrupt bool) (int64, error) {
 			break
 		}
 
-		var actual int
-		var err error
-		if interrupt {
-			actual, err = d.h.InterruptTransfer(endpoint, buffer, timeoutMS)
-		} else {
-			actual, err = d.h.BulkTransfer(endpoint, buffer, timeoutMS)
-		}
+		actual, err := transfer(endpoint, buffer, timeoutMS)
 		if err != nil {
 			if err == usb.ERROR_TIMEOUT {
 				drained += int64(actual)
-				return drained, nil
+				if actual == 0 {
+					return drained, nil
+				}
+				continue
 			}
 			return drained, err
 		}
@@ -302,7 +289,7 @@ func (d *Device) drainEndpoint(endpoint byte, interrupt bool) (int64, error) {
 		drained += int64(actual)
 	}
 
-	return drained, nil
+	return drained, fmt.Errorf("endpoint 0x%x did not become idle before drain timeout", endpoint)
 }
 
 func (d *Device) drainCancelPipes() (int64, error) {
@@ -319,6 +306,10 @@ func (d *Device) drainCancelPipes() (int64, error) {
 }
 
 func (d *Device) verifyTransactionSync() error {
+	originalTimeout := d.Timeout
+	d.Timeout = cancelControlTimeoutMS
+	defer func() { d.Timeout = originalTimeout }()
+
 	var data bytes.Buffer
 	var req, rep Container
 	req.Code = OC_GetDeviceInfo
@@ -342,7 +333,7 @@ func (d *Device) recoverCancelledTransaction(transactionID uint32) error {
 		0,
 		interfaceNumber,
 		cancelRequestData(transactionID),
-		d.Timeout,
+		cancelControlTimeoutMS,
 	); err != nil {
 		return fmt.Errorf("cancel request: %w", err)
 	}
@@ -361,105 +352,37 @@ func (d *Device) recoverCancelledTransaction(transactionID uint32) error {
 	}
 	readStatus := func() (uint16, error) {
 		statusData := make([]byte, 8)
-		if err := d.h.ControlTransfer(
+		actual, err := d.h.ControlTransferCount(
 			statusRequestType,
 			mtpRequestGetDeviceStatus,
 			0,
 			interfaceNumber,
 			statusData,
 			statusTimeout,
-		); err != nil {
+		)
+		if err != nil {
 			return 0, err
 		}
-		return parseDeviceStatus(statusData)
+		return parseDeviceStatus(statusData[:actual])
 	}
 	return awaitCancelRecovery(drain, readStatus, clearHalts, d.verifyTransactionSync, cancelRecoveryTimeout)
-}
-
-func (d *Device) resetTransportOnFreshHandle() error {
-	// A stalled Android MTP interface can keep returning the old bulk stream
-	// forever.  Do not issue DEVICE_RESET on that handle: close it first and
-	// reopen the selector-backed device so the reset is session-less.
-	if d.dev == nil {
-		return fmt.Errorf("device descriptor is unavailable")
-	}
-	return resetFreshHandleOrder(nil,
-		func() error {
-			d.session = nil
-			return d.Close()
-		},
-		func() error { return d.Open() },
-		func() error {
-			return d.h.ControlTransfer(
-				byte(usb.REQUEST_TYPE_CLASS|usb.RECIPIENT_INTERFACE),
-				mtpRequestReset,
-				0,
-				uint16(d.ifaceDescr.InterfaceNumber),
-				nil,
-				d.Timeout,
-			)
-		},
-		func() error { return d.clearBulkHalts() },
-		func() error {
-			_, err := d.drainCancelPipes()
-			return err
-		},
-		func() error {
-			d.session = nil
-			return d.Close()
-		},
-	)
-}
-
-// resetFreshHandleOrder is kept separate so recovery sequencing stays
-// regression-testable without requiring a physical MTP device.
-func resetFreshHandleOrder(events *[]string, closeStale, openFresh, reset, clearHalts, drain, closeFresh func() error) error {
-	appendEvent := func(event string) {
-		if events != nil {
-			*events = append(*events, event)
-		}
-	}
-	appendEvent("close-stale")
-	if err := closeStale(); err != nil {
-		return fmt.Errorf("close stale MTP handle: %w", err)
-	}
-	appendEvent("open-fresh")
-	if err := openFresh(); err != nil {
-		return fmt.Errorf("open fresh MTP handle: %w", err)
-	}
-	for _, step := range []struct {
-		name string
-		fn   func() error
-	}{
-		{"device-reset", reset},
-		{"clear-halts", clearHalts},
-		{"drain", drain},
-	} {
-		appendEvent(step.name)
-		if err := step.fn(); err != nil {
-			_ = closeFresh()
-			return err
-		}
-	}
-	appendEvent("close-fresh")
-	return closeFresh()
 }
 
 func (d *Device) recoverTransferError(transactionID uint32, err error) error {
 	if !errors.Is(err, ErrTransferCancelled) {
 		return err
 	}
+	recoveryStarted := time.Now()
 	if recoveryErr := d.recoverCancelledTransaction(transactionID); recoveryErr == nil {
-		log.Printf("MTP cancellation recovery completed transaction=0x%x", transactionID)
+		log.Printf("MTP cancellation recovery completed transaction=0x%x duration_ms=%d", transactionID, time.Since(recoveryStarted).Milliseconds())
 		return ErrTransferCancelled
 	} else {
-		resetErr := d.resetTransportOnFreshHandle()
-		d.session = nil
+		_ = d.Abort()
 		return SyncError(fmt.Sprintf(
-			"MTP cancellation recovery failed transaction=0x%x: %v; device reset=%v",
+			"MTP cancellation recovery failed transaction=0x%x duration_ms=%d: %v; transport closed for quiet reopen",
 			transactionID,
+			time.Since(recoveryStarted).Milliseconds(),
 			recoveryErr,
-			resetErr,
 		))
 	}
 }
@@ -1053,8 +976,8 @@ func (d *Device) bulkRead(w io.Writer, progressCb ProgressFunc) (n int64, lastPa
 	return n, buf[:0], err
 }
 
-// Configure is a robust version of OpenSession. On failure, it closes the
-// stale handle, resets a fresh session-less handle, then retries OpenSession.
+// Configure opens one session. Recovery is intentionally owned by the caller,
+// which can close this handle and perform quiet, selector-backed retries.
 func (d *Device) Configure() error {
 	if d.h == nil {
 		if err := d.Open(); err != nil {
@@ -1074,22 +997,8 @@ func (d *Device) Configure() error {
 	}
 
 	if err != nil {
-		log.Printf("MTP OpenSession failed: %v; resetting MTP transport", err)
-		if d.h == nil {
-			if openErr := d.Open(); openErr != nil {
-				return fmt.Errorf("opening for MTP reset: %w", openErr)
-			}
-		}
-		resetErr := d.resetTransportOnFreshHandle()
-		d.session = nil
-		time.Sleep(250 * time.Millisecond)
-		if openErr := d.Open(); openErr != nil {
-			return fmt.Errorf("opening after MTP reset (reset=%v): %w", resetErr, openErr)
-		}
-		if openErr := d.OpenSession(); openErr != nil {
-			_ = d.Close()
-			return fmt.Errorf("OpenSession after MTP reset (reset=%v): %w", resetErr, openErr)
-		}
+		_ = d.Abort()
+		return fmt.Errorf("OpenSession failed; transport closed for quiet reopen: %w", err)
 	}
 	return nil
 }

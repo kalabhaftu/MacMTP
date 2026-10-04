@@ -65,6 +65,55 @@ func transportFailureClassificationKeepsContentionSeparateFromBrokenSessions() {
 }
 
 @Test
+func deviceLockedDirectoryFailureIsRecoverableButOnlyTerminalFailuresCreateIssues() {
+    let error = KalamError.nativeOperationFailed(
+        operation: "make_directory",
+        errorType: "ErrorDeviceLocked",
+        message: "device is not open"
+    )
+    let unrelatedLock = KalamError.nativeOperationFailed(
+        operation: "list_directory",
+        errorType: "ErrorDeviceLocked",
+        message: "device is not open"
+    )
+    let finalFailure = TransferDirectoryRecoveryFailure(
+        underlying: error,
+        outcome: .retryFailed
+    )
+
+    #expect(shouldRecoverMTPDirectoryCreation(error))
+    #expect(!shouldRecoverMTPDirectoryCreation(unrelatedLock))
+    #expect(!ErrorLogger.shouldCaptureMessage(.warning))
+    #expect(ErrorLogger.shouldReport(finalFailure.underlying))
+    #expect(shouldAutomaticallyReconnectMTP(finalFailure.underlying))
+}
+
+@Test
+func transferBreadcrumbContextContainsNoPathsOrDeviceIdentifiers() {
+    let context = TransferTelemetryContext.make(
+        direction: .localToMTP,
+        fileCount: 12,
+        totalBytes: 4_096,
+        retryCount: 1,
+        recoveryOutcome: "recovered",
+        phase: "directory_recovery",
+        nativeErrorType: "ErrorDeviceLocked"
+    )
+    let rendered = context.keys.sorted().map { key in
+        "\(key)=\(String(describing: context[key]!))"
+    }.joined(separator: " ").lowercased()
+
+    #expect(context["direction"] as? String == "local_to_mtp")
+    #expect(context["recovery_result"] as? String == "recovered")
+    #expect(!rendered.contains("/users/"))
+    #expect(!rendered.contains("/storage/"))
+    #expect(!rendered.contains("serial"))
+    #expect(!rendered.contains("device_id"))
+    #expect(!rendered.contains("vid"))
+    #expect(!rendered.contains("pid"))
+}
+
+@Test
 func verifiedDeviceDetachStaysBreadcrumbWhileUnexpectedTimeoutsReport() {
     let error = KalamError.nativeOperationFailed(
         operation: "transfer",

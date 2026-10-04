@@ -68,7 +68,12 @@ public final class MTPDeviceManager: ObservableObject {
     }
 
     @discardableResult
-    func connectDevice(selector: MTPDeviceSelector) async -> Bool {
+    func connectDevice(
+        selector: MTPDeviceSelector,
+        reportFailure: Bool = true,
+        refreshAfterConnect: Bool = true,
+        shouldCancel: () -> Bool = { false }
+    ) async -> Bool {
         guard !isLoading, !isConnected else { return false }
         connectionGeneration &+= 1
         let generation = connectionGeneration
@@ -84,9 +89,17 @@ public final class MTPDeviceManager: ObservableObject {
         do {
             let goDevInfo = try await bridge.initialize(selector: selector)
             guard generation == connectionGeneration else { return false }
+            guard !shouldCancel() else {
+                try? await bridge.dispose()
+                return false
+            }
             
             let goStorages = try await bridge.fetchStorages()
             guard generation == connectionGeneration else { return false }
+            guard !shouldCancel() else {
+                try? await bridge.dispose()
+                return false
+            }
             guard !goStorages.isEmpty else {
                 throw KalamError.operationFailed("No storage found on the connected MTP device")
             }
@@ -112,7 +125,9 @@ public final class MTPDeviceManager: ObservableObject {
                 self.currentMTPPath = "/"
                 self.backHistory.removeAll()
                 self.forwardHistory.removeAll()
-                await refreshFiles()
+                if refreshAfterConnect {
+                    await refreshFiles()
+                }
             }
             return isConnected
         } catch {
@@ -133,19 +148,20 @@ public final class MTPDeviceManager: ObservableObject {
             let isNoStorageError = errLower.contains("no storage found")
             let isMultipleDeviceError = errLower.contains("errormultipledevice")
                 || errLower.contains("more than 1 device")
-            let isDeviceNotFound = errLower.contains("no mtp device")
-                || errLower.contains("no mtp devices found")
-                || errLower.contains("no mtp device matched")
-                || errLower.contains("no device found")
-                || errLower.contains("mtp detect failed")
-                || errLower.contains("errormtpdetectfailed")
-                || errLower.contains("busy")
-                || errLower.contains("libusb_error_no_device")
-                || errLower.contains("libusb_error_not_found")
+            let isDeviceNotFound = isMTPDeviceUnavailable(error)
 
             let isExpectedUserCondition = isNoStorageError || isDeviceNotFound || isMultipleDeviceError
             canRetryConnection = isMTPTransportFailure(error) && !isDeviceNotFound
-            if !isExpectedUserCondition {
+            if !reportFailure {
+                ErrorLogger.logMessage(
+                    "Transfer recovery could not reopen the Android device",
+                    level: .warning,
+                    userInfo: [
+                        "event": "transfer_recovery_reconnect_failed",
+                        "native_error_type": nativeErrorType(for: error)
+                    ]
+                )
+            } else if !isExpectedUserCondition {
                 ErrorLogger.log(
                     error,
                     message: "MTP connection failed",
@@ -250,7 +266,94 @@ public final class MTPDeviceManager: ObservableObject {
         return await connectDevice(selector: selector)
     }
 
-    func invalidateConnection(message: String, reconnectAutomatically: Bool = false) {
+    func reconnectForTransferDirectoryRetry(
+        selector: MTPDeviceSelector,
+        storageId: UInt32,
+        shouldCancel: () -> Bool = { false }
+    ) async -> TransferDirectoryReconnectResult {
+        guard activeSelector == selector else {
+            return .deviceUnavailable
+        }
+        guard selectedStorageId == storageId else {
+            return .storageChanged
+        }
+        let selectorSerial = selector.serialNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        let expectedDeviceSerial = deviceInfo?.serialNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasStableDeviceIdentity = !selectorSerial.isEmpty
+            || (expectedDeviceSerial.map { !$0.isEmpty && $0 != "000000" } ?? false)
+        guard !isConnectionRecoveryInFlight, invalidationTask == nil, !isLoading else {
+            return .failed
+        }
+
+        invalidateConnection(
+            message: "Reopening the Android connection to retry directory preparation…",
+            reconnectAutomatically: false,
+            nativeOperationAlreadySettled: true
+        )
+        if let cleanup = invalidationTask {
+            await cleanup.value
+        }
+        guard !shouldCancel() else { return .failed }
+        guard !isConnected, activeSelector == nil, !isConnectionRecoveryInFlight else {
+            return .failed
+        }
+        guard hasStableDeviceIdentity else {
+            return .deviceUnavailable
+        }
+
+        let expectedGeneration = connectionGeneration
+        let discovered: [MTPDeviceSelector]
+        do {
+            discovered = try await bridge.discoverMTPDevices()
+        } catch {
+            return .failed
+        }
+        guard !shouldCancel(), connectionGeneration == expectedGeneration else {
+            return .failed
+        }
+        guard discovered.contains(selector) else {
+            return .deviceUnavailable
+        }
+        guard !isConnected, activeSelector == nil, !isLoading else {
+            return .deviceUnavailable
+        }
+        guard await connectDevice(
+            selector: selector,
+            reportFailure: false,
+            refreshAfterConnect: false,
+            shouldCancel: shouldCancel
+        ) else {
+            return .failed
+        }
+        guard activeSelector == selector else {
+            return .deviceUnavailable
+        }
+        if selectorSerial.isEmpty,
+           let expectedDeviceSerial,
+           deviceInfo?.serialNumber.trimmingCharacters(in: .whitespacesAndNewlines) != expectedDeviceSerial {
+            invalidateConnection(
+                message: "A different Android device appeared during transfer recovery.",
+                reconnectAutomatically: false
+            )
+            return .deviceUnavailable
+        }
+        MTPConnectionCoordinator.shared.markSessionRestored(selector)
+        guard storages.contains(where: { $0.storageId == storageId }) else {
+            return .storageChanged
+        }
+
+        selectedStorageId = storageId
+        guard isConnected, activeSelector == selector, selectedStorageId == storageId else {
+            return .failed
+        }
+        return .reconnected
+    }
+
+    func invalidateConnection(
+        message: String,
+        reconnectAutomatically: Bool = false,
+        nativeOperationAlreadySettled: Bool = false
+    ) {
         if invalidationTask != nil {
             reconnectAfterInvalidation = reconnectAfterInvalidation || reconnectAutomatically
             errorMessage = message
@@ -262,6 +365,7 @@ public final class MTPDeviceManager: ObservableObject {
         connectionGeneration &+= 1
         refreshGeneration &+= 1
         let failedSelector = activeSelector
+        let recoveryStarted = Date()
         MTPConnectionCoordinator.shared.markSessionLost(message: message, failedSelector: failedSelector)
         let invalidatedGeneration = connectionGeneration
         directoryCoordinator.invalidateSnapshot()
@@ -301,7 +405,7 @@ public final class MTPDeviceManager: ObservableObject {
                 self.reconnectAfterInvalidation = false
             }
             let cleanupDeadline = Date().addingTimeInterval(10)
-            while FileTransferService.shared.isTransferInFlight {
+            while !nativeOperationAlreadySettled && FileTransferService.shared.isTransferInFlight {
                 if Date() >= cleanupDeadline {
                     ErrorLogger.logMessage(
                         "Timed out waiting for MTP transfer cleanup",
@@ -320,10 +424,6 @@ public final class MTPDeviceManager: ObservableObject {
             let shouldReconnect = self.reconnectAfterInvalidation
             var reconnectStarted = false
             if shouldReconnect {
-                // Samsung devices can keep the interface wedged briefly after a
-                // failed cancellation reset. Let macOS and Android settle before
-                // discovery opens a fresh handle.
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
                 guard self.connectionGeneration == invalidatedGeneration else { return }
                 self.invalidationTask = nil
                 self.isConnectionRecoveryInFlight = false
@@ -340,6 +440,7 @@ public final class MTPDeviceManager: ObservableObject {
                     "operation_phase": "connection",
                     "reconnect_result": reconnectStarted ? "automatic_retry_started" : "manual_retry_required",
                     "session_generation": Int64(invalidatedGeneration),
+                    "recovery_duration_ms": Int(Date().timeIntervalSince(recoveryStarted) * 1_000)
                 ]
             )
         }

@@ -21,19 +21,31 @@ private actor RecordingMTPBridge: MTPBridge {
     private let initializeDelay: UInt64
     private let cancelInitialize: Bool
     private let cancelListing: Bool
+    private let deviceSerialNumber: String
+    private let discoveredSelectors: [MTPDeviceSelector]
+    private let storageSequences: [[UInt32]]
+    private var fetchStorageCall = 0
 
     init(
         files: [GoFileInfo] = [],
         failListingAfterMutation: Bool = false,
         initializeDelay: UInt64 = 0,
         cancelInitialize: Bool = false,
-        cancelListing: Bool = false
+        cancelListing: Bool = false,
+        deviceSerialNumber: String = "test",
+        discoveredSelectors: [MTPDeviceSelector] = [
+            MTPDeviceSelector(vendorId: 0x1234, productId: 0x5678, serialNumber: "")
+        ],
+        storageSequences: [[UInt32]] = [[1]]
     ) {
         self.files = files
         self.failListingAfterMutation = failListingAfterMutation
         self.initializeDelay = initializeDelay
         self.cancelInitialize = cancelInitialize
         self.cancelListing = cancelListing
+        self.deviceSerialNumber = deviceSerialNumber
+        self.discoveredSelectors = discoveredSelectors
+        self.storageSequences = storageSequences
     }
 
     func initialize(selector: MTPDeviceSelector) async throws -> GoDeviceInfoData {
@@ -49,7 +61,7 @@ private actor RecordingMTPBridge: MTPBridge {
                 Manufacturer: "Test",
                 Model: "Test MTP",
                 DeviceVersion: "1.0",
-                SerialNumber: "test",
+                SerialNumber: deviceSerialNumber,
                 StandardVersion: nil,
                 MTPVendorExtensionID: nil,
                 MTPVersion: nil,
@@ -61,23 +73,27 @@ private actor RecordingMTPBridge: MTPBridge {
     }
 
     func discoverMTPDevices() async throws -> [MTPDeviceSelector] {
-        [MTPDeviceSelector(vendorId: 0x1234, productId: 0x5678, serialNumber: "")]
+        discoveredSelectors
     }
 
     func fetchStorages() async throws -> [GoStorageData] {
-        [GoStorageData(
-            Sid: 1,
-            Info: GoStorageInfo(
-                StorageType: 0,
-                FilesystemType: 0,
-                AccessCapability: 0,
-                MaxCapability: 1_000,
-                FreeSpaceInBytes: 500,
-                FreeSpaceInImages: 0,
-                StorageDescription: "Internal",
-                VolumeLabel: ""
+        let ids = storageSequences[min(fetchStorageCall, storageSequences.count - 1)]
+        fetchStorageCall += 1
+        return ids.map { id in
+            GoStorageData(
+                Sid: id,
+                Info: GoStorageInfo(
+                    StorageType: 0,
+                    FilesystemType: 0,
+                    AccessCapability: 0,
+                    MaxCapability: 1_000,
+                    FreeSpaceInBytes: 500,
+                    FreeSpaceInImages: 0,
+                    StorageDescription: "Internal",
+                    VolumeLabel: ""
+                )
             )
-        )]
+        }
     }
 
     func dispose() async throws {
@@ -244,6 +260,69 @@ func mtpSelectorIdentityIgnoresDisplayMetadataChanges() {
 }
 
 @Test
+func usbRegistryNamesFillOnlyMissingSelectorNames() {
+    let unnamed = MTPDeviceSelector(vendorId: 0x04e8, productId: 0x6860, serialNumber: "samsung")
+    let nativeNamed = MTPDeviceSelector(
+        vendorId: 0x0e8d,
+        productId: 0x2008,
+        serialNumber: "tecno",
+        manufacturer: "TECNO",
+        model: "KI7"
+    )
+    let usbNames = [
+        USBDeviceNames(vendorID: 0x04e8, productID: 0x6860, manufacturer: "SAMSUNG", product: "SAMSUNG_Android"),
+        USBDeviceNames(vendorID: 0x0e8d, productID: 0x2008, manufacturer: "USB TECNO", product: "USB KI7")
+    ]
+
+    let named = fillMissingMTPSelectorNames([unnamed, nativeNamed], from: usbNames)
+    let samsung = named.first { $0.vendorId == 0x04e8 && $0.productId == 0x6860 }
+    let tecno = named.first { $0.vendorId == 0x0e8d && $0.productId == 0x2008 }
+    #expect(samsung?.manufacturer == "SAMSUNG")
+    #expect(samsung?.model == "SAMSUNG_Android")
+    #expect(tecno?.manufacturer == "TECNO")
+    #expect(tecno?.model == "KI7")
+    #expect(MTPDeviceSelector(vendorId: 1, productId: 2, serialNumber: "").displayName == "MTP 0x0001:0x0002")
+}
+
+@Test
+func usbNameMetadataDoesNotChangeUSBDeviceIdentity() {
+    let previous = USBDeviceIdentity(vendorID: 0x04e8, productID: 0x6860, locationID: 1, serialNumber: "samsung")
+    let refreshed = USBDeviceIdentity(vendorID: 0x04e8, productID: 0x6860, locationID: 1, serialNumber: "samsung")
+    let oldNames = USBDeviceNames(vendorID: 0x04e8, productID: 0x6860, manufacturer: "SAMSUNG", product: "SAMSUNG_Android")
+    let newNames = USBDeviceNames(vendorID: 0x04e8, productID: 0x6860, manufacturer: "Samsung", product: "SM-M055F")
+
+    #expect(oldNames != newNames)
+    #expect(previous == refreshed)
+    #expect(!usbInventoryChanged(previous: [previous], current: [refreshed]))
+}
+
+@Test
+func activeMTPModelReplacesGenericUSBProductName() {
+    let samsung = MTPDeviceSelector(
+        vendorId: 0x04e8,
+        productId: 0x6860,
+        serialNumber: "samsung",
+        manufacturer: "SAMSUNG",
+        model: "SAMSUNG_Android"
+    )
+    let deviceInfo = MTPDeviceInfo(
+        manufacturer: "Samsung",
+        model: "SM-M055F",
+        serialNumber: "samsung",
+        deviceVersion: "1.0",
+        storages: []
+    )
+    let active = fillMissingMTPSelectorNames(
+        [samsung],
+        from: [],
+        activeSelector: samsung,
+        activeDeviceInfo: deviceInfo
+    ).first
+
+    #expect(active?.displayName == "Samsung SM-M055F")
+}
+
+@Test
 func failedMTPSelectorsStayListedWithoutReplacingTheActiveDevice() {
     let samsung = MTPDeviceSelector(vendorId: 0x04e8, productId: 0x6860, serialNumber: "samsung", model: "Samsung")
     let tecno = MTPDeviceSelector(vendorId: 0x0e8d, productId: 0x2008, serialNumber: "tecno", model: "TECNO")
@@ -271,6 +350,29 @@ func failedMTPSelectorsAreRetriedAfterHealthyCandidates() {
     #expect(orderedMTPConnectionCandidates([failed, healthy], failed: [failed]) == [healthy, failed])
 }
 
+@Test
+func matchedSelectorOpenTimeoutRemainsRetryable() {
+    let timeout = KalamError.nativeOperationFailed(
+        operation: "initialize",
+        errorType: "ErrorMtpDetectFailed",
+        message: "opening MTP device vendor=0x04e8 product=0x6860: LIBUSB_ERROR_TIMEOUT"
+    )
+    let absent = KalamError.nativeOperationFailed(
+        operation: "initialize",
+        errorType: "ErrorMtpDetectFailed",
+        message: "no MTP device matched vendor=0x04e8 product=0x6860"
+    )
+
+    #expect(!isMTPDeviceUnavailable(timeout))
+    #expect(isMTPDeviceUnavailable(absent))
+}
+
+@Test
+func mtpRecoveryRetriesUseQuietBoundedBackoff() {
+    #expect(mtpRecoveryDelayNanoseconds(attempt: 1) == 2_000_000_000)
+    #expect(mtpRecoveryDelayNanoseconds(attempt: 2) == 4_000_000_000)
+}
+
 @Test @MainActor
 func switchingDevicesDisposesTheOldSessionBeforeInitializingTheNewOne() async {
     let bridge = RecordingMTPBridge()
@@ -283,6 +385,75 @@ func switchingDevicesDisposesTheOldSessionBeforeInitializingTheNewOne() async {
     #expect(manager.activeSelector == second)
     #expect(await bridge.disposeCalls == 1)
     #expect(await bridge.initializeCalls == [first, second])
+}
+
+@Test @MainActor
+func transferDirectoryRecoveryReconnectsOnlyTheSameDeviceAndStorage() async {
+    let phone = MTPDeviceSelector(
+        vendorId: 0x1234,
+        productId: 0x5678,
+        serialNumber: "phone-one"
+    )
+    let bridge = RecordingMTPBridge(discoveredSelectors: [phone])
+    let manager = MTPDeviceManager(bridge: bridge)
+    #expect(await manager.connectDevice(selector: phone))
+
+    let result = await manager.reconnectForTransferDirectoryRetry(selector: phone, storageId: 1)
+
+    #expect(result == .reconnected)
+    #expect(manager.isConnected)
+    #expect(manager.activeSelector == phone)
+    #expect(manager.selectedStorageId == 1)
+    #expect(await bridge.initializeCalls == [phone, phone])
+    #expect(await bridge.disposeCalls == 1)
+}
+
+@Test @MainActor
+func transferDirectoryRecoveryStopsWhenTheOriginalDeviceIsGone() async {
+    let phone = MTPDeviceSelector(vendorId: 0x1234, productId: 0x5678, serialNumber: "phone-one")
+    let replacement = MTPDeviceSelector(vendorId: 0x1234, productId: 0x5678, serialNumber: "phone-two")
+    let bridge = RecordingMTPBridge(discoveredSelectors: [replacement])
+    let manager = MTPDeviceManager(bridge: bridge)
+    #expect(await manager.connectDevice(selector: phone))
+
+    let result = await manager.reconnectForTransferDirectoryRetry(selector: phone, storageId: 1)
+
+    #expect(result == .deviceUnavailable)
+    #expect(!manager.isConnected)
+    #expect(await bridge.initializeCalls == [phone])
+}
+
+@Test @MainActor
+func transferDirectoryRecoveryFailsClosedWhenDeviceHasNoStableSerial() async {
+    let phone = MTPDeviceSelector(vendorId: 0x1234, productId: 0x5678, serialNumber: "")
+    let bridge = RecordingMTPBridge(deviceSerialNumber: "000000", discoveredSelectors: [phone])
+    let manager = MTPDeviceManager(bridge: bridge)
+    #expect(await manager.connectDevice(selector: phone))
+
+    let result = await manager.reconnectForTransferDirectoryRetry(selector: phone, storageId: 1)
+
+    #expect(result == .deviceUnavailable)
+    #expect(!manager.isConnected)
+    #expect(await bridge.initializeCalls == [phone])
+    #expect(await bridge.disposeCalls == 1)
+}
+
+@Test @MainActor
+func transferDirectoryRecoveryStopsWhenTheOriginalStorageDisappears() async {
+    let phone = MTPDeviceSelector(vendorId: 0x1234, productId: 0x5678, serialNumber: "phone-one")
+    let bridge = RecordingMTPBridge(
+        discoveredSelectors: [phone],
+        storageSequences: [[1], [2]]
+    )
+    let manager = MTPDeviceManager(bridge: bridge)
+    #expect(await manager.connectDevice(selector: phone))
+
+    let result = await manager.reconnectForTransferDirectoryRetry(selector: phone, storageId: 1)
+
+    #expect(result == .storageChanged)
+    #expect(manager.isConnected)
+    #expect(manager.activeSelector == phone)
+    #expect(manager.selectedStorageId == 2)
 }
 
 @Test @MainActor
@@ -532,11 +703,11 @@ func failedConnectionRetriesWhenThePhoneIsReattached() {
 }
 
 @Test
-func cancellationTransportResetTriggersAutomaticReconnect() {
+func cancellationRecoveryFailureTriggersAutomaticReconnect() {
     let recoveryFailure = KalamError.nativeOperationFailed(
         operation: "transfer",
         errorType: "ErrorFileTransfer",
-        message: "MTP cancellation recovery failed transaction=0x17: verify MTP session after cancellation: got stale response container; device reset=<nil>"
+        message: "MTP cancellation recovery failed transaction=0x17: verify MTP session after cancellation: got stale response container; transport closed for quiet reopen"
     )
     let legacyRecoveryFailure = KalamError.nativeOperationFailed(
         operation: "transfer",

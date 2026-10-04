@@ -47,6 +47,9 @@ public enum KalamError: Error, LocalizedError {
 }
 
 func isMTPTransportFailure(_ error: Error) -> Bool {
+    if let recoveryFailure = error as? TransferDirectoryRecoveryFailure {
+        return isMTPTransportFailure(recoveryFailure.underlying)
+    }
     if isMTPCancellationRecoveryFailure(error) {
         return true
     }
@@ -92,6 +95,37 @@ func isMTPTransportFailure(_ error: Error) -> Bool {
     }
 }
 
+func shouldRecoverMTPDirectoryCreation(_ error: Error) -> Bool {
+    guard case .nativeOperationFailed(let operation, let errorType, let message) = error as? KalamError else {
+        return false
+    }
+    guard operation.localizedCaseInsensitiveContains("make_directory")
+        || operation.localizedCaseInsensitiveContains("create_directory") else {
+        return false
+    }
+
+    let isDeviceLockedError = errorType.map {
+        $0.localizedCaseInsensitiveCompare("ErrorDeviceLocked") == .orderedSame
+    } ?? false
+    return isDeviceLockedError || message.localizedCaseInsensitiveContains("device is not open")
+}
+
+func isMTPDeviceUnavailable(_ error: Error) -> Bool {
+    let normalized = error.localizedDescription.lowercased()
+    if normalized.contains("opening mtp device"),
+       normalized.contains("libusb_error_") {
+        return false
+    }
+    return normalized.contains("no mtp device")
+        || normalized.contains("no mtp devices found")
+        || normalized.contains("no mtp device matched")
+        || normalized.contains("no device found")
+        || normalized.contains("mtp detect failed")
+        || normalized.contains("errormtpdetectfailed")
+        || normalized.contains("libusb_error_no_device")
+        || normalized.contains("libusb_error_not_found")
+}
+
 func isMTPCancellationRecoveryFailure(_ error: Error) -> Bool {
     let message = error.localizedDescription.lowercased()
     return message.contains("cancellation recovery failed")
@@ -113,6 +147,18 @@ func shouldSignalNativeCancellation(after error: Error) -> Bool {
     guard let kalamError = error as? KalamError else { return false }
     if case .timedOut = kalamError { return true }
     return false
+}
+
+func transferActivityExpired(lastActivity: UInt64, now: UInt64, timeout: UInt64) -> Bool {
+    now >= lastActivity && now - lastActivity >= timeout
+}
+
+func transferActivityAdvanced(previousPayload: String?, currentPayload: String) -> Bool {
+    previousPayload != currentPayload
+}
+
+func nativeTransferCanFinish(nativeReturned: Bool, hasResult: Bool) -> Bool {
+    nativeReturned && hasResult
 }
 
 func shouldReportMTPTransportFailure(_ error: Error, connectionIsActive: Bool) -> Bool {
@@ -166,6 +212,9 @@ private func nativeOperationError(
 }
 
 func nativeErrorType(for error: Error) -> String {
+    if let recoveryFailure = error as? TransferDirectoryRecoveryFailure {
+        return nativeErrorType(for: recoveryFailure.underlying)
+    }
     guard let kalamError = error as? KalamError else {
         return String(describing: type(of: error))
     }
@@ -301,6 +350,10 @@ final class KalamRegistry: @unchecked Sendable {
     private var doneOperationID: String?
     private var transferContinuation: CheckedContinuation<Void, Error>?
     private var transferOperationID: String?
+    private var transferLastActivity: UInt64?
+    private var transferLastActivityPayload: String?
+    private var transferResult: Result<Void, Error>?
+    private var transferNativeReturned = false
     
     private var preprocessCallback: ((String) -> Void)?
     private var progressCallback: ((String) -> Void)?
@@ -335,6 +388,10 @@ final class KalamRegistry: @unchecked Sendable {
         }
         transferContinuation = continuation
         transferOperationID = operationID
+        transferLastActivity = DispatchTime.now().uptimeNanoseconds
+        transferLastActivityPayload = nil
+        transferResult = nil
+        transferNativeReturned = false
         preprocessCallback = preprocess
         progressCallback = progress
         transferDoneCallback = done
@@ -377,20 +434,63 @@ final class KalamRegistry: @unchecked Sendable {
 
     func finishTransfer(with result: Result<Void, Error>) {
         lock.lock()
-        let continuation = transferContinuation
+        guard transferContinuation != nil else {
+            lock.unlock()
+            return
+        }
+        if transferResult == nil {
+            transferResult = result
+        }
+        let completion = takeFinishedTransferLocked()
+        lock.unlock()
+        resumeTransfer(completion)
+    }
+
+    func nativeTransferDidReturn(operationID: String) {
+        lock.lock()
+        guard transferOperationID == operationID else {
+            lock.unlock()
+            return
+        }
+        transferNativeReturned = true
+        let completion = takeFinishedTransferLocked()
+        lock.unlock()
+        resumeTransfer(completion)
+    }
+
+    private func takeFinishedTransferLocked() -> (CheckedContinuation<Void, Error>, Result<Void, Error>)? {
+        guard nativeTransferCanFinish(nativeReturned: transferNativeReturned, hasResult: transferResult != nil),
+              let continuation = transferContinuation,
+              let result = transferResult else { return nil }
         transferContinuation = nil
         transferOperationID = nil
+        transferLastActivity = nil
+        transferLastActivityPayload = nil
+        transferResult = nil
+        transferNativeReturned = false
         preprocessCallback = nil
         progressCallback = nil
         transferDoneCallback = nil
-        lock.unlock()
+        return (continuation, result)
+    }
 
+    private func resumeTransfer(_ completion: (CheckedContinuation<Void, Error>, Result<Void, Error>)?) {
+        guard let (continuation, result) = completion else { return }
         switch result {
         case .success:
-            continuation?.resume(returning: ())
+            continuation.resume(returning: ())
         case .failure(let error):
-            continuation?.resume(throwing: error)
+            continuation.resume(throwing: error)
         }
+    }
+
+    func transferHasBeenIdle(operationID: String, for nanoseconds: UInt64) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard transferOperationID == operationID,
+              let lastActivity = transferLastActivity else { return false }
+        let now = DispatchTime.now().uptimeNanoseconds
+        return transferActivityExpired(lastActivity: lastActivity, now: now, timeout: nanoseconds)
     }
 
     func triggerPreprocess(_ json: String) {
@@ -399,6 +499,10 @@ final class KalamRegistry: @unchecked Sendable {
         guard callbackMatches(json, expected: transferOperationID) else {
             lock.unlock()
             return
+        }
+        if transferActivityAdvanced(previousPayload: transferLastActivityPayload, currentPayload: json) {
+            transferLastActivity = DispatchTime.now().uptimeNanoseconds
+            transferLastActivityPayload = json
         }
         cb = preprocessCallback
         lock.unlock()
@@ -412,6 +516,10 @@ final class KalamRegistry: @unchecked Sendable {
             lock.unlock()
             return
         }
+        if transferActivityAdvanced(previousPayload: transferLastActivityPayload, currentPayload: json) {
+            transferLastActivity = DispatchTime.now().uptimeNanoseconds
+            transferLastActivityPayload = json
+        }
         cb = progressCallback
         lock.unlock()
         cb?(json)
@@ -424,6 +532,7 @@ final class KalamRegistry: @unchecked Sendable {
             lock.unlock()
             return
         }
+        transferLastActivity = DispatchTime.now().uptimeNanoseconds
         cb = transferDoneCallback
         lock.unlock()
         cb?(json)
@@ -548,6 +657,18 @@ public actor KalamBridge {
     }
 
     private static let callbackTimeoutNanoseconds: UInt64 = 60_000_000_000
+
+    private func waitForTransferActivity(operationName: String, operationID: String) async throws -> Void {
+        while true {
+            try await Task.sleep(nanoseconds: 1_000_000_000)
+            if KalamRegistry.shared.transferHasBeenIdle(
+                operationID: operationID,
+                for: Self.callbackTimeoutNanoseconds
+            ) {
+                throw KalamError.timedOut(operationName)
+            }
+        }
+    }
 
     private func waitForDone(operationName: String, startOperation: @escaping @Sendable (String) -> Void) async throws -> String {
         let operationID = UUID().uuidString
@@ -865,12 +986,12 @@ public actor KalamBridge {
                         cInput.withUnsafeMutableBufferPointer { buffer in
                             UploadFiles(buffer.baseAddress)
                         }
+                        KalamRegistry.shared.nativeTransferDidReturn(operationID: operationID)
                     }
                 }
             }
             group.addTask {
-                try await Task.sleep(nanoseconds: Self.callbackTimeoutNanoseconds)
-                throw KalamError.timedOut("upload")
+                try await self.waitForTransferActivity(operationName: "upload", operationID: operationID)
             }
             defer { group.cancelAll() }
 
@@ -955,12 +1076,12 @@ public actor KalamBridge {
                         cInput.withUnsafeMutableBufferPointer { buffer in
                             DownloadFiles(buffer.baseAddress)
                         }
+                        KalamRegistry.shared.nativeTransferDidReturn(operationID: operationID)
                     }
                 }
             }
             group.addTask {
-                try await Task.sleep(nanoseconds: Self.callbackTimeoutNanoseconds)
-                throw KalamError.timedOut("download")
+                try await self.waitForTransferActivity(operationName: "download", operationID: operationID)
             }
             defer { group.cancelAll() }
 

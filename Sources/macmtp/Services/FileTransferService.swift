@@ -40,6 +40,7 @@ public final class FileTransferService: ObservableObject {
     private var cutSourcePaths: [String] = []
     
     private var verifiedDirectories = Set<String>()
+    private var isDirectoryRecoveryInFlight = false
     @Published private(set) var transferInFlight = false
 
     public var isTransferInFlight: Bool {
@@ -52,6 +53,10 @@ public final class FileTransferService: ObservableObject {
     
     @discardableResult
     public func pauseTransfer() -> Bool {
+        if isDirectoryRecoveryInFlight {
+            pauseRequested = true
+            return true
+        }
         guard activeBatch?.state == .transferring else { return false }
         pauseRequested = true
         activeBatch?.pause()
@@ -61,12 +66,13 @@ public final class FileTransferService: ObservableObject {
     public func resumeTransfer() {
         guard activeBatch?.state == .paused else { return }
         pauseRequested = false
+        if isDirectoryRecoveryInFlight { return }
         activeBatch?.resume()
     }
     
     public func cancelTransfer() {
         cancelRequested = true
-        if transferInFlight {
+        if transferInFlight && !isDirectoryRecoveryInFlight {
             bridge.cancelTransfer()
         }
         if let batch = activeBatch {
@@ -173,6 +179,13 @@ public final class FileTransferService: ObservableObject {
                     // Auto-dismiss failed transfer progress bar after 3 seconds.
                     let failedBatch = self.activeBatch
                     self.dismissBatchWhenTransferSettles(failedBatch, after: 3_000_000_000)
+                }
+                if let batch = self.activeBatch {
+                    self.recordTransferCompletion(
+                        batch: batch,
+                        direction: direction,
+                        result: cancelRequested || isMTPTransferCancellation(error) ? "cancelled" : "failed"
+                    )
                 }
                 isCutOperation = false
                 cutSourcePaths = []
@@ -356,6 +369,15 @@ public final class FileTransferService: ObservableObject {
         }
         
         batch.items = transferQueue
+        ErrorLogger.logMessage(
+            "Transfer started",
+            level: .info,
+            userInfo: TransferTelemetryContext.make(
+                direction: direction,
+                fileCount: batch.totalFileCount,
+                totalBytes: batch.totalBytes
+            )
+        )
         guard !batch.isCancelling, !cancelRequested else {
             batch.finishCancellation()
             return
@@ -398,21 +420,49 @@ public final class FileTransferService: ObservableObject {
         queueLoop: for destParent in groupOrder {
             guard let indices = groups[destParent] else { continue }
             if cancelRequested { break }
+
+            while pauseRequested && !cancelRequested {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+            if cancelRequested { break }
             
             do {
-                try await ensureDirectoryExists(path: destParent, direction: direction, storageId: storageId)
+                try await prepareDestinationDirectory(
+                    path: destParent,
+                    direction: direction,
+                    storageId: storageId,
+                    batch: batch
+                )
             } catch {
-                ErrorLogger.log(error, message: "FileTransferService: Failed to create parent directory")
+                if cancelRequested || isMTPTransferCancellation(error) {
+                    break queueLoop
+                }
+                let recoveryFailure = error as? TransferDirectoryRecoveryFailure
+                let reportedError = recoveryFailure?.underlying ?? error
+                var errorContext: [String: Any] = [
+                    "operation": "transfer",
+                    "operation_phase": "directory_preparation",
+                    "native_error_type": nativeErrorType(for: reportedError),
+                    "retry_count": recoveryFailure == nil ? 0 : 1
+                ]
+                if let recoveryFailure {
+                    errorContext["recovery_result"] = recoveryFailure.outcome.rawValue
+                }
+                ErrorLogger.log(
+                    reportedError,
+                    message: "FileTransferService: Failed to prepare parent directory",
+                    userInfo: errorContext
+                )
                 let formattedErr = formatTransferError(error)
                 if !shouldPresentAsCancelledAfterRecoveryFailure(error, cancelRequested: cancelRequested)
                     && !isMTPTransferCancellation(error) {
                     for idx in indices {
                         var itm = batch.items[idx]
                         itm.markFailed(formattedErr)
-                        batch.items[idx] = itm
+                        batch.updateItem(at: idx) { $0 = itm }
                     }
                 }
-                if isMTPTransportFailure(error) {
+                if shouldStopTransferQueue(afterDirectoryPreparationError: error) {
                     terminalTransferError = error
                     break queueLoop
                 }
@@ -437,7 +487,7 @@ public final class FileTransferService: ObservableObject {
                 for idx in chunkIndices {
                     var itm = batch.items[idx]
                     itm.status = .preprocessing
-                    batch.items[idx] = itm
+                    batch.updateItem(at: idx) { $0 = itm }
                 }
                 
                 do {
@@ -461,6 +511,10 @@ public final class FileTransferService: ObservableObject {
                     }
                     let handleProgress: @Sendable (GoTransferProgressInfo) -> Void = { [weak self] progressInfo in
                         guard let self = self else { return }
+                        // Native emits empty-path heartbeats while it is walking
+                        // a large source. They feed the transfer watchdog but
+                        // must not move a visible file to 0-byte progress.
+                        guard !progressInfo.fullPath.isEmpty else { return }
                         let index = progressIndices[progressInfo.fullPath] ?? chunkIndices.first
                         guard let index else { return }
                         let sent = progressInfo.activeFileSize.sent
@@ -498,7 +552,7 @@ public final class FileTransferService: ObservableObject {
                         var itm = batch.items[idx]
                         if itm.status != .completed {
                             itm.markCompleted()
-                            batch.items[idx] = itm
+                            batch.updateItem(at: idx) { $0 = itm }
                         }
                     }
                     
@@ -520,6 +574,7 @@ public final class FileTransferService: ObservableObject {
                             message: "FileTransferService: File copy failed for chunk",
                             userInfo: [
                                 "operation": "transfer",
+                                "operation_phase": "transfer",
                                 "total_files": batch.totalFileCount,
                                 "completed_files": batch.completedFileCount,
                                 "bytes_transferred": batch.totalBytesTransferred,
@@ -548,7 +603,7 @@ public final class FileTransferService: ObservableObject {
                             var itm = batch.items[idx]
                             if itm.status != .completed && itm.bytesTransferred < itm.fileSize {
                                 itm.markFailed(error.localizedDescription)
-                                batch.items[idx] = itm
+                                batch.updateItem(at: idx) { $0 = itm }
                             }
                         }
                     }
@@ -571,15 +626,25 @@ public final class FileTransferService: ObservableObject {
                 for index in batch.items.indices where !batch.items[index].status.isTerminal {
                     var item = batch.items[index]
                     item.markFailed(message)
-                    batch.items[index] = item
+                    batch.updateItem(at: index) { $0 = item }
                 }
             }
-            MTPDeviceManager.shared.invalidateConnection(
-                message: reconnectAutomatically
-                    ? "Transfer cancellation interrupted the MTP session. Reconnecting…"
-                    : "The MTP connection stopped responding. Reconnect your Android device and try again.",
-                reconnectAutomatically: reconnectAutomatically
-            )
+            if let recoveryFailure = terminalTransferError as? TransferDirectoryRecoveryFailure {
+                if recoveryFailure.outcome == .retryFailed,
+                   isMTPTransportFailure(recoveryFailure.underlying) {
+                    MTPDeviceManager.shared.invalidateConnection(
+                        message: "Directory preparation still failed after reconnecting. Reconnect the Android device and try again.",
+                        reconnectAutomatically: false
+                    )
+                }
+            } else {
+                MTPDeviceManager.shared.invalidateConnection(
+                    message: reconnectAutomatically
+                        ? "Transfer cancellation interrupted the MTP session. Reconnecting…"
+                        : "The MTP connection stopped responding. Reconnect your Android device and try again.",
+                    reconnectAutomatically: reconnectAutomatically
+                )
+            }
         }
         
         if let terminalTransferError {
@@ -589,7 +654,7 @@ public final class FileTransferService: ObservableObject {
                 batch.finishCancellation()
                 postTransferNotification(
                     title: "Transfer Cancelled",
-                    body: "\(batch.completedFileCount) of \(batch.totalFileCount) files copied. Session recovery failed; reconnecting.",
+                    body: "\(batch.completedFileCount) of \(batch.totalFileCount) files copied. The transfer was cancelled.",
                     isError: true
                 )
             } else {
@@ -663,6 +728,18 @@ public final class FileTransferService: ObservableObject {
                 }
             }
         }
+
+        let completionResult: String
+        if cancelRequested {
+            completionResult = "cancelled"
+        } else if terminalTransferError != nil {
+            completionResult = "failed"
+        } else if batch.failedFileCount > 0 {
+            completionResult = "completed_with_errors"
+        } else {
+            completionResult = "completed"
+        }
+        recordTransferCompletion(batch: batch, direction: direction, result: completionResult)
         
         let completedBatch = batch
         dismissBatchWhenTransferSettles(completedBatch, after: 3_000_000_000)
@@ -680,6 +757,23 @@ public final class FileTransferService: ObservableObject {
                 self.activeBatch = nil
             }
         }
+    }
+
+    private func recordTransferCompletion(
+        batch: TransferBatch,
+        direction: TransferDirection,
+        result: String
+    ) {
+        var context = TransferTelemetryContext.make(
+            direction: direction,
+            fileCount: batch.totalFileCount,
+            totalBytes: batch.totalBytes
+        )
+        context["result"] = result
+        context["completed_files"] = batch.completedFileCount
+        context["failed_files"] = batch.failedFileCount
+        context["bytes_transferred"] = batch.totalBytesTransferred
+        ErrorLogger.logMessage("Transfer finished", level: .info, userInfo: context)
     }
     
     
@@ -707,9 +801,97 @@ public final class FileTransferService: ObservableObject {
             item.markTransferring()
         }
         
-        batch.items[index] = item
+        batch.updateItem(at: index) { $0 = item }
         
         batch.recordSpeedSample(bytesTransferredNow: batch.totalBytesTransferred)
+    }
+
+    private func prepareDestinationDirectory(
+        path: String,
+        direction: TransferDirection,
+        storageId: UInt32,
+        batch: TransferBatch
+    ) async throws {
+        let manager = MTPDeviceManager.shared
+        let recoveryOutcome = try await prepareTransferDirectoryWithRecovery(
+            prepare: {
+                try await self.ensureDirectoryExists(
+                    path: path,
+                    direction: direction,
+                    storageId: storageId
+                )
+            },
+            shouldRecover: { direction == .localToMTP && shouldRecoverMTPDirectoryCreation($0) },
+            isCancelled: { self.cancelRequested },
+            reconnect: {
+                guard let selector = manager.activeSelector else { return .deviceUnavailable }
+                guard manager.selectedStorageId == storageId else { return .storageChanged }
+
+                self.isDirectoryRecoveryInFlight = true
+                batch.pause()
+                defer {
+                    self.isDirectoryRecoveryInFlight = false
+                }
+                while self.pauseRequested && !self.cancelRequested {
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                }
+                guard !self.cancelRequested else { return .failed }
+                return await manager.reconnectForTransferDirectoryRetry(
+                    selector: selector,
+                    storageId: storageId,
+                    shouldCancel: { self.cancelRequested }
+                )
+            },
+            retryPreparation: {
+                self.verifiedDirectories.removeAll(keepingCapacity: true)
+                try await self.ensureDirectoryExists(
+                    path: path,
+                    direction: direction,
+                    storageId: storageId,
+                    confirmCreatedDirectory: true
+                )
+            },
+            onRecoveryStarted: { error in
+                var context = TransferTelemetryContext.make(
+                    direction: direction,
+                    fileCount: batch.totalFileCount,
+                    totalBytes: batch.totalBytes,
+                    retryCount: 1,
+                    phase: "directory_recovery",
+                    nativeErrorType: nativeErrorType(for: error)
+                )
+                context["recovery_result"] = "started"
+                ErrorLogger.logMessage(
+                    "Retrying transfer directory preparation after a device lock",
+                    level: .warning,
+                    userInfo: context
+                )
+            },
+            onRecoveryFinished: { outcome in
+                let context = TransferTelemetryContext.make(
+                    direction: direction,
+                    fileCount: batch.totalFileCount,
+                    totalBytes: batch.totalBytes,
+                    retryCount: 1,
+                    recoveryOutcome: outcome.rawValue,
+                    phase: "directory_recovery"
+                )
+                ErrorLogger.logMessage(
+                    outcome == .recovered
+                        ? "Transfer directory recovery completed"
+                        : "Transfer directory recovery failed",
+                    level: outcome == .recovered ? .info : .warning,
+                    userInfo: context
+                )
+            }
+        )
+
+        if recoveryOutcome == .recovered {
+            guard !cancelRequested else { throw CancellationError() }
+            if !pauseRequested {
+                batch.resume()
+            }
+        }
     }
     
     
@@ -952,7 +1134,14 @@ public final class FileTransferService: ObservableObject {
     }
     
     
-    private func ensureDirectoryExists(path: String, direction: TransferDirection, storageId: UInt32, depth: Int = 0) async throws {
+    private func ensureDirectoryExists(
+        path: String,
+        direction: TransferDirection,
+        storageId: UInt32,
+        depth: Int = 0,
+        confirmCreatedDirectory: Bool = false
+    ) async throws {
+        guard !cancelRequested else { throw CancellationError() }
         if depth > PathValidation.maxDirectoryDepth {
             throw KalamError.invalidPath("Directory nesting exceeds maximum allowed depth: \(path)")
         }
@@ -962,24 +1151,43 @@ public final class FileTransferService: ObservableObject {
         if verifiedDirectories.contains(path) { return }
         
         if direction == .localToMTP {
-            let existResult = try await bridge.checkFilesExist(storageId: storageId, paths: [path])
-            if let exists = existResult.first, exists {
-                verifiedDirectories.insert(path)
-                return
-            }
-            
             let parent = (path as NSString).deletingLastPathComponent
-            if parent != "/" && !parent.isEmpty && parent != path {
-                try await ensureDirectoryExists(path: parent, direction: direction, storageId: storageId, depth: depth + 1)
-            }
-            
-            _ = try await bridge.makeDirectory(storageId: storageId, path: path)
+            try await prepareMissingTransferDirectory(
+                checkExists: {
+                    let result = try await self.bridge.checkFilesExist(storageId: storageId, paths: [path])
+                    return result.first == true
+                },
+                prepareParent: {
+                    if parent != "/" && !parent.isEmpty && parent != path {
+                        try await self.ensureDirectoryExists(
+                            path: parent,
+                            direction: direction,
+                            storageId: storageId,
+                            depth: depth + 1,
+                            confirmCreatedDirectory: confirmCreatedDirectory
+                        )
+                    }
+                },
+                create: {
+                    _ = try await self.bridge.makeDirectory(storageId: storageId, path: path)
+                },
+                confirmCreated: confirmCreatedDirectory ? {
+                    let result = try await self.bridge.checkFilesExist(storageId: storageId, paths: [path])
+                    return result.first == true
+                } : nil,
+                isCancelled: { self.cancelRequested }
+            )
             verifiedDirectories.insert(path)
         } else {
             let fileManager = FileManager.default
             var isDir: ObjCBool = false
             if !fileManager.fileExists(atPath: path, isDirectory: &isDir) {
                 try fileManager.createDirectory(atPath: path, withIntermediateDirectories: true)
+            }
+            if confirmCreatedDirectory {
+                guard fileManager.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else {
+                    throw KalamError.operationNotReconciled("make_directory")
+                }
             }
             verifiedDirectories.insert(path)
         }

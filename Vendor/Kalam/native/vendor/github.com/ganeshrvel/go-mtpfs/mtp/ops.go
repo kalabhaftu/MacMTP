@@ -65,7 +65,20 @@ func (d *Device) GetData(req *Container, info interface{}) error {
 func (d *Device) GetDeviceInfo(info *DeviceInfo) error {
 	var req Container
 	req.Code = OC_GetDeviceInfo
-	return d.GetData(&req, info)
+	if err := d.GetData(&req, info); err != nil {
+		return err
+	}
+	d.operationsSupported = append(d.operationsSupported[:0], info.OperationsSupported...)
+	return nil
+}
+
+func (d *Device) SupportsOperation(operation uint16) bool {
+	for _, supported := range d.operationsSupported {
+		if supported == operation {
+			return true
+		}
+	}
+	return false
 }
 
 func (d *Device) GetStorageIDs(info *Uint32Array) error {
@@ -215,9 +228,12 @@ func (d *Device) GetObject(handle uint32, w io.Writer, progressCb ProgressFunc) 
 	return d.RunTransaction(&req, &rep, w, nil, 0, progressCb)
 }
 
+func partialObjectRequest(handle, offset, size uint32) Container {
+	return Container{Code: OC_GetPartialObject, Param: []uint32{handle, offset, size}}
+}
+
 func (d *Device) GetPartialObject(handle uint32, w io.Writer, offset uint32, size uint32) error {
-	var req, rep Container
-	req.Code = OC_ANDROID_GET_PARTIAL_OBJECT64
-	req.Param = []uint32{handle, offset, size}
+	req := partialObjectRequest(handle, offset, size)
+	var rep Container
 	return d.RunTransaction(&req, &rep, w, nil, 0, EmptyProgressFunc)
 }

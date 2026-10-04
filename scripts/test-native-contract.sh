@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SEND_SOURCE="$ROOT_DIR/Vendor/Kalam/native/send_to_js/main.go"
 KALAM_SOURCE="$ROOT_DIR/Vendor/Kalam/native/kalam.go"
+USB_SOURCE="$ROOT_DIR/Vendor/Kalam/native/vendor/github.com/ganeshrvel/usb/usb.go"
 
 require_pattern() {
     local pattern="$1"
@@ -30,6 +31,7 @@ require_pattern 'func SetOperationID' "$KALAM_SOURCE"
 require_pattern 'func Initialize\(inputJSON \*C.char\)' "$KALAM_SOURCE"
 require_pattern 'func DiscoverMTPDevices' "$KALAM_SOURCE"
 require_pattern 'ErrorTransferCancelled' "$ROOT_DIR/Vendor/Kalam/native/send_to_js/enums.go"
+require_pattern 'libusb_interrupt_transfer' "$USB_SOURCE"
 
 (
     cd "$ROOT_DIR/Vendor/Kalam/native"
