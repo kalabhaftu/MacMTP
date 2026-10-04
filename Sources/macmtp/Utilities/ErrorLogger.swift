@@ -343,9 +343,10 @@ public struct ErrorLogger {
             "session_generation",
             "usb_event",
             "connection_state",
+            "direction",
             "initial_scan",
             "reconnect_result",
-            "selected_vid_pid",
+            "recovery_result",
             "source_revision",
         ]
         for key in keys {

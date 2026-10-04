@@ -21,19 +21,31 @@ private actor RecordingMTPBridge: MTPBridge {
     private let initializeDelay: UInt64
     private let cancelInitialize: Bool
     private let cancelListing: Bool
+    private let deviceSerialNumber: String
+    private let discoveredSelectors: [MTPDeviceSelector]
+    private let storageSequences: [[UInt32]]
+    private var fetchStorageCall = 0
 
     init(
         files: [GoFileInfo] = [],
         failListingAfterMutation: Bool = false,
         initializeDelay: UInt64 = 0,
         cancelInitialize: Bool = false,
-        cancelListing: Bool = false
+        cancelListing: Bool = false,
+        deviceSerialNumber: String = "test",
+        discoveredSelectors: [MTPDeviceSelector] = [
+            MTPDeviceSelector(vendorId: 0x1234, productId: 0x5678, serialNumber: "")
+        ],
+        storageSequences: [[UInt32]] = [[1]]
     ) {
         self.files = files
         self.failListingAfterMutation = failListingAfterMutation
         self.initializeDelay = initializeDelay
         self.cancelInitialize = cancelInitialize
         self.cancelListing = cancelListing
+        self.deviceSerialNumber = deviceSerialNumber
+        self.discoveredSelectors = discoveredSelectors
+        self.storageSequences = storageSequences
     }
 
     func initialize(selector: MTPDeviceSelector) async throws -> GoDeviceInfoData {
@@ -49,7 +61,7 @@ private actor RecordingMTPBridge: MTPBridge {
                 Manufacturer: "Test",
                 Model: "Test MTP",
                 DeviceVersion: "1.0",
-                SerialNumber: "test",
+                SerialNumber: deviceSerialNumber,
                 StandardVersion: nil,
                 MTPVendorExtensionID: nil,
                 MTPVersion: nil,
@@ -61,23 +73,27 @@ private actor RecordingMTPBridge: MTPBridge {
     }
 
     func discoverMTPDevices() async throws -> [MTPDeviceSelector] {
-        [MTPDeviceSelector(vendorId: 0x1234, productId: 0x5678, serialNumber: "")]
+        discoveredSelectors
     }
 
     func fetchStorages() async throws -> [GoStorageData] {
-        [GoStorageData(
-            Sid: 1,
-            Info: GoStorageInfo(
-                StorageType: 0,
-                FilesystemType: 0,
-                AccessCapability: 0,
-                MaxCapability: 1_000,
-                FreeSpaceInBytes: 500,
-                FreeSpaceInImages: 0,
-                StorageDescription: "Internal",
-                VolumeLabel: ""
+        let ids = storageSequences[min(fetchStorageCall, storageSequences.count - 1)]
+        fetchStorageCall += 1
+        return ids.map { id in
+            GoStorageData(
+                Sid: id,
+                Info: GoStorageInfo(
+                    StorageType: 0,
+                    FilesystemType: 0,
+                    AccessCapability: 0,
+                    MaxCapability: 1_000,
+                    FreeSpaceInBytes: 500,
+                    FreeSpaceInImages: 0,
+                    StorageDescription: "Internal",
+                    VolumeLabel: ""
+                )
             )
-        )]
+        }
     }
 
     func dispose() async throws {
@@ -369,6 +385,75 @@ func switchingDevicesDisposesTheOldSessionBeforeInitializingTheNewOne() async {
     #expect(manager.activeSelector == second)
     #expect(await bridge.disposeCalls == 1)
     #expect(await bridge.initializeCalls == [first, second])
+}
+
+@Test @MainActor
+func transferDirectoryRecoveryReconnectsOnlyTheSameDeviceAndStorage() async {
+    let phone = MTPDeviceSelector(
+        vendorId: 0x1234,
+        productId: 0x5678,
+        serialNumber: "phone-one"
+    )
+    let bridge = RecordingMTPBridge(discoveredSelectors: [phone])
+    let manager = MTPDeviceManager(bridge: bridge)
+    #expect(await manager.connectDevice(selector: phone))
+
+    let result = await manager.reconnectForTransferDirectoryRetry(selector: phone, storageId: 1)
+
+    #expect(result == .reconnected)
+    #expect(manager.isConnected)
+    #expect(manager.activeSelector == phone)
+    #expect(manager.selectedStorageId == 1)
+    #expect(await bridge.initializeCalls == [phone, phone])
+    #expect(await bridge.disposeCalls == 1)
+}
+
+@Test @MainActor
+func transferDirectoryRecoveryStopsWhenTheOriginalDeviceIsGone() async {
+    let phone = MTPDeviceSelector(vendorId: 0x1234, productId: 0x5678, serialNumber: "phone-one")
+    let replacement = MTPDeviceSelector(vendorId: 0x1234, productId: 0x5678, serialNumber: "phone-two")
+    let bridge = RecordingMTPBridge(discoveredSelectors: [replacement])
+    let manager = MTPDeviceManager(bridge: bridge)
+    #expect(await manager.connectDevice(selector: phone))
+
+    let result = await manager.reconnectForTransferDirectoryRetry(selector: phone, storageId: 1)
+
+    #expect(result == .deviceUnavailable)
+    #expect(!manager.isConnected)
+    #expect(await bridge.initializeCalls == [phone])
+}
+
+@Test @MainActor
+func transferDirectoryRecoveryFailsClosedWhenDeviceHasNoStableSerial() async {
+    let phone = MTPDeviceSelector(vendorId: 0x1234, productId: 0x5678, serialNumber: "")
+    let bridge = RecordingMTPBridge(deviceSerialNumber: "000000", discoveredSelectors: [phone])
+    let manager = MTPDeviceManager(bridge: bridge)
+    #expect(await manager.connectDevice(selector: phone))
+
+    let result = await manager.reconnectForTransferDirectoryRetry(selector: phone, storageId: 1)
+
+    #expect(result == .deviceUnavailable)
+    #expect(!manager.isConnected)
+    #expect(await bridge.initializeCalls == [phone])
+    #expect(await bridge.disposeCalls == 1)
+}
+
+@Test @MainActor
+func transferDirectoryRecoveryStopsWhenTheOriginalStorageDisappears() async {
+    let phone = MTPDeviceSelector(vendorId: 0x1234, productId: 0x5678, serialNumber: "phone-one")
+    let bridge = RecordingMTPBridge(
+        discoveredSelectors: [phone],
+        storageSequences: [[1], [2]]
+    )
+    let manager = MTPDeviceManager(bridge: bridge)
+    #expect(await manager.connectDevice(selector: phone))
+
+    let result = await manager.reconnectForTransferDirectoryRetry(selector: phone, storageId: 1)
+
+    #expect(result == .storageChanged)
+    #expect(manager.isConnected)
+    #expect(manager.activeSelector == phone)
+    #expect(manager.selectedStorageId == 2)
 }
 
 @Test @MainActor

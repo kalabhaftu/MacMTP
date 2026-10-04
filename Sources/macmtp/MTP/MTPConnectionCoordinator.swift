@@ -288,6 +288,12 @@ final class MTPConnectionCoordinator: ObservableObject {
         state = .failed(message: message, technicalDetails: message)
     }
 
+    func markSessionRestored(_ selector: MTPDeviceSelector) {
+        failedSelectors.remove(selector)
+        claimantRecoveryUsed = false
+        state = .connected
+    }
+
     private func startDiscovery() {
         guard discoveryTask == nil else { return }
         let token = generation
@@ -393,10 +399,7 @@ final class MTPConnectionCoordinator: ObservableObject {
                                 "event": "connection_ready",
                                 "state": "connected",
                                 "generation": Int64(token),
-                                "attempt": attempt,
-                                "selected_vid_pid": MTPDeviceManager.shared.activeSelector.map {
-                                    String(format: "0x%04x:0x%04x", $0.vendorId, $0.productId)
-                                } ?? "unknown"
+                                "attempt": attempt
                             ]
                         )
                         return

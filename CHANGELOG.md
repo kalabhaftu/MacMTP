@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 1.7.4 - 2026-10-04
+
+### MTP Transfer Reliability
+- Recover from a device lock during destination-directory creation with one bounded reconnect and retry, while checking whether the directory was created before retrying.
+- Keep completed file transfers untouched when directory recovery runs or fails, and stop the affected transfer cleanly if recovery cannot complete.
+- Update aggregate transfer progress incrementally for large queues instead of rescanning every queued item on each progress update.
+- Add path-free transfer lifecycle breadcrumbs to Sentry to help diagnose future hangs and transfer failures.
+
 ## 1.7.3 - 2026-09-24
 
 ### MTP Transfer Reliability

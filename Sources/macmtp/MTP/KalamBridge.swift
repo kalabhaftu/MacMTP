@@ -47,6 +47,9 @@ public enum KalamError: Error, LocalizedError {
 }
 
 func isMTPTransportFailure(_ error: Error) -> Bool {
+    if let recoveryFailure = error as? TransferDirectoryRecoveryFailure {
+        return isMTPTransportFailure(recoveryFailure.underlying)
+    }
     if isMTPCancellationRecoveryFailure(error) {
         return true
     }
@@ -90,6 +93,21 @@ func isMTPTransportFailure(_ error: Error) -> Bool {
     default:
         return false
     }
+}
+
+func shouldRecoverMTPDirectoryCreation(_ error: Error) -> Bool {
+    guard case .nativeOperationFailed(let operation, let errorType, let message) = error as? KalamError else {
+        return false
+    }
+    guard operation.localizedCaseInsensitiveContains("make_directory")
+        || operation.localizedCaseInsensitiveContains("create_directory") else {
+        return false
+    }
+
+    let isDeviceLockedError = errorType.map {
+        $0.localizedCaseInsensitiveCompare("ErrorDeviceLocked") == .orderedSame
+    } ?? false
+    return isDeviceLockedError || message.localizedCaseInsensitiveContains("device is not open")
 }
 
 func isMTPDeviceUnavailable(_ error: Error) -> Bool {
@@ -194,6 +212,9 @@ private func nativeOperationError(
 }
 
 func nativeErrorType(for error: Error) -> String {
+    if let recoveryFailure = error as? TransferDirectoryRecoveryFailure {
+        return nativeErrorType(for: recoveryFailure.underlying)
+    }
     guard let kalamError = error as? KalamError else {
         return String(describing: type(of: error))
     }

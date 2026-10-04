@@ -22,7 +22,9 @@ public enum TransferState: Equatable {
 public class TransferBatch: ObservableObject {
     @Published public var items: [TransferItem] = [] {
         didSet {
-            recalculateTotals()
+            if !isUpdatingItem {
+                recalculateTotals()
+            }
         }
     }
     @Published public var currentItemIndex: Int = 0
@@ -37,6 +39,8 @@ public class TransferBatch: ObservableObject {
     private var cachedFailedCount: Int = 0
     private var cachedTotalBytes: Int64 = 0
     private var cachedTotalBytesTransferred: Int64 = 0
+    private var isUpdatingItem = false
+    private(set) var fullRecalculationCount = 0
 
     public var totalFileCount: Int { items.count }
 
@@ -54,6 +58,7 @@ public class TransferBatch: ObservableObject {
     }
 
     private func recalculateTotals() {
+        fullRecalculationCount += 1
         var completed = 0
         var failed = 0
         var total: Int64 = 0
@@ -70,6 +75,27 @@ public class TransferBatch: ObservableObject {
         cachedFailedCount = failed
         cachedTotalBytes = total
         cachedTotalBytesTransferred = transferred
+    }
+
+    /// Applies a single queue-item mutation and adjusts aggregate values in O(1).
+    /// Assigning a new `items` array still performs a full rebuild.
+    func updateItem(at index: Int, _ update: (inout TransferItem) -> Void) {
+        guard items.indices.contains(index) else { return }
+
+        let previous = items[index]
+        var updated = previous
+        update(&updated)
+
+        cachedCompletedCount += (updated.status == .completed ? 1 : 0)
+            - (previous.status == .completed ? 1 : 0)
+        cachedFailedCount += (updated.status == .failed ? 1 : 0)
+            - (previous.status == .failed ? 1 : 0)
+        cachedTotalBytes += updated.fileSize - previous.fileSize
+        cachedTotalBytesTransferred += updated.bytesTransferred - previous.bytesTransferred
+
+        isUpdatingItem = true
+        items[index] = updated
+        isUpdatingItem = false
     }
 
     public var currentItem: TransferItem? {
@@ -149,14 +175,16 @@ public class TransferBatch: ObservableObject {
     }
 
     public func updateCurrentItemProgress(bytesTransferred: Int64) {
-        guard currentItemIndex < items.count else { return }
-        items[currentItemIndex].updateProgress(bytesTransferred: bytesTransferred)
+        guard items.indices.contains(currentItemIndex) else { return }
+        updateItem(at: currentItemIndex) {
+            $0.updateProgress(bytesTransferred: bytesTransferred)
+        }
         recordSpeedSample(bytesTransferredNow: totalBytesTransferred)
     }
 
     public func advanceToNextItem() {
-        guard currentItemIndex < items.count else { return }
-        items[currentItemIndex].markCompleted()
+        guard items.indices.contains(currentItemIndex) else { return }
+        updateItem(at: currentItemIndex) { $0.markCompleted() }
         if currentItemIndex < items.count - 1 {
             currentItemIndex += 1
         } else {
@@ -165,8 +193,8 @@ public class TransferBatch: ObservableObject {
     }
 
     public func failCurrentItem(error: String) {
-        guard currentItemIndex < items.count else { return }
-        items[currentItemIndex].markFailed(error)
+        guard items.indices.contains(currentItemIndex) else { return }
+        updateItem(at: currentItemIndex) { $0.markFailed(error) }
         if currentItemIndex < items.count - 1 {
             currentItemIndex += 1
         } else {
