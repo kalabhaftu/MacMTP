@@ -114,7 +114,7 @@ extension FileNode: Comparable {
     }
 }
 
-struct FileSizeSummary: Equatable {
+struct FileSizeSummary: Equatable, Sendable {
     let bytes: Int64
     let fileCount: Int
     let folderCount: Int
@@ -134,6 +134,69 @@ struct FileSizeSummary: Equatable {
             bytes = overflow ? Int64.max : sum
         }
         return FileSizeSummary(bytes: bytes, fileCount: fileCount, folderCount: folderCount)
+    }
+}
+
+struct FileListStatusSummary: Equatable, Sendable {
+    let visibleItemCount: Int
+    let directory: FileSizeSummary
+    let selected: FileSizeSummary
+
+    static let empty = FileListStatusSummary(
+        visibleItemCount: 0,
+        directory: FileSizeSummary(bytes: 0, fileCount: 0, folderCount: 0),
+        selected: FileSizeSummary(bytes: 0, fileCount: 0, folderCount: 0)
+    )
+
+    static func make(
+        from files: [FileNode],
+        showHidden: Bool,
+        selectedPaths: Set<String>
+    ) -> FileListStatusSummary {
+        var visibleItemCount = 0
+        var directoryBytes: Int64 = 0
+        var directoryFileCount = 0
+        var directoryFolderCount = 0
+        var selectedBytes: Int64 = 0
+        var selectedFileCount = 0
+        var selectedFolderCount = 0
+
+        for file in files {
+            guard showHidden || !file.name.hasPrefix(".") else { continue }
+            visibleItemCount += 1
+            let isSelected = selectedPaths.contains(file.path)
+
+            if file.isDirectory {
+                directoryFolderCount += 1
+                if isSelected { selectedFolderCount += 1 }
+                continue
+            }
+
+            let size = max(0, file.size)
+            let (newDirectoryBytes, directoryOverflow) = directoryBytes.addingReportingOverflow(size)
+            directoryBytes = directoryOverflow ? Int64.max : newDirectoryBytes
+            directoryFileCount += 1
+
+            if isSelected {
+                let (newSelectedBytes, selectedOverflow) = selectedBytes.addingReportingOverflow(size)
+                selectedBytes = selectedOverflow ? Int64.max : newSelectedBytes
+                selectedFileCount += 1
+            }
+        }
+
+        return FileListStatusSummary(
+            visibleItemCount: visibleItemCount,
+            directory: FileSizeSummary(
+                bytes: directoryBytes,
+                fileCount: directoryFileCount,
+                folderCount: directoryFolderCount
+            ),
+            selected: FileSizeSummary(
+                bytes: selectedBytes,
+                fileCount: selectedFileCount,
+                folderCount: selectedFolderCount
+            )
+        )
     }
 }
 

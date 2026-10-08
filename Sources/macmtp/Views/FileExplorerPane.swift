@@ -113,6 +113,7 @@ struct FileExplorerPane: View {
     var isDisabled: Bool = false
 
     @Binding var files: [FileNode]
+    var filesRevision: UInt64 = 0
 
     let isActivePane: Bool
     let clipboardManager: ClipboardManager
@@ -130,6 +131,8 @@ struct FileExplorerPane: View {
     @State private var displayedFiles: [FileNode] = []
     @State private var ungroupedFiles: [FileNode] = []
     @State private var displayedGroups: [FileGroup] = []
+    @State private var displayedContentRevision: UInt64 = 0
+    @State private var appliedFilesRevision: UInt64?
 
     @State private var sortColumn: FileSortColumn = .name
     @State private var sortDirection: FileSortDirection = .ascending
@@ -227,9 +230,10 @@ struct FileExplorerPane: View {
                 navigateTo(path: newPath)
             }
         }
-        .onChange(of: files) { _, newFiles in
+        .onChange(of: filesRevision) { _, newRevision in
+            guard !usesProvidedFiles, appliedFilesRevision != newRevision else { return }
             resetTypeahead()
-            applyFilterAndSort(using: newFiles)
+            applyFilterAndSort(using: files)
         }
         .onChange(of: isDisabled) { _, disabled in
             guard !usesProvidedFiles else { return }
@@ -253,8 +257,6 @@ struct FileExplorerPane: View {
         }
         .onReceive(MTPDeviceManager.shared.$mtpFiles) { newFiles in
             guard !usesProvidedFiles, !isLocal else { return }
-            resetTypeahead()
-            applyFilterAndSort(using: newFiles)
             if MTPDeviceManager.shared.isLoading {
                 loadingState = .loading
             } else if newFiles.isEmpty {
@@ -711,6 +713,7 @@ struct FileExplorerPane: View {
         AppKitFileBrowser(
             files: ungroupedFiles,
             groups: [],
+            contentRevision: displayedContentRevision,
             selectedPaths: $selectedItems,
             mode: .list,
             fontScale: appFontScale,
@@ -737,6 +740,7 @@ struct FileExplorerPane: View {
         AppKitFileBrowser(
             files: displayedFiles,
             groups: grouping == .none ? [] : displayedGroups,
+            contentRevision: displayedContentRevision,
             selectedPaths: $selectedItems,
             mode: viewMode,
             fontScale: appFontScale,
@@ -1127,8 +1131,9 @@ struct FileExplorerPane: View {
                     if case .failure(let error) = result {
                         self.loadingState = .error(error.localizedDescription)
                     } else if case .success(let items) = result {
+                        let newFilesRevision = self.filesRevision &+ 1
                         self.files = items
-                        self.applyFilterAndSort(using: items)
+                        self.applyFilterAndSort(using: items, recordingFilesRevision: newFilesRevision)
                         if items.isEmpty {
                             self.loadingState = .empty
                         } else if self.displayedFiles.isEmpty && (!self.filterText.isEmpty || self.extensionFilter != nil) {
@@ -1183,8 +1188,13 @@ struct FileExplorerPane: View {
     @AppStorage("showHiddenFilesLocal") private var showHiddenFilesLocal: Bool = false
     @AppStorage("showHiddenFilesMTP") private var showHiddenFilesMTP: Bool = false
 
-    private func applyFilterAndSort(using input: [FileNode]? = nil) {
+    private func applyFilterAndSort(
+        using input: [FileNode]? = nil,
+        recordingFilesRevision: UInt64? = nil
+    ) {
         resetTypeahead()
+        appliedFilesRevision = recordingFilesRevision ?? filesRevision
+        displayedContentRevision &+= 1
         let sourceFiles = input ?? files
         let showHidden = isLocal ? showHiddenFilesLocal : showHiddenFilesMTP
         let organization = browserOrganization

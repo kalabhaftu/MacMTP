@@ -253,6 +253,12 @@ public final class FileTransferService: ObservableObject {
         guard MTPDeviceManager.shared.isConnected else {
             throw KalamError.deviceNotConnected
         }
+
+        ErrorLogger.logMessage(
+            "Transfer source scan started",
+            level: .info,
+            userInfo: TransferTelemetryContext.sourceScanStarted(direction: direction)
+        )
         
         let expandedItems = try await expandSources(sources: sources, direction: direction, storageId: mStorageId)
         

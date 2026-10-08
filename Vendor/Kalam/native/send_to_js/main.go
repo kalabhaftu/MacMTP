@@ -4,12 +4,16 @@ package send_to_js
 	#include "stdlib.h"
 
 	extern void macMTP_done_callback(char* json);
+	extern void macMTP_activity_callback(char* operationID);
 	extern void macMTP_preprocess_callback(char* json);
 	extern void macMTP_progress_callback(char* json);
 	extern void macMTP_transfer_done_callback(char* json);
 
 	void call_done(char* json) {
 		macMTP_done_callback(json);
+	}
+	void call_activity(char* operationID) {
+		macMTP_activity_callback(operationID);
 	}
 	void call_preprocess(char* json) {
 		macMTP_preprocess_callback(json);
@@ -42,6 +46,16 @@ func SendError(err error) {
 	json := toJson(o)
 
 	C.call_done(C.CString(json))
+}
+
+// SendOperationActivity reports real native progress for long operations such
+// as directory walks. The operation ID lets Swift discard late callbacks.
+func SendOperationActivity() {
+	id, ok := operationID.Load().(string)
+	if !ok || id == "" {
+		return
+	}
+	C.call_activity(C.CString(id))
 }
 
 func SendTransferError(err error) {

@@ -47,6 +47,10 @@ struct ContentView: View {
 
     @State private var localFiles: [FileNode] = []
     @State private var mtpFiles: [FileNode] = []
+    @State private var localFilesRevision: UInt64 = 0
+    @State private var mtpFilesRevision: UInt64 = 0
+    @State private var localStatusSummary = FileListStatusSummary.empty
+    @State private var mtpStatusSummary = FileListStatusSummary.empty
 
 
     @State private var mtpStorages: [MTPStorageInfo] = []
@@ -154,14 +158,14 @@ struct ContentView: View {
                 localPath: currentLocalPath,
                 mtpPath: currentMTPPath,
                 isMTPConnected: isMTPConnected,
-                localItemCount: showHiddenFilesLocal ? localFiles.count : localFiles.filter { !$0.name.hasPrefix(".") }.count,
+                localItemCount: localStatusSummary.visibleItemCount,
                 localSelectedCount: selectedLocalItems.count,
-                localSelectedSize: fileSizeSummary(of: localFiles, showHidden: showHiddenFilesLocal, selectedPaths: selectedLocalItems),
-                localDirSize: fileSizeSummary(of: localFiles, showHidden: showHiddenFilesLocal),
-                mtpItemCount: showHiddenFilesMTP ? mtpFiles.count : mtpFiles.filter { !$0.name.hasPrefix(".") }.count,
+                localSelectedSize: localStatusSummary.selected,
+                localDirSize: localStatusSummary.directory,
+                mtpItemCount: mtpStatusSummary.visibleItemCount,
                 mtpSelectedCount: selectedMTPItems.count,
-                mtpSelectedSize: fileSizeSummary(of: mtpFiles, showHidden: showHiddenFilesMTP, selectedPaths: selectedMTPItems),
-                mtpDirSize: fileSizeSummary(of: mtpFiles, showHidden: showHiddenFilesMTP),
+                mtpSelectedSize: mtpStatusSummary.selected,
+                mtpDirSize: mtpStatusSummary.directory,
                 isTransferring: statusIsTransferring,
                 transferProgress: statusTransferProgress,
                 transferFileName: statusTransferFileName,
@@ -265,6 +269,8 @@ struct ContentView: View {
         }
         .onAppear {
             installKeyboardMonitor()
+            updateLocalStatusSummary()
+            updateMTPStatusSummary()
             if !hasSeenPrivacyPrompt {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                     guard !screenshotMode else { return }
@@ -274,6 +280,18 @@ struct ContentView: View {
         }
         .onDisappear {
             removeKeyboardMonitor()
+        }
+        .onChange(of: selectedLocalItems) { _, _ in
+            updateLocalStatusSummary()
+        }
+        .onChange(of: selectedMTPItems) { _, _ in
+            updateMTPStatusSummary()
+        }
+        .onChange(of: showHiddenFilesLocal) { _, _ in
+            updateLocalStatusSummary()
+        }
+        .onChange(of: showHiddenFilesMTP) { _, _ in
+            updateMTPStatusSummary()
         }
         .onChange(of: activeConflictResolution) { _, resolution in
             if let resolution = resolution {
@@ -319,6 +337,8 @@ struct ContentView: View {
         .onReceive(MTPDeviceManager.shared.$mtpFiles) { newFiles in
             guard !screenshotMode else { return }
             mtpFiles = newFiles
+            mtpFilesRevision &+= 1
+            updateMTPStatusSummary(files: newFiles)
             currentMTPPath = MTPDeviceManager.shared.currentMTPPath
         }
         .onReceive(MTPDeviceManager.shared.$storages) { storages in
@@ -373,13 +393,31 @@ struct ContentView: View {
         }
     }
 
-    private func fileSizeSummary(
-        of files: [FileNode],
-        showHidden: Bool,
-        selectedPaths: Set<String>? = nil
-    ) -> FileSizeSummary {
-        let visible = showHidden ? files : files.filter { !$0.name.hasPrefix(".") }
-        return FileSizeSummary.directItems(in: visible, selectedPaths: selectedPaths)
+    private func updateLocalStatusSummary(files: [FileNode]? = nil) {
+        localStatusSummary = FileListStatusSummary.make(
+            from: files ?? localFiles,
+            showHidden: showHiddenFilesLocal,
+            selectedPaths: selectedLocalItems
+        )
+    }
+
+    private func updateMTPStatusSummary(files: [FileNode]? = nil) {
+        mtpStatusSummary = FileListStatusSummary.make(
+            from: files ?? mtpFiles,
+            showHidden: showHiddenFilesMTP,
+            selectedPaths: selectedMTPItems
+        )
+    }
+
+    private var localFilesBinding: Binding<[FileNode]> {
+        Binding(
+            get: { localFiles },
+            set: { files in
+                localFiles = files
+                localFilesRevision &+= 1
+                updateLocalStatusSummary(files: files)
+            }
+        )
     }
 
     private var sidebarView: some View {
@@ -425,7 +463,8 @@ struct ContentView: View {
             selectedItems: $selectedLocalItems,
             isLocal: true,
             isDisabled: false,
-            files: $localFiles,
+            files: localFilesBinding,
+            filesRevision: localFilesRevision,
             isActivePane: activePane == .local,
             clipboardManager: ClipboardManager.shared,
             onActivate: { activePane = .local },
@@ -472,6 +511,7 @@ struct ContentView: View {
                 isLocal: false,
                 isDisabled: !isMTPConnected,
                 files: $mtpFiles,
+                filesRevision: mtpFilesRevision,
                 isActivePane: activePane == .mtp,
                 clipboardManager: ClipboardManager.shared,
                 onActivate: { activePane = .mtp },

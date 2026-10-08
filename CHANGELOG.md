@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 1.7.5 - 2026-10-09
+
+### MTP Listing Reliability and Responsiveness
+- Track progress during native directory walks so slow scans that continue returning entries do not hit a fixed wall-clock timeout; retain a bounded timeout for stalled operations.
+- Skip stale queued directory operations after timeout and arbitrate timeout/completion safely for each native operation.
+- Cache file-list status summaries and use content revisions to avoid rescanning large file arrays on unrelated SwiftUI updates.
+- Add path-free source-scan breadcrumbs and regression coverage for timeout races, large lists, revision invalidation, and telemetry privacy.
+
 ## 1.7.4 - 2026-10-04
 
 ### MTP Transfer Reliability

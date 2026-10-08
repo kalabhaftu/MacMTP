@@ -32,6 +32,101 @@ func transferWatchdogUsesInactivityInsteadOfWallClockAge() {
 }
 
 @Test
+func directoryWalkActivityOnlyRefreshesItsMatchingOperation() {
+    var queued = DoneOperationActivity()
+    queued.begin(operationID: "walk-current", at: 100)
+    #expect(!queued.markStarted(operationID: "walk-stale", at: 50))
+    #expect(!queued.timeoutIfExpired(
+        operationID: "walk-current",
+        now: 500,
+        timeout: 401,
+        includeQueueWait: true
+    ))
+    #expect(queued.timeoutIfExpired(
+        operationID: "walk-current",
+        now: 501,
+        timeout: 401,
+        includeQueueWait: true
+    ))
+
+    var startedAtDeadline = DoneOperationActivity()
+    startedAtDeadline.begin(operationID: "walk-current", at: 100)
+    #expect(startedAtDeadline.markStarted(operationID: "walk-current", at: 500))
+    #expect(!startedAtDeadline.timeoutIfExpired(
+        operationID: "walk-current",
+        now: 501,
+        timeout: 401,
+        includeQueueWait: true
+    ))
+    #expect(!startedAtDeadline.hasWaitedToStartTooLong(
+        operationID: "walk-current",
+        now: 10_000,
+        timeout: 1
+    ))
+
+    var active = DoneOperationActivity()
+    active.begin(operationID: "walk-current", at: 100)
+    #expect(active.markStarted(operationID: "walk-current", at: 100))
+    #expect(!active.record(operationID: "walk-stale", at: 600))
+    #expect(active.record(operationID: "walk-current", at: 600))
+    #expect(!active.timeoutIfExpired(
+        operationID: "walk-current",
+        now: 700,
+        timeout: 401,
+        includeQueueWait: true
+    ))
+    #expect(active.timeoutIfExpired(
+        operationID: "walk-current",
+        now: 1_001,
+        timeout: 401,
+        includeQueueWait: true
+    ))
+    #expect(!active.markStarted(operationID: "walk-current", at: 10_001))
+}
+
+@Test
+func directoryWatchdogTimeoutAndNativeCompletionHaveOneWinner() async {
+    let timedOutRegistry = KalamRegistry()
+    do {
+        _ = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
+            timedOutRegistry.setDoneContinuation(continuation, operationID: "walk-timeout")
+            #expect(timedOutRegistry.markDoneOperationStarted(operationID: "walk-timeout"))
+            #expect(timedOutRegistry.timeoutDoneIfExpired(
+                operationID: "walk-timeout",
+                timeout: 0,
+                includeQueueWait: true,
+                error: KalamError.timedOut("list_directory")
+            ))
+            #expect(!timedOutRegistry.markDoneOperationStarted(operationID: "walk-timeout"))
+            timedOutRegistry.resolveDone(with: #"{"operationId":"walk-timeout","data":true}"#)
+        }
+        Issue.record("Expected the timeout to win")
+    } catch let error as KalamError {
+        #expect(error.localizedDescription.contains("timed out"))
+    } catch {
+        Issue.record("Unexpected continuation error: \(error)")
+    }
+
+    let completedRegistry = KalamRegistry()
+    do {
+        let response = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
+            completedRegistry.setDoneContinuation(continuation, operationID: "walk-complete")
+            #expect(completedRegistry.markDoneOperationStarted(operationID: "walk-complete"))
+            completedRegistry.resolveDone(with: #"{"operationId":"walk-complete","data":true}"#)
+            #expect(!completedRegistry.timeoutDoneIfExpired(
+                operationID: "walk-complete",
+                timeout: 0,
+                includeQueueWait: true,
+                error: KalamError.timedOut("list_directory")
+            ))
+        }
+        #expect(response.contains("\"data\":true"))
+    } catch {
+        Issue.record("Expected the native completion to win, got: \(error)")
+    }
+}
+
+@Test
 func repeatedCachedProgressDoesNotCountAsTransferActivity() {
     #expect(transferActivityAdvanced(previousPayload: nil, currentPayload: "first"))
     #expect(!transferActivityAdvanced(previousPayload: "same", currentPayload: "same"))
