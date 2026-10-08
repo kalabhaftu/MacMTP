@@ -35,29 +35,34 @@ func transferWatchdogUsesInactivityInsteadOfWallClockAge() {
 func directoryWalkActivityOnlyRefreshesItsMatchingOperation() {
     var queued = DoneOperationActivity()
     queued.begin(operationID: "walk-current", at: 100)
-    #expect(!queued.markStarted(operationID: "walk-stale", at: 50))
-    #expect(!queued.timeoutIfExpired(
+    let staleStartAccepted = queued.markStarted(operationID: "walk-stale", at: 50)
+    #expect(!staleStartAccepted)
+    let queuedExpiredBeforeDeadline = queued.timeoutIfExpired(
         operationID: "walk-current",
         now: 500,
         timeout: 401,
         includeQueueWait: true
-    ))
-    #expect(queued.timeoutIfExpired(
+    )
+    #expect(!queuedExpiredBeforeDeadline)
+    let queuedExpiredAtDeadline = queued.timeoutIfExpired(
         operationID: "walk-current",
         now: 501,
         timeout: 401,
         includeQueueWait: true
-    ))
+    )
+    #expect(queuedExpiredAtDeadline)
 
     var startedAtDeadline = DoneOperationActivity()
     startedAtDeadline.begin(operationID: "walk-current", at: 100)
-    #expect(startedAtDeadline.markStarted(operationID: "walk-current", at: 500))
-    #expect(!startedAtDeadline.timeoutIfExpired(
+    let markedStarted = startedAtDeadline.markStarted(operationID: "walk-current", at: 500)
+    #expect(markedStarted)
+    let activeExpiredImmediately = startedAtDeadline.timeoutIfExpired(
         operationID: "walk-current",
         now: 501,
         timeout: 401,
         includeQueueWait: true
-    ))
+    )
+    #expect(!activeExpiredImmediately)
     #expect(!startedAtDeadline.hasWaitedToStartTooLong(
         operationID: "walk-current",
         now: 10_000,
@@ -66,22 +71,28 @@ func directoryWalkActivityOnlyRefreshesItsMatchingOperation() {
 
     var active = DoneOperationActivity()
     active.begin(operationID: "walk-current", at: 100)
-    #expect(active.markStarted(operationID: "walk-current", at: 100))
-    #expect(!active.record(operationID: "walk-stale", at: 600))
-    #expect(active.record(operationID: "walk-current", at: 600))
-    #expect(!active.timeoutIfExpired(
+    let activeStartAccepted = active.markStarted(operationID: "walk-current", at: 100)
+    #expect(activeStartAccepted)
+    let staleActivityAccepted = active.record(operationID: "walk-stale", at: 600)
+    #expect(!staleActivityAccepted)
+    let currentActivityAccepted = active.record(operationID: "walk-current", at: 600)
+    #expect(currentActivityAccepted)
+    let activeExpiredBeforeDeadline = active.timeoutIfExpired(
         operationID: "walk-current",
         now: 700,
         timeout: 401,
         includeQueueWait: true
-    ))
-    #expect(active.timeoutIfExpired(
+    )
+    #expect(!activeExpiredBeforeDeadline)
+    let activeExpiredAtDeadline = active.timeoutIfExpired(
         operationID: "walk-current",
         now: 1_001,
         timeout: 401,
         includeQueueWait: true
-    ))
-    #expect(!active.markStarted(operationID: "walk-current", at: 10_001))
+    )
+    #expect(activeExpiredAtDeadline)
+    let staleStartAfterTimeout = active.markStarted(operationID: "walk-current", at: 10_001)
+    #expect(!staleStartAfterTimeout)
 }
 
 @Test
