@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct AppKitFileBrowser: NSViewRepresentable {
     let files: [FileNode]
     let groups: [FileGroup]
+    let contentRevision: UInt64
     @Binding var selectedPaths: Set<String>
     let mode: FileViewMode
     let fontScale: Double
@@ -33,6 +34,7 @@ struct AppKitFileBrowser: NSViewRepresentable {
         view.update(
             files: files,
             groups: groups,
+            contentRevision: contentRevision,
             mode: mode,
             fontScale: fontScale,
             coordinator: context.coordinator
@@ -54,6 +56,7 @@ struct AppKitFileBrowser: NSViewRepresentable {
         nsView.update(
             files: files,
             groups: groups,
+            contentRevision: contentRevision,
             mode: mode,
             fontScale: fontScale,
             coordinator: context.coordinator
@@ -381,14 +384,14 @@ final class FileBrowserHostView: NSView {
     private var scrollView: NSScrollView?
     private weak var coordinator: AppKitFileBrowser.Coordinator?
     private var isGrouped = false
-    private var lastFiles: [FileNode] = []
-    private var lastGroups: [FileGroup] = []
+    private var lastContentRevision: UInt64?
     private var lastSelection: Set<String> = []
     private var lastFontScale: Double?
 
     func update(
         files: [FileNode],
         groups: [FileGroup],
+        contentRevision: UInt64,
         mode: FileViewMode,
         fontScale: Double,
         coordinator: AppKitFileBrowser.Coordinator
@@ -400,7 +403,10 @@ final class FileBrowserHostView: NSView {
         let shouldGroup = !groups.isEmpty
         let modeChanged = self.mode != mode
         let groupingChanged = self.isGrouped != shouldGroup
-        let contentChanged = Self.filesChanged(from: lastFiles, to: files) || lastGroups != groups
+        let contentChanged = Self.contentRevisionChanged(
+            previous: lastContentRevision,
+            current: contentRevision
+        )
         let fontScaleChanged = lastFontScale != fontScale
         let selection = coordinator.selectedPaths.wrappedValue
         let selectionChanged = lastSelection != selection
@@ -430,22 +436,13 @@ final class FileBrowserHostView: NSView {
             }
         }
 
-        lastFiles = files
-        lastGroups = groups
+        lastContentRevision = contentRevision
         lastSelection = selection
         lastFontScale = fontScale
     }
 
-    static func filesChanged(from previous: [FileNode], to current: [FileNode]) -> Bool {
-        guard previous.count == current.count else { return true }
-        return zip(previous, current).contains { old, new in
-            old.path != new.path
-                || old.name != new.name
-                || old.isDirectory != new.isDirectory
-                || old.size != new.size
-                || old.modificationDate != new.modificationDate
-                || old.objectId != new.objectId
-        }
+    static func contentRevisionChanged(previous: UInt64?, current: UInt64) -> Bool {
+        previous != current
     }
 
     private func rebuild(mode: FileViewMode, isGrouped: Bool, fontScale: Double, coordinator: AppKitFileBrowser.Coordinator) {

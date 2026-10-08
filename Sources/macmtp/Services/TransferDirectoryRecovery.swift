@@ -114,6 +114,14 @@ func prepareTransferDirectoryWithRecovery(
 }
 
 enum TransferTelemetryContext {
+    static func sourceScanStarted(direction: TransferDirection) -> [String: Any] {
+        [
+            "operation": "transfer",
+            "direction": direction == .localToMTP ? "local_to_mtp" : "mtp_to_local",
+            "operation_phase": "source_scan"
+        ]
+    }
+
     static func make(
         direction: TransferDirection,
         fileCount: Int,

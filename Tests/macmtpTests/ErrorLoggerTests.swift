@@ -111,6 +111,19 @@ func transferBreadcrumbContextContainsNoPathsOrDeviceIdentifiers() {
     #expect(!rendered.contains("device_id"))
     #expect(!rendered.contains("vid"))
     #expect(!rendered.contains("pid"))
+
+    let scanContext = TransferTelemetryContext.sourceScanStarted(direction: .mtpToLocal)
+    let renderedScanContext = scanContext.keys.sorted().map { key in
+        "\(key)=\(String(describing: scanContext[key]!))"
+    }.joined(separator: " ").lowercased()
+    #expect(scanContext["operation_phase"] as? String == "source_scan")
+    #expect(scanContext["direction"] as? String == "mtp_to_local")
+    #expect(!renderedScanContext.contains("/users/"))
+    #expect(!renderedScanContext.contains("/storage/"))
+    #expect(!renderedScanContext.contains("serial"))
+    #expect(!renderedScanContext.contains("device_id"))
+    #expect(!renderedScanContext.contains("vid"))
+    #expect(!renderedScanContext.contains("pid"))
 }
 
 @Test

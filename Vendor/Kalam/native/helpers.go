@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"github.com/ganeshrvel/go-mtpfs/mtp"
 	"github.com/ganeshrvel/go-mtpx"
+	"kalam/send_to_js"
 	"log"
 	"strings"
 	"sync"
+	"time"
 )
 
 const (
@@ -147,6 +149,7 @@ func _walk(storageId uint32, fullPath string, recursive, skipDisallowedFiles, sk
 		return []*mtpx.FileInfo{}, err
 	}
 
+	lastActivity := time.Time{}
 	_, _, _, err = mtpx.Walk(container.dev, storageId, fullPath, recursive, skipDisallowedFiles, skipHiddenFiles, func(objectId uint32, fi *mtpx.FileInfo, err error) error {
 		if transferCancellationRequested() {
 			return mtpx.ErrTransferCancelled
@@ -156,6 +159,11 @@ func _walk(storageId uint32, fullPath string, recursive, skipDisallowedFiles, sk
 		}
 
 		files = append(files, fi)
+		now := time.Now()
+		if lastActivity.IsZero() || now.Sub(lastActivity) >= time.Second {
+			send_to_js.SendOperationActivity()
+			lastActivity = now
+		}
 
 		return nil
 	})

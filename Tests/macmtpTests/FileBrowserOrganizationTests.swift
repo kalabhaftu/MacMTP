@@ -177,13 +177,10 @@ func iconGridReservesStableCellsForWrappedNames() {
 }
 
 @Test @MainActor
-func appKitBrowserDetectsPresentationChangesWithoutReloadingUnchangedFiles() {
-    let original = file("photo.jpg", size: 10)
-    let unchanged = file("photo.jpg", size: 10)
-    let updated = file("photo.jpg", size: 20)
-
-    #expect(!FileBrowserHostView.filesChanged(from: [original], to: [unchanged]))
-    #expect(FileBrowserHostView.filesChanged(from: [original], to: [updated]))
+func appKitBrowserUsesContentRevisionToSkipUnrelatedScans() {
+    #expect(FileBrowserHostView.contentRevisionChanged(previous: nil, current: 1))
+    #expect(!FileBrowserHostView.contentRevisionChanged(previous: 1, current: 1))
+    #expect(FileBrowserHostView.contentRevisionChanged(previous: 1, current: 2))
 }
 
 @Test @MainActor
@@ -226,6 +223,66 @@ func selectedSizeSummaryReportsFolderOnlySelectionsWithoutFakeZeroByteFolders() 
     let summary = FileSizeSummary.directItems(in: files, selectedPaths: ["/Folder"])
 
     #expect(summary == FileSizeSummary(bytes: 0, fileCount: 0, folderCount: 1))
+}
+
+@Test
+func fileListStatusSummaryCountsVisibleAndSelectedItems() {
+    let files = (0..<10_000).map { index in
+        FileNode(
+            name: index.isMultiple(of: 10) ? ".hidden-\(index)" : "file-\(index)",
+            path: "/root/\(index)",
+            isDirectory: index.isMultiple(of: 5),
+            size: Int64(index + 1)
+        )
+    }
+    let selectedPaths: Set<String> = ["/root/1", "/root/5", "/root/10"]
+
+    let visibleOnly = FileListStatusSummary.make(
+        from: files,
+        showHidden: false,
+        selectedPaths: selectedPaths
+    )
+    #expect(visibleOnly.visibleItemCount == 9_000)
+    #expect(visibleOnly.directory.bytes == 40_008_000)
+    #expect(visibleOnly.directory.folderCount == 1_000)
+    #expect(visibleOnly.directory.fileCount == 8_000)
+    #expect(visibleOnly.selected.folderCount == 1)
+    #expect(visibleOnly.selected.fileCount == 1)
+    #expect(visibleOnly.selected.bytes == 2)
+
+    let includingHidden = FileListStatusSummary.make(
+        from: files,
+        showHidden: true,
+        selectedPaths: selectedPaths
+    )
+    #expect(includingHidden.visibleItemCount == 10_000)
+    #expect(includingHidden.directory.bytes == 40_008_000)
+    #expect(includingHidden.directory.folderCount == 2_000)
+    #expect(includingHidden.directory.fileCount == 8_000)
+    #expect(includingHidden.selected.folderCount == 2)
+    #expect(includingHidden.selected.fileCount == 1)
+    #expect(includingHidden.selected.bytes == 2)
+}
+
+@Test
+func fileListStatusSummaryClampsNegativeSizesAndSaturatesOnOverflow() {
+    let files = [
+        FileNode(name: "negative", path: "/root/negative", isDirectory: false, size: -5),
+        FileNode(name: "large", path: "/root/large", isDirectory: false, size: Int64.max),
+        FileNode(name: "overflow", path: "/root/overflow", isDirectory: false, size: 1),
+    ]
+
+    let summary = FileListStatusSummary.make(
+        from: files,
+        showHidden: true,
+        selectedPaths: Set(files.map(\.path))
+    )
+
+    #expect(summary.visibleItemCount == 3)
+    #expect(summary.directory.fileCount == 3)
+    #expect(summary.directory.bytes == Int64.max)
+    #expect(summary.selected.fileCount == 3)
+    #expect(summary.selected.bytes == Int64.max)
 }
 
 @Test

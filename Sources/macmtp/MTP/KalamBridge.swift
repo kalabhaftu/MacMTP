@@ -161,6 +161,71 @@ func nativeTransferCanFinish(nativeReturned: Bool, hasResult: Bool) -> Bool {
     nativeReturned && hasResult
 }
 
+struct DoneOperationActivity: Sendable {
+    private(set) var operationID: String?
+    private(set) var hasStarted = false
+    private(set) var queuedAt: UInt64?
+    private(set) var lastActivity: UInt64?
+
+    mutating func begin(operationID: String, at timestamp: UInt64) {
+        self.operationID = operationID
+        hasStarted = false
+        queuedAt = timestamp
+        lastActivity = nil
+    }
+
+    @discardableResult
+    mutating func markStarted(operationID: String, at timestamp: UInt64) -> Bool {
+        guard self.operationID == operationID else { return false }
+        hasStarted = true
+        lastActivity = timestamp
+        return true
+    }
+
+    @discardableResult
+    mutating func record(operationID: String, at timestamp: UInt64) -> Bool {
+        guard hasStarted, self.operationID == operationID else { return false }
+        lastActivity = timestamp
+        return true
+    }
+
+    func hasBeenIdle(operationID: String, now: UInt64, timeout: UInt64) -> Bool {
+        guard hasStarted,
+              self.operationID == operationID,
+              let lastActivity else { return false }
+        return transferActivityExpired(lastActivity: lastActivity, now: now, timeout: timeout)
+    }
+
+    func hasWaitedToStartTooLong(operationID: String, now: UInt64, timeout: UInt64) -> Bool {
+        guard !hasStarted,
+              self.operationID == operationID,
+              let queuedAt else { return false }
+        return transferActivityExpired(lastActivity: queuedAt, now: now, timeout: timeout)
+    }
+
+    mutating func timeoutIfExpired(
+        operationID: String,
+        now: UInt64,
+        timeout: UInt64,
+        includeQueueWait: Bool
+    ) -> Bool {
+        let expired = hasBeenIdle(operationID: operationID, now: now, timeout: timeout)
+            || (includeQueueWait
+                && hasWaitedToStartTooLong(operationID: operationID, now: now, timeout: timeout))
+        if expired {
+            clear()
+        }
+        return expired
+    }
+
+    mutating func clear() {
+        operationID = nil
+        hasStarted = false
+        queuedAt = nil
+        lastActivity = nil
+    }
+}
+
 func shouldReportMTPTransportFailure(_ error: Error, connectionIsActive: Bool) -> Bool {
     if isMTPTransferCancellation(error) {
         return false
@@ -348,6 +413,7 @@ final class KalamRegistry: @unchecked Sendable {
 
     private var doneContinuation: CheckedContinuation<String, Error>?
     private var doneOperationID: String?
+    private var doneActivity = DoneOperationActivity()
     private var transferContinuation: CheckedContinuation<Void, Error>?
     private var transferOperationID: String?
     private var transferLastActivity: UInt64?
@@ -359,7 +425,8 @@ final class KalamRegistry: @unchecked Sendable {
     private var progressCallback: ((String) -> Void)?
     private var transferDoneCallback: ((String) -> Void)?
 
-    private init() {}
+    // Production uses `shared`; internal initialization keeps callback lifecycle tests isolated.
+    init() {}
 
     func setDoneContinuation(_ continuation: CheckedContinuation<String, Error>, operationID: String) {
         lock.lock()
@@ -370,7 +437,58 @@ final class KalamRegistry: @unchecked Sendable {
         }
         doneContinuation = continuation
         doneOperationID = operationID
+        doneActivity.begin(
+            operationID: operationID,
+            at: DispatchTime.now().uptimeNanoseconds
+        )
         lock.unlock()
+    }
+
+    func markDoneOperationStarted(operationID: String) -> Bool {
+        lock.lock()
+        let started = doneActivity.markStarted(
+            operationID: operationID,
+            at: DispatchTime.now().uptimeNanoseconds
+        )
+        lock.unlock()
+        return started
+    }
+
+    @discardableResult
+    func recordDoneActivity(operationID: String) -> Bool {
+        lock.lock()
+        let recorded = doneActivity.record(
+            operationID: operationID,
+            at: DispatchTime.now().uptimeNanoseconds
+        )
+        lock.unlock()
+        return recorded
+    }
+
+    @discardableResult
+    func timeoutDoneIfExpired(
+        operationID: String,
+        timeout nanoseconds: UInt64,
+        includeQueueWait: Bool,
+        error: Error
+    ) -> Bool {
+        lock.lock()
+        guard doneOperationID == operationID,
+              let continuation = doneContinuation,
+              doneActivity.timeoutIfExpired(
+                operationID: operationID,
+                now: DispatchTime.now().uptimeNanoseconds,
+                timeout: nanoseconds,
+                includeQueueWait: includeQueueWait
+              ) else {
+            lock.unlock()
+            return false
+        }
+        doneContinuation = nil
+        doneOperationID = nil
+        lock.unlock()
+        continuation.resume(throwing: error)
+        return true
     }
 
     func setTransferCallbacks(
@@ -407,6 +525,7 @@ final class KalamRegistry: @unchecked Sendable {
         let continuation = doneContinuation
         doneContinuation = nil
         doneOperationID = nil
+        doneActivity.clear()
         let transferCallback = continuation == nil ? transferDoneCallback : nil
         lock.unlock()
         if let continuation {
@@ -424,8 +543,25 @@ final class KalamRegistry: @unchecked Sendable {
         let continuation = doneContinuation
         doneContinuation = nil
         doneOperationID = nil
+        doneActivity.clear()
         lock.unlock()
         continuation?.resume(throwing: error)
+    }
+
+    @discardableResult
+    func timeoutDone(operationID: String, error: Error) -> Bool {
+        lock.lock()
+        guard doneOperationID == operationID,
+              let continuation = doneContinuation else {
+            lock.unlock()
+            return false
+        }
+        doneContinuation = nil
+        doneOperationID = nil
+        doneActivity.clear()
+        lock.unlock()
+        continuation.resume(throwing: error)
+        return true
     }
 
     func failTransfer(with error: Error) {
@@ -597,6 +733,16 @@ public func macMTP_done_callback(jsonPtr: UnsafeMutablePointer<CChar>?) {
     }
 }
 
+@_cdecl("macMTP_activity_callback")
+public func macMTP_activity_callback(operationIDPtr: UnsafeMutablePointer<CChar>?) {
+    guard let operationIDPtr = operationIDPtr else { return }
+    let operationID = String(cString: operationIDPtr)
+    free(operationIDPtr)
+    bounceQueue.async {
+        KalamRegistry.shared.recordDoneActivity(operationID: operationID)
+    }
+}
+
 @_cdecl("macMTP_preprocess_callback")
 public func macMTP_preprocess_callback(jsonPtr: UnsafeMutablePointer<CChar>?) {
     guard let jsonPtr = jsonPtr else { return }
@@ -679,9 +825,31 @@ public actor KalamBridge {
                     startOperation(operationID)
                 }
             }
-            group.addTask {
-                try await Task.sleep(nanoseconds: Self.callbackTimeoutNanoseconds)
-                throw KalamError.timedOut(operationName)
+            if operationName == "list_directory" {
+                group.addTask {
+                    while true {
+                        try await Task.sleep(nanoseconds: 1_000_000_000)
+                        let error = KalamError.timedOut(operationName)
+                        if KalamRegistry.shared.timeoutDoneIfExpired(
+                            operationID: operationID,
+                            timeout: Self.callbackTimeoutNanoseconds,
+                            includeQueueWait: true,
+                            error: error
+                        ) {
+                            throw error
+                        }
+                    }
+                }
+            } else {
+                group.addTask {
+                    while true {
+                        try await Task.sleep(nanoseconds: Self.callbackTimeoutNanoseconds)
+                        let error = KalamError.timedOut(operationName)
+                        if KalamRegistry.shared.timeoutDone(operationID: operationID, error: error) {
+                            throw error
+                        }
+                    }
+                }
             }
             defer { group.cancelAll() }
 
@@ -704,6 +872,7 @@ public actor KalamBridge {
 
         let jsonString = try await waitForDone(operationName: operationName) { operationID in
             self.mtpQueue.async {
+                guard KalamRegistry.shared.markDoneOperationStarted(operationID: operationID) else { return }
                 var id = operationID.utf8CString
                 id.withUnsafeMutableBufferPointer { buffer in
                     SetOperationID(buffer.baseAddress)
@@ -729,6 +898,7 @@ public actor KalamBridge {
 
         let jsonString = try await waitForDone(operationName: operationName) { operationID in
             self.mtpQueue.async {
+                guard KalamRegistry.shared.markDoneOperationStarted(operationID: operationID) else { return }
                 var cInput = inputJson.utf8CString
                 cInput.withUnsafeMutableBufferPointer { buffer in
                     var id = operationID.utf8CString
