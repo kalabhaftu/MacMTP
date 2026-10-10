@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 1.7.6 - 2026-10-10
+
+### Transfer Failures and App Responsiveness
+- Stop the transfer queue when the destination runs out of space, keep completed files and cut sources, and show an actionable failure without reconnecting a healthy device.
+- Treat full-storage responses as expected user conditions and group other native errors by operation and error type so unrelated failures do not reopen the same Sentry issue.
+- Correct native MTP response classification so an invalid object handle is not mistaken for full storage.
+- Limit the main window's SwiftUI hosting view to minimum-size measurement to reduce repeated layout work while preserving resizing.
+
 ## 1.7.5 - 2026-10-09
 
 ### MTP Listing Reliability and Responsiveness

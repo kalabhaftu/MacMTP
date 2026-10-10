@@ -169,6 +169,30 @@ func cancellationRecoveryFailuresAreReportedButDiskFullIsFiltered() {
 }
 
 @Test
+func deviceStorageFullStopsTheQueueWithoutReportingOrReconnecting() {
+    let full = KalamError.nativeOperationFailed(
+        operation: "transfer",
+        errorType: "ErrorStorageFull",
+        message: "an error occured while uploading files. StoreFull"
+    )
+    let invalidHandle = KalamError.nativeOperationFailed(
+        operation: "transfer",
+        errorType: "ErrorGeneral",
+        message: "InvalidObjectHandle"
+    )
+    let wrappedFull = TransferDirectoryRecoveryFailure(underlying: full, outcome: .retryFailed)
+
+    #expect(isTransferStorageFull(full))
+    #expect(isTransferStorageFull(wrappedFull))
+    #expect(shouldStopTransferQueue(afterDirectoryPreparationError: full))
+    #expect(!isMTPTransportFailure(full))
+    #expect(!shouldAutomaticallyReconnectMTP(full))
+    #expect(!ErrorLogger.shouldReport(full))
+    #expect(!isTransferStorageFull(invalidHandle))
+    #expect(ErrorLogger.shouldReport(invalidHandle))
+}
+
+@Test
 func transferCompletionRequiresValidJSONAndPreservesNativeErrors() {
     guard case .success = decodeMTPTransferCompletion(#"{"data":true}"#) else {
         Issue.record("Expected a valid transfer completion")

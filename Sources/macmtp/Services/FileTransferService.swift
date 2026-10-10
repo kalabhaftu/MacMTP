@@ -608,12 +608,12 @@ public final class FileTransferService: ObservableObject {
                         for idx in chunkIndices {
                             var itm = batch.items[idx]
                             if itm.status != .completed && itm.bytesTransferred < itm.fileSize {
-                                itm.markFailed(error.localizedDescription)
+                                itm.markFailed(formatTransferError(error))
                                 batch.updateItem(at: idx) { $0 = itm }
                             }
                         }
                     }
-                    if isMTPTransportFailure(error) {
+                    if isMTPTransportFailure(error) || isTransferStorageFull(error) {
                         terminalTransferError = error
                         break queueLoop
                     }
@@ -643,7 +643,7 @@ public final class FileTransferService: ObservableObject {
                         reconnectAutomatically: false
                     )
                 }
-            } else {
+            } else if isMTPTransportFailure(terminalTransferError) {
                 MTPDeviceManager.shared.invalidateConnection(
                     message: reconnectAutomatically
                         ? "Transfer cancellation interrupted the MTP session. Reconnecting…"
@@ -664,7 +664,7 @@ public final class FileTransferService: ObservableObject {
                     isError: true
                 )
             } else {
-                batch.complete()
+                batch.state = .failed(errorDetail)
                 postTransferNotification(
                     title: title,
                     body: "\(batch.completedFileCount) of \(batch.totalFileCount) files copied. \(errorDetail)",
@@ -1209,6 +1209,9 @@ public final class FileTransferService: ObservableObject {
     }
 
     private func formatTransferError(_ error: Error) -> String {
+        if isTransferStorageFull(error) {
+            return "The destination storage is full. Free up space and try again. Files already copied have been kept."
+        }
         let nsError = error as NSError
         if nsError.domain == NSCocoaErrorDomain && nsError.code == 513 {
             return "Permission denied: Destination directory is read-only or not writable."

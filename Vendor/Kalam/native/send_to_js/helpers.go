@@ -28,7 +28,7 @@ func processError(e error) (errorType ErrorType, errorMsg string) {
 
 	switch v := e.(type) {
 	case mtp.RCError:
-		if v == 0x2009 {
+		if v == mtp.RC_StoreFull {
 			errorType = ErrorStorageFull
 			errorMsg = v.Error()
 		}

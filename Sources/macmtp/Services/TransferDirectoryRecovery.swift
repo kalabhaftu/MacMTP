@@ -23,7 +23,9 @@ struct TransferDirectoryRecoveryFailure: Error, LocalizedError {
 }
 
 func shouldStopTransferQueue(afterDirectoryPreparationError error: Error) -> Bool {
-    error is TransferDirectoryRecoveryFailure || isMTPTransportFailure(error)
+    error is TransferDirectoryRecoveryFailure
+        || isMTPTransportFailure(error)
+        || isTransferStorageFull(error)
 }
 
 /// Reconciles one directory at a time and checks cancellation between native

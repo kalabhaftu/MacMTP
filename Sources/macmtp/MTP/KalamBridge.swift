@@ -46,6 +46,18 @@ public enum KalamError: Error, LocalizedError {
     }
 }
 
+func isTransferStorageFull(_ error: Error) -> Bool {
+    if let recoveryFailure = error as? TransferDirectoryRecoveryFailure {
+        return isTransferStorageFull(recoveryFailure.underlying)
+    }
+    if case .nativeOperationFailed(_, let errorType, _) = error as? KalamError {
+        return errorType == "ErrorStorageFull"
+    }
+    let nsError = error as NSError
+    return nsError.domain == NSCocoaErrorDomain
+        && nsError.code == NSFileWriteOutOfSpaceError
+}
+
 func isMTPTransportFailure(_ error: Error) -> Bool {
     if let recoveryFailure = error as? TransferDirectoryRecoveryFailure {
         return isMTPTransportFailure(recoveryFailure.underlying)

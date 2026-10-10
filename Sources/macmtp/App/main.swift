@@ -46,7 +46,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             window.setFrameAutosaveName("macMTPMainWindow")
         }
         window.minSize = NSSize(width: 900, height: 550)
-        window.contentView = NSHostingView(rootView: contentView)
+        let hostingView = NSHostingView(rootView: contentView)
+        // The resizable window only needs SwiftUI's minimum size constraint.
+        hostingView.sizingOptions = [.minSize]
+        window.contentView = hostingView
         window.makeKeyAndOrderFront(nil)
         window.isReleasedWhenClosed = false
         

@@ -83,6 +83,9 @@ public struct ErrorLogger {
             if let kalamError = error as? KalamError {
                 scope.setTag(value: kalamError.reportingCase, key: "kalam_error_case")
                 if case .nativeOperationFailed(let operation, let errorType, _) = kalamError {
+                    scope.setFingerprint([
+                        "macmtp", "native_operation_failed", operation, errorType ?? "ErrorGeneral"
+                    ])
                     scope.setTag(value: operation, key: "mtp_operation")
                     if let errorType, !errorType.isEmpty {
                         scope.setTag(value: errorType, key: "native_error_type")
@@ -205,6 +208,9 @@ public struct ErrorLogger {
     }
 
     static func shouldReport(_ error: Error) -> Bool {
+        if isTransferStorageFull(error) {
+            return false
+        }
         // A user cancellation is expected; failed recovery is a transport bug
         // and must remain visible with its native recovery details.
         if isMTPTransferCancellation(error) {

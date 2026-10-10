@@ -37,6 +37,9 @@ require_pattern '@_cdecl\("macMTP_activity_callback"\)' "$BRIDGE_SOURCE"
 require_pattern 'func Initialize\(inputJSON \*C.char\)' "$KALAM_SOURCE"
 require_pattern 'func DiscoverMTPDevices' "$KALAM_SOURCE"
 require_pattern 'ErrorTransferCancelled' "$ROOT_DIR/Vendor/Kalam/native/send_to_js/enums.go"
+require_pattern 'if v == mtp\.RC_StoreFull' "$ROOT_DIR/Vendor/Kalam/native/send_to_js/helpers.go"
+require_pattern 'const RC_InvalidObjectHandle = 0x2009' "$ROOT_DIR/Vendor/Kalam/native/vendor/github.com/ganeshrvel/go-mtpfs/mtp/const.go"
+require_pattern 'const RC_StoreFull = 0x200C' "$ROOT_DIR/Vendor/Kalam/native/vendor/github.com/ganeshrvel/go-mtpfs/mtp/const.go"
 require_pattern 'libusb_interrupt_transfer' "$USB_SOURCE"
 
 (
