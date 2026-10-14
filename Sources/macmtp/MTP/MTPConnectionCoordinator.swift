@@ -91,6 +91,11 @@ public enum MTPConnectionState: Equatable {
     case connected
     case failed(message: String, technicalDetails: String)
 
+    var isConnecting: Bool {
+        if case .connecting = self { return true }
+        return false
+    }
+
     var title: String {
         switch self {
         case .usbAbsent: return "USB device not connected"
@@ -129,7 +134,7 @@ final class MTPConnectionCoordinator: ObservableObject {
     private var claimantRecoveryUsed = false
     private var failedSelectors: Set<MTPDeviceSelector> = []
 
-    private init() {}
+    init() {}
 
     func updateAvailableDevices(
         _ devices: Set<USBDeviceIdentity>,
@@ -148,7 +153,7 @@ final class MTPConnectionCoordinator: ObservableObject {
             pendingEmptyAvailabilityTask?.cancel()
             pendingEmptyAvailabilityTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: 400_000_000)
-                guard let self, self.usbDevicePresent else { return }
+                guard !Task.isCancelled, let self, self.usbDevicePresent else { return }
                 self.usbDevicePresent = false
                 self.availableDevices.removeAll()
                 self.availableMTPDevices.removeAll()
@@ -237,11 +242,14 @@ final class MTPConnectionCoordinator: ObservableObject {
                 self.failedSelectors.insert(selector)
                 if let previousSelector,
                    previousSelector != selector,
-                   selectorIsPresent(previousSelector, in: self.lastUSBInventory),
-                   await MTPDeviceManager.shared.switchDevice(to: previousSelector) {
-                    self.refreshSelectorDisplayNames()
-                    self.state = .connected
-                    return
+                   selectorIsPresent(previousSelector, in: self.lastUSBInventory) {
+                    let restored = await MTPDeviceManager.shared.switchDevice(to: previousSelector)
+                    guard self.generation == token, !Task.isCancelled else { return }
+                    if restored {
+                        self.refreshSelectorDisplayNames()
+                        self.state = .connected
+                        return
+                    }
                 }
                 let message = MTPDeviceManager.shared.errorMessage ?? "The MTP session could not be opened."
                 self.state = .failed(message: message, technicalDetails: message)
@@ -250,6 +258,7 @@ final class MTPConnectionCoordinator: ObservableObject {
     }
 
     func retry() {
+        guard discoveryTask == nil, !MTPDeviceManager.shared.isLoading else { return }
         guard !MTPDeviceManager.shared.isConnectionRecoveryInFlight else { return }
         guard !FileTransferService.shared.isTransferInFlight else {
             state = .failed(
@@ -267,8 +276,6 @@ final class MTPConnectionCoordinator: ObservableObject {
         }
 
         generation &+= 1
-        discoveryTask?.cancel()
-        discoveryTask = nil
         claimantRecoveryUsed = false
         guard usbDevicePresent else {
             state = .usbAbsent
@@ -388,6 +395,7 @@ final class MTPConnectionCoordinator: ObservableObject {
 
                     let candidates = orderedMTPConnectionCandidates(orderedSelectors, failed: self.failedSelectors)
                     let connected = await self.connectFirstAvailable(candidates, token: token)
+                    guard self.generation == token, !Task.isCancelled else { return }
 
                     if connected {
                         guard self.generation == token else { return }
@@ -435,10 +443,13 @@ final class MTPConnectionCoordinator: ObservableObject {
                     let retained = self.sortSelectors(self.failedSelectors.filter {
                         selectorIsPresent($0, in: self.lastUSBInventory)
                     })
-                    if !retained.isEmpty,
-                       await self.connectFirstAvailable(retained, token: token) {
-                        self.state = .connected
-                        return
+                    if !retained.isEmpty {
+                        let connected = await self.connectFirstAvailable(retained, token: token)
+                        guard self.generation == token, !Task.isCancelled else { return }
+                        if connected {
+                            self.state = .connected
+                            return
+                        }
                     }
                     guard attempt == 1, isTransientProbeFailure(error) else {
                         self.state = .failed(
@@ -457,7 +468,9 @@ final class MTPConnectionCoordinator: ObservableObject {
     private func connectFirstAvailable(_ candidates: [MTPDeviceSelector], token: UInt64) async -> Bool {
         for candidate in candidates {
             guard generation == token, !Task.isCancelled else { return false }
-            if await MTPDeviceManager.shared.switchDevice(to: candidate) {
+            let connected = await MTPDeviceManager.shared.switchDevice(to: candidate)
+            guard generation == token, !Task.isCancelled else { return false }
+            if connected {
                 failedSelectors.remove(candidate)
                 refreshSelectorDisplayNames()
                 return true

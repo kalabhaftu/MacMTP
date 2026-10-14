@@ -708,6 +708,10 @@ final class FIFOOperationGate: @unchecked Sendable {
     private var occupied = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
 
+    var waitingCount: Int {
+        lock.withLock { waiters.count }
+    }
+
     func enter() async {
         await withCheckedContinuation { continuation in
             lock.lock()
@@ -791,11 +795,17 @@ public actor KalamBridge {
 
     private let jsonDecoder: JSONDecoder
     private let mtpQueue: DispatchQueue
-    private let operationGate = FIFOOperationGate()
+    private let operationGate: FIFOOperationGate
+    private let doneCallbackTimeoutNanoseconds: UInt64
 
-    private init() {
+    init(
+        operationGate: FIFOOperationGate = FIFOOperationGate(),
+        doneCallbackTimeoutNanoseconds: UInt64 = 60_000_000_000
+    ) {
         self.jsonDecoder = JSONDecoder()
         self.mtpQueue = DispatchQueue(label: "com.macmtp.kalam", qos: .userInitiated)
+        self.operationGate = operationGate
+        self.doneCallbackTimeoutNanoseconds = doneCallbackTimeoutNanoseconds
     }
 
     private func beginOperation() async {
@@ -830,6 +840,7 @@ public actor KalamBridge {
 
     private func waitForDone(operationName: String, startOperation: @escaping @Sendable (String) -> Void) async throws -> String {
         let operationID = UUID().uuidString
+        let timeout = doneCallbackTimeoutNanoseconds
         return try await withThrowingTaskGroup(of: String.self) { group in
             group.addTask {
                 try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
@@ -837,15 +848,15 @@ public actor KalamBridge {
                     startOperation(operationID)
                 }
             }
-            if operationName == "list_directory" {
+            if operationName == "list_directory" || operationName == "dispose" {
                 group.addTask {
                     while true {
-                        try await Task.sleep(nanoseconds: 1_000_000_000)
+                        try await Task.sleep(nanoseconds: min(1_000_000_000, timeout))
                         let error = KalamError.timedOut(operationName)
                         if KalamRegistry.shared.timeoutDoneIfExpired(
                             operationID: operationID,
-                            timeout: Self.callbackTimeoutNanoseconds,
-                            includeQueueWait: true,
+                            timeout: timeout,
+                            includeQueueWait: operationName != "dispose",
                             error: error
                         ) {
                             throw error
@@ -855,7 +866,7 @@ public actor KalamBridge {
             } else {
                 group.addTask {
                     while true {
-                        try await Task.sleep(nanoseconds: Self.callbackTimeoutNanoseconds)
+                        try await Task.sleep(nanoseconds: timeout)
                         let error = KalamError.timedOut(operationName)
                         if KalamRegistry.shared.timeoutDone(operationID: operationID, error: error) {
                             throw error
@@ -879,8 +890,10 @@ public actor KalamBridge {
         operationName: String,
         _ operation: @escaping @Sendable () -> Void
     ) async throws -> T {
+        try Task.checkCancellation()
         await beginOperation()
         defer { endOperation() }
+        try Task.checkCancellation()
 
         let jsonString = try await waitForDone(operationName: operationName) { operationID in
             self.mtpQueue.async {
@@ -892,6 +905,7 @@ public actor KalamBridge {
                 operation()
             }
         }
+        try Task.checkCancellation()
         return try decodeResponse(jsonString, operation: operationName)
     }
 
@@ -900,6 +914,7 @@ public actor KalamBridge {
         _ input: I,
         _ operation: @escaping @Sendable (UnsafeMutablePointer<CChar>?) -> Void
     ) async throws -> T {
+        try Task.checkCancellation()
         let inputData = try JSONEncoder().encode(input)
         guard let inputJson = String(data: inputData, encoding: .utf8) else {
             throw KalamError.serializationError
@@ -907,6 +922,7 @@ public actor KalamBridge {
 
         await beginOperation()
         defer { endOperation() }
+        try Task.checkCancellation()
 
         let jsonString = try await waitForDone(operationName: operationName) { operationID in
             self.mtpQueue.async {
@@ -921,6 +937,7 @@ public actor KalamBridge {
                 }
             }
         }
+        try Task.checkCancellation()
         return try decodeResponse(jsonString, operation: operationName)
     }
 
@@ -1288,10 +1305,16 @@ public actor KalamBridge {
         )
     }
 
-    public func dispose() async throws {
-        let _: GoSimpleResult = try await executeMTP(operationName: "dispose") {
-            Dispose()
+    internal func executeMTPCleanup(_ operation: @escaping @Sendable () -> Void) async throws {
+        // Cleanup must outlive cancellation of the task that opened the handle.
+        let cleanup = Task {
+            let _: GoSimpleResult = try await self.executeMTP(operationName: "dispose", operation)
         }
+        try await cleanup.value
+    }
+
+    public func dispose() async throws {
+        try await executeMTPCleanup { Dispose() }
     }
 
 }

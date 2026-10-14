@@ -74,7 +74,7 @@ public final class MTPDeviceManager: ObservableObject {
         refreshAfterConnect: Bool = true,
         shouldCancel: () -> Bool = { false }
     ) async -> Bool {
-        guard !isLoading, !isConnected else { return false }
+        guard !Task.isCancelled, !shouldCancel(), !isLoading, !isConnected else { return false }
         connectionGeneration &+= 1
         let generation = connectionGeneration
         isLoading = true
@@ -88,6 +88,7 @@ public final class MTPDeviceManager: ObservableObject {
 
         do {
             let goDevInfo = try await bridge.initialize(selector: selector)
+            try Task.checkCancellation()
             guard generation == connectionGeneration else { return false }
             guard !shouldCancel() else {
                 try? await bridge.dispose()
@@ -95,6 +96,7 @@ public final class MTPDeviceManager: ObservableObject {
             }
             
             let goStorages = try await bridge.fetchStorages()
+            try Task.checkCancellation()
             guard generation == connectionGeneration else { return false }
             guard !shouldCancel() else {
                 try? await bridge.dispose()
@@ -140,7 +142,7 @@ public final class MTPDeviceManager: ObservableObject {
 
             // USBWatcher cancels superseded auto-connect tasks. That is normal
             // lifecycle control flow, not a connection failure to report.
-            if error is CancellationError {
+            if error is CancellationError || Task.isCancelled || shouldCancel() {
                 return false
             }
 
@@ -251,6 +253,7 @@ public final class MTPDeviceManager: ObservableObject {
 
     @discardableResult
     func switchDevice(to selector: MTPDeviceSelector) async -> Bool {
+        guard !Task.isCancelled else { return false }
         guard !isConnectionRecoveryInFlight else {
             errorMessage = "The previous MTP session is still cleaning up. Try again shortly."
             return false
@@ -263,6 +266,7 @@ public final class MTPDeviceManager: ObservableObject {
         if isConnected || isLoading {
             await disconnectDevice()
         }
+        guard !Task.isCancelled else { return false }
         return await connectDevice(selector: selector)
     }
 

@@ -2,6 +2,7 @@ package mtp
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -9,6 +10,24 @@ import (
 
 	"github.com/ganeshrvel/usb"
 )
+
+func TestWrappedTransportErrorsStillRequireAbort(t *testing.T) {
+	for _, cause := range []error{usb.ERROR_OTHER, usb.ERROR_TIMEOUT, SyncError("transaction mismatch")} {
+		wrapped := fmt.Errorf("MTP operation=SendObject phase=response-read: %w", cause)
+		if !isFatalTransactionError(wrapped) {
+			t.Errorf("wrapped transport failure %v did not require abort", wrapped)
+		}
+		if !errors.Is(wrapped, cause) {
+			t.Errorf("wrapped transport failure lost its cause: %v", wrapped)
+		}
+	}
+
+	for _, cause := range []error{RCError(RC_StoreFull), ErrTransferCancelled} {
+		if isFatalTransactionError(fmt.Errorf("MTP operation=SendObject: %w", cause)) {
+			t.Errorf("expected condition %v incorrectly requires abort", cause)
+		}
+	}
+}
 
 func TestCancelRequestDataUsesCurrentTransaction(t *testing.T) {
 	want := []byte{0x01, 0x40, 0x78, 0x56, 0x34, 0x12}
