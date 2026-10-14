@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### MTP Connection Recovery
+- Keep an active connection attempt running when Retry is pressed again, and prevent cancelled attempts from changing the next attempt's state.
+- Always dispose the native session after cancelled initialization and skip cancelled commands waiting for the native operation queue.
+- Preserve the native operation phase and payload byte counts in USB failure reports, while closing broken transports even when their errors are wrapped.
+
 ## 1.7.6 - 2026-10-10
 
 ### Transfer Failures and App Responsiveness

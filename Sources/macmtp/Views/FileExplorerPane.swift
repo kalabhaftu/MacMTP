@@ -903,6 +903,7 @@ struct FileExplorerPane: View {
                 Button(action: { onConnect?() }) {
                     Label("Retry Connection", systemImage: "arrow.clockwise")
                 }
+                .disabled(connectionCoordinator.state.isConnecting)
                 .buttonStyle(.bordered)
                 .controlSize(.regular)
             }

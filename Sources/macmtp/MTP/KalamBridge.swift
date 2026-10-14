@@ -879,8 +879,10 @@ public actor KalamBridge {
         operationName: String,
         _ operation: @escaping @Sendable () -> Void
     ) async throws -> T {
+        try Task.checkCancellation()
         await beginOperation()
         defer { endOperation() }
+        try Task.checkCancellation()
 
         let jsonString = try await waitForDone(operationName: operationName) { operationID in
             self.mtpQueue.async {
@@ -892,6 +894,7 @@ public actor KalamBridge {
                 operation()
             }
         }
+        try Task.checkCancellation()
         return try decodeResponse(jsonString, operation: operationName)
     }
 
@@ -900,6 +903,7 @@ public actor KalamBridge {
         _ input: I,
         _ operation: @escaping @Sendable (UnsafeMutablePointer<CChar>?) -> Void
     ) async throws -> T {
+        try Task.checkCancellation()
         let inputData = try JSONEncoder().encode(input)
         guard let inputJson = String(data: inputData, encoding: .utf8) else {
             throw KalamError.serializationError
@@ -907,6 +911,7 @@ public actor KalamBridge {
 
         await beginOperation()
         defer { endOperation() }
+        try Task.checkCancellation()
 
         let jsonString = try await waitForDone(operationName: operationName) { operationID in
             self.mtpQueue.async {
@@ -921,6 +926,7 @@ public actor KalamBridge {
                 }
             }
         }
+        try Task.checkCancellation()
         return try decodeResponse(jsonString, operation: operationName)
     }
 
@@ -1288,10 +1294,16 @@ public actor KalamBridge {
         )
     }
 
-    public func dispose() async throws {
-        let _: GoSimpleResult = try await executeMTP(operationName: "dispose") {
-            Dispose()
+    internal func executeMTPCleanup(_ operation: @escaping @Sendable () -> Void) async throws {
+        // Cleanup must outlive cancellation of the task that opened the handle.
+        let cleanup = Task {
+            let _: GoSimpleResult = try await self.executeMTP(operationName: "dispose", operation)
         }
+        try await cleanup.value
+    }
+
+    public func dispose() async throws {
+        try await executeMTPCleanup { Dispose() }
     }
 
 }

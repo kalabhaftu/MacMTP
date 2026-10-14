@@ -627,6 +627,12 @@ func (s SyncError) Error() string {
 	return string(s)
 }
 
+func isFatalTransactionError(err error) bool {
+	var usbErr usb.Error
+	var syncErr SyncError
+	return errors.As(err, &usbErr) || errors.As(err, &syncErr)
+}
+
 // Runs a single MTP transaction. dest and src cannot be specified at
 // the same time.  The request should fill out Code and Param as
 // necessary. The response is provided here, but usually only the
@@ -644,9 +650,7 @@ func (d *Device) RunTransaction(req *Container, rep *Container,
 			OC_names[int(req.Code)])
 	}
 	if err := d.runTransaction(req, rep, dest, src, writeSize, progressCb); err != nil {
-		_, ok2 := err.(SyncError)
-		_, ok1 := err.(usb.Error)
-		if ok1 || ok2 {
+		if isFatalTransactionError(err) {
 			operation := getName(OC_names, int(req.Code))
 			log.Printf("fatal error operation=%s code=0x%x transaction=0x%x: %v; closing connection.", operation, req.Code, req.TransactionID, err)
 			// Abort without a physical USB bus reset; a reset would create false
@@ -678,7 +682,7 @@ func (d *Device) runTransaction(req *Container, rep *Container,
 			log.Printf("MTP sendreq failed: %v\n", err)
 		}
 		log.Printf("MTP operation=%s phase=command-send: %v", getName(OC_names, int(req.Code)), err)
-		return err
+		return fmt.Errorf("MTP operation=%s phase=command-send: %w", getName(OC_names, int(req.Code)), err)
 	}
 
 	if src != nil {
@@ -689,11 +693,11 @@ func (d *Device) runTransaction(req *Container, rep *Container,
 			TransactionID: req.TransactionID,
 		}
 
-		_, err := d.bulkWrite(&hdr, src, writeSize, req, progressCb)
+		sent, err := d.bulkWrite(&hdr, src, writeSize, req, progressCb)
 		if err != nil {
 			err = d.recoverTransferError(req.TransactionID, err)
 			log.Printf("MTP operation=%s phase=data-send: %v", getName(OC_names, int(req.Code)), err)
-			return err
+			return fmt.Errorf("MTP operation=%s phase=data-send sent=%d total=%d: %w", getName(OC_names, int(req.Code)), sent, writeSize, err)
 		}
 	}
 	fetchPacketSize := d.fetchMaxPacketSize()
@@ -702,7 +706,7 @@ func (d *Device) runTransaction(req *Container, rep *Container,
 	rest, n, err := d.fetchPacket(data[:], h)
 	if err != nil {
 		log.Printf("MTP operation=%s phase=response-read: %v", getName(OC_names, int(req.Code)), err)
-		return err
+		return fmt.Errorf("MTP operation=%s phase=response-read payload=%d: %w", getName(OC_names, int(req.Code)), writeSize, err)
 	}
 	var unexpectedData bool
 	if h.Type == USB_CONTAINER_DATA {
@@ -988,8 +992,7 @@ func (d *Device) Configure() error {
 	err := d.OpenSession()
 	if err == RCError(RC_SessionAlreadyOpened) {
 		// This works without a transaction ID on most Android devices. If the
-		// stale response is already fatal, RunTransaction closes the handle;
-		// the reset path below will reopen it before issuing the class request.
+		// stale response is already fatal, RunTransaction closes the handle.
 		_ = d.CloseSession()
 		if d.h != nil {
 			err = d.OpenSession()

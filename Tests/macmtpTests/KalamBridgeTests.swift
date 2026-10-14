@@ -151,35 +151,126 @@ func transferCompletionWaitsForNativeReturnAndTerminalResult() {
     #expect(nativeTransferCanFinish(nativeReturned: true, hasResult: true))
 }
 
-@Test
-func lateDoneCallbackAfterContinuationCleanupIsIgnored() async {
-    do {
-        _ = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
-            KalamRegistry.shared.setDoneContinuation(continuation, operationID: "test")
-            KalamRegistry.shared.rejectDone(with: KalamError.timedOut("test"))
+@Suite(.serialized)
+struct KalamSharedRegistryTests {
+    @Test
+    func lateDoneCallbackAfterContinuationCleanupIsIgnored() async {
+        do {
+            _ = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
+                KalamRegistry.shared.setDoneContinuation(continuation, operationID: "test")
+                KalamRegistry.shared.rejectDone(with: KalamError.timedOut("test"))
+            }
+            Issue.record("Expected the cleaned continuation to fail")
+        } catch let error as KalamError {
+            #expect(error.localizedDescription.contains("timed out"))
+        } catch {
+            Issue.record("Unexpected continuation error: \(error)")
         }
-        Issue.record("Expected the cleaned continuation to fail")
-    } catch let error as KalamError {
-        #expect(error.localizedDescription.contains("timed out"))
-    } catch {
-        Issue.record("Unexpected continuation error: \(error)")
+
+        KalamRegistry.shared.resolveDone(with: #"{"data":true}"#)
     }
 
-    KalamRegistry.shared.resolveDone(with: #"{"data":true}"#)
+    @Test
+    func callbackForAnotherOperationCannotResumeTheActiveContinuation() async {
+        do {
+            _ = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
+                KalamRegistry.shared.setDoneContinuation(continuation, operationID: "current")
+                KalamRegistry.shared.resolveDone(with: #"{"operationId":"late","data":true}"#)
+                KalamRegistry.shared.rejectDone(with: KalamError.timedOut("current"))
+            }
+            Issue.record("Expected the active operation to be rejected")
+        } catch let error as KalamError {
+            #expect(error.localizedDescription.contains("timed out"))
+        } catch {
+            Issue.record("Unexpected continuation error: \(error)")
+        }
+    }
+
+    @Test
+    func cancelledInitializationStillRunsNativeCleanup() async throws {
+        let log = NativeCommandTestLog()
+        let task = Task {
+            do {
+                let _: GoSimpleResult = try await KalamBridge.shared.executeMTPWithInput(
+                    operationName: "initialize", "test"
+                ) { _ in
+                    log.record("initialize")
+                }
+                Issue.record("Expected initialization to be cancelled")
+            } catch {
+                try await KalamBridge.shared.executeMTPCleanup {
+                    log.record("dispose")
+                    KalamRegistry.shared.resolveDone(with: #"{"data":true}"#)
+                }
+                throw error
+            }
+        }
+        defer {
+            task.cancel()
+            KalamRegistry.shared.rejectDone(with: CancellationError())
+        }
+        try await waitForNativeCommand("initialize", in: log)
+        task.cancel()
+        do {
+            try await task.value
+            Issue.record("Expected cancellation after cleanup")
+        } catch is CancellationError {
+            #expect(log.contains("dispose"))
+        }
+    }
+
+    @Test
+    func cancelledCommandWaitingForTheGateDoesNotStart() async throws {
+        let log = NativeCommandTestLog()
+        let first = Task {
+            let _: GoSimpleResult = try await KalamBridge.shared.executeMTP(operationName: "test") {
+                log.record("first")
+            }
+        }
+        defer {
+            first.cancel()
+            KalamRegistry.shared.rejectDone(with: CancellationError())
+        }
+        try await waitForNativeCommand("first", in: log)
+        let queued = Task {
+            log.record("queued")
+            let _: GoSimpleResult = try await KalamBridge.shared.executeMTPWithInput(
+                operationName: "initialize", "test"
+            ) { _ in
+                log.record("unexpected initialization")
+                KalamRegistry.shared.resolveDone(with: #"{"data":true}"#)
+            }
+        }
+        try await waitForNativeCommand("queued", in: log)
+        queued.cancel()
+        KalamRegistry.shared.resolveDone(with: #"{"data":true}"#)
+        try await first.value
+        do {
+            try await queued.value
+            Issue.record("Expected the queued command to be cancelled")
+        } catch is CancellationError {
+            #expect(!log.contains("unexpected initialization"))
+        }
+    }
 }
 
-@Test
-func callbackForAnotherOperationCannotResumeTheActiveContinuation() async {
-    do {
-        _ = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
-            KalamRegistry.shared.setDoneContinuation(continuation, operationID: "current")
-            KalamRegistry.shared.resolveDone(with: #"{"operationId":"late","data":true}"#)
-            KalamRegistry.shared.rejectDone(with: KalamError.timedOut("current"))
-        }
-        Issue.record("Expected the active operation to be rejected")
-    } catch let error as KalamError {
-        #expect(error.localizedDescription.contains("timed out"))
-    } catch {
-        Issue.record("Unexpected continuation error: \(error)")
+private final class NativeCommandTestLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var events: Set<String> = []
+
+    func record(_ event: String) {
+        lock.withLock { _ = events.insert(event) }
     }
+
+    func contains(_ event: String) -> Bool {
+        lock.withLock { events.contains(event) }
+    }
+}
+
+private func waitForNativeCommand(_ event: String, in log: NativeCommandTestLog) async throws {
+    for _ in 0..<2_000 {
+        if log.contains(event) { return }
+        try await Task.sleep(nanoseconds: 1_000_000)
+    }
+    throw KalamError.timedOut("test command did not start")
 }
