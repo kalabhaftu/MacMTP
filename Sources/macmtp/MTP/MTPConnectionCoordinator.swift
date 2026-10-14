@@ -134,7 +134,7 @@ final class MTPConnectionCoordinator: ObservableObject {
     private var claimantRecoveryUsed = false
     private var failedSelectors: Set<MTPDeviceSelector> = []
 
-    private init() {}
+    init() {}
 
     func updateAvailableDevices(
         _ devices: Set<USBDeviceIdentity>,
@@ -153,7 +153,7 @@ final class MTPConnectionCoordinator: ObservableObject {
             pendingEmptyAvailabilityTask?.cancel()
             pendingEmptyAvailabilityTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: 400_000_000)
-                guard let self, self.usbDevicePresent else { return }
+                guard !Task.isCancelled, let self, self.usbDevicePresent else { return }
                 self.usbDevicePresent = false
                 self.availableDevices.removeAll()
                 self.availableMTPDevices.removeAll()
@@ -242,11 +242,14 @@ final class MTPConnectionCoordinator: ObservableObject {
                 self.failedSelectors.insert(selector)
                 if let previousSelector,
                    previousSelector != selector,
-                   selectorIsPresent(previousSelector, in: self.lastUSBInventory),
-                   await MTPDeviceManager.shared.switchDevice(to: previousSelector) {
-                    self.refreshSelectorDisplayNames()
-                    self.state = .connected
-                    return
+                   selectorIsPresent(previousSelector, in: self.lastUSBInventory) {
+                    let restored = await MTPDeviceManager.shared.switchDevice(to: previousSelector)
+                    guard self.generation == token, !Task.isCancelled else { return }
+                    if restored {
+                        self.refreshSelectorDisplayNames()
+                        self.state = .connected
+                        return
+                    }
                 }
                 let message = MTPDeviceManager.shared.errorMessage ?? "The MTP session could not be opened."
                 self.state = .failed(message: message, technicalDetails: message)

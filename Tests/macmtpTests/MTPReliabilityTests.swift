@@ -660,6 +660,20 @@ func usbLifecycleInvalidatesRapidReplugAndDetachTokens() {
 }
 
 @Test @MainActor
+func rapidUSBReattachmentCancelsThePendingDisconnect() async throws {
+    let coordinator = MTPConnectionCoordinator()
+    let phone = USBDeviceIdentity(vendorID: 0x2717, productID: 0xff48, locationID: 1, serialNumber: "test")
+
+    coordinator.updateAvailableDevices([phone], startAutomatically: false)
+    coordinator.updateAvailableDevices([], startAutomatically: false)
+    await Task.yield()
+    coordinator.updateAvailableDevices([phone], startAutomatically: false)
+    try await Task.sleep(nanoseconds: 20_000_000)
+
+    #expect(coordinator.state == .deviceFound)
+}
+
+@Test @MainActor
 func staleConnectionCompletionCannotLeaveTheManagerLoading() async {
     let bridge = RecordingMTPBridge(initializeDelay: 100_000_000)
     let manager = MTPDeviceManager(bridge: bridge)

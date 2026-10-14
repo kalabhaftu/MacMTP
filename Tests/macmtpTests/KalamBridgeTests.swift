@@ -189,16 +189,23 @@ struct KalamSharedRegistryTests {
     @Test
     func cancelledInitializationStillRunsNativeCleanup() async throws {
         let log = NativeCommandTestLog()
+        let nativeMayReturn = DispatchSemaphore(value: 0)
+        let bridge = KalamBridge(doneCallbackTimeoutNanoseconds: 200_000_000)
         let task = Task {
             do {
-                let _: GoSimpleResult = try await KalamBridge.shared.executeMTPWithInput(
+                let _: GoSimpleResult = try await bridge.executeMTPWithInput(
                     operationName: "initialize", "test"
                 ) { _ in
                     log.record("initialize")
+                    if nativeMayReturn.wait(timeout: .now() + 5) == .timedOut {
+                        log.record("native wait expired")
+                    }
+                    log.record("native returned")
                 }
                 Issue.record("Expected initialization to be cancelled")
             } catch {
-                try await KalamBridge.shared.executeMTPCleanup {
+                log.record("cleanup requested")
+                try await bridge.executeMTPCleanup {
                     log.record("dispose")
                     KalamRegistry.shared.resolveDone(with: #"{"data":true}"#)
                 }
@@ -206,24 +213,34 @@ struct KalamSharedRegistryTests {
             }
         }
         defer {
+            nativeMayReturn.signal()
             task.cancel()
             KalamRegistry.shared.rejectDone(with: CancellationError())
         }
         try await waitForNativeCommand("initialize", in: log)
         task.cancel()
+        try await waitForNativeCommand("cleanup requested", in: log)
+        try await Task.sleep(nanoseconds: 500_000_000)
+        #expect(!log.contains("dispose"))
+        #expect(!log.contains("native returned"))
+        nativeMayReturn.signal()
         do {
             try await task.value
             Issue.record("Expected cancellation after cleanup")
         } catch is CancellationError {
             #expect(log.contains("dispose"))
+            #expect(log.contains("native returned"))
+            #expect(!log.contains("native wait expired"))
         }
     }
 
     @Test
     func cancelledCommandWaitingForTheGateDoesNotStart() async throws {
         let log = NativeCommandTestLog()
+        let gate = FIFOOperationGate()
+        let bridge = KalamBridge(operationGate: gate)
         let first = Task {
-            let _: GoSimpleResult = try await KalamBridge.shared.executeMTP(operationName: "test") {
+            let _: GoSimpleResult = try await bridge.executeMTP(operationName: "test") {
                 log.record("first")
             }
         }
@@ -233,15 +250,15 @@ struct KalamSharedRegistryTests {
         }
         try await waitForNativeCommand("first", in: log)
         let queued = Task {
-            log.record("queued")
-            let _: GoSimpleResult = try await KalamBridge.shared.executeMTPWithInput(
+            let _: GoSimpleResult = try await bridge.executeMTPWithInput(
                 operationName: "initialize", "test"
             ) { _ in
                 log.record("unexpected initialization")
                 KalamRegistry.shared.resolveDone(with: #"{"data":true}"#)
             }
         }
-        try await waitForNativeCommand("queued", in: log)
+        defer { queued.cancel() }
+        try await waitForQueuedNativeCommand(in: gate)
         queued.cancel()
         KalamRegistry.shared.resolveDone(with: #"{"data":true}"#)
         try await first.value
@@ -273,4 +290,12 @@ private func waitForNativeCommand(_ event: String, in log: NativeCommandTestLog)
         try await Task.sleep(nanoseconds: 1_000_000)
     }
     throw KalamError.timedOut("test command did not start")
+}
+
+private func waitForQueuedNativeCommand(in gate: FIFOOperationGate) async throws {
+    for _ in 0..<2_000 {
+        if gate.waitingCount > 0 { return }
+        try await Task.sleep(nanoseconds: 1_000_000)
+    }
+    throw KalamError.timedOut("test command did not enter the queue")
 }
