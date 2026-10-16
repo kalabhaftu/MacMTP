@@ -29,7 +29,7 @@ let package = Package(
         .macOS(.v14)
     ],
     dependencies: [
-        .package(url: "https://github.com/getsentry/sentry-cocoa.git", from: "9.19.0")
+        .package(url: "https://github.com/getsentry/sentry-cocoa.git", from: "9.30.1")
     ],
     targets: [
         // C target that exposes the Go Kalam static library headers

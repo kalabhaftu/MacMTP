@@ -4,6 +4,12 @@ public struct FinderFavoritesResolver {
     public static let sflPath = ("~/Library/Application Support/com.apple.sharedfilelist/com.apple.LSSharedFileList.FavoriteItems.sfl3" as NSString).expandingTildeInPath
 
     public static func resolveFavorites(customSflPath: String? = nil) -> [SidebarItem] {
+        HangDiagnostics.shared.measureMainThread(.favorites) {
+            resolveFavoritesFromFileSystem(customSflPath: customSflPath)
+        }
+    }
+
+    private static func resolveFavoritesFromFileSystem(customSflPath: String?) -> [SidebarItem] {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let homeItem = SidebarItem(
             id: "home",

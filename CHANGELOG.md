@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.8 - 2026-10-16
+
+### Hang Diagnostics
+- Add path-free sidebar operation timings and last known window/connection state to live hang reports, including favorites resolution during sidebar initialization.
+- Enable Apple MetricKit diagnostics alongside the existing hang tracker, using Sentry 9.30.1 or later for historical diagnostic version attribution.
+
 ## 1.7.7 - 2026-10-14
 
 ### MTP Connection Recovery

@@ -2,6 +2,64 @@ import Testing
 import Sentry
 @testable import macmtp
 
+private func hangEvent(mechanism: String) -> Event {
+    let event = Event(level: .error)
+    let exception = Exception(value: "App hanging", type: "App Hanging")
+    exception.mechanism = Mechanism(type: mechanism)
+    event.exceptions = [exception]
+    return event
+}
+
+@Test
+func liveHangEnrichmentPreservesEventIdentityGroupingAndExistingContext() {
+    let diagnostics = HangDiagnostics()
+    diagnostics.setConnected(true)
+    let event = hangEvent(mechanism: "AppHang")
+    event.fingerprint = ["existing", "group"]
+    event.tags = ["existing": "tag"]
+    event.context = ["existing": ["keep": true], "macmtp_hang": ["keep": 42]]
+    let exception = event.exceptions?.first
+
+    let prepared = ErrorLogger.prepareEventForSending(event, diagnostics: diagnostics)
+    #expect(prepared === event)
+    #expect(prepared.exceptions?.first === exception)
+    #expect(prepared.fingerprint == ["existing", "group"])
+    #expect(prepared.tags?["existing"] == "tag")
+    #expect(prepared.tags?["hang_diagnostic_source"] == "sentry_watchdog")
+    #expect(prepared.context?["existing"]?["keep"] as? Bool == true)
+    #expect(prepared.context?["macmtp_hang"]?["keep"] as? Int == 42)
+    #expect(prepared.context?["macmtp_hang"]?["last_known_connected"] as? Bool == true)
+}
+
+@Test
+func historicalMetricKitHangsNeverReceiveCurrentRuntimeState() {
+    let diagnostics = HangDiagnostics()
+    diagnostics.setConnected(true)
+    let event = hangEvent(mechanism: "mx_hang_diagnostic")
+    event.releaseName = "com.macmtp.app@1.7.5+21"
+    event.context = ["os": ["version": "recorded-version"]]
+    event.fingerprint = ["recorded-group"]
+
+    let prepared = ErrorLogger.prepareEventForSending(event, diagnostics: diagnostics)
+    #expect(prepared.tags?["hang_diagnostic_source"] == "apple_metrickit")
+    #expect(prepared.context?["macmtp_hang"] == nil)
+    #expect(prepared.context?["os"]?["version"] as? String == "recorded-version")
+    #expect(prepared.releaseName == "com.macmtp.app@1.7.5+21")
+    #expect(prepared.fingerprint == ["recorded-group"])
+}
+
+@Test
+func unrelatedEventsAreNotChangedByHangEnrichment() {
+    let event = Event(level: .error)
+    #expect(ErrorLogger.prepareEventForSending(event) === event)
+    #expect(event.context == nil)
+    #expect(event.tags == nil)
+    let nativeError = hangEvent(mechanism: "generic")
+    #expect(ErrorLogger.prepareEventForSending(nativeError) === nativeError)
+    #expect(nativeError.context == nil)
+    #expect(nativeError.tags == nil)
+}
+
 @Test
 func sentryDSNValidationRequiresSecureCompleteEndpoint() {
     #expect(ErrorLogger.isValidDSN("https://public-key@example.ingest.sentry.io/12345"))
