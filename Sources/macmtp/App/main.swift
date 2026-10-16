@@ -2,7 +2,7 @@ import Cocoa
 import SwiftUI
 
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var window: NSWindow!
     var preferencesWindowController: NSWindowController?
     var aboutWindowController: NSWindowController?
@@ -50,8 +50,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // The resizable window only needs SwiftUI's minimum size constraint.
         hostingView.sizingOptions = [.minSize]
         window.contentView = hostingView
+        window.delegate = self
         window.makeKeyAndOrderFront(nil)
         window.isReleasedWhenClosed = false
+        updateHangWindowState()
         
         setupMainMenu()
         
@@ -77,6 +79,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     func applicationWillTerminate(_ notification: Notification) {
         USBWatcher.shared.stopWatching()
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        updateHangWindowState()
+    }
+
+    func applicationDidResignActive(_ notification: Notification) {
+        updateHangWindowState()
+    }
+
+    func windowDidChangeOcclusionState(_ notification: Notification) {
+        updateHangWindowState()
+    }
+
+    private func updateHangWindowState() {
+        guard let window else { return }
+        HangDiagnostics.shared.setWindowState(
+            appActive: NSApp.isActive,
+            visible: window.isVisible,
+            unoccluded: window.occlusionState.contains(.visible)
+        )
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

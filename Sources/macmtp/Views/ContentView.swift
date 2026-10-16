@@ -322,6 +322,7 @@ struct ContentView: View {
         .onReceive(MTPDeviceManager.shared.$isConnected) { connected in
             guard !screenshotMode else { return }
             isMTPConnected = connected
+            HangDiagnostics.shared.setConnected(connected)
             connectedDeviceName = MTPDeviceManager.shared.deviceInfo?.displayName ?? "No Device Connected"
             if !connected {
                 selectedMTPItems.removeAll()

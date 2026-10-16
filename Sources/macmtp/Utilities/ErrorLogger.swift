@@ -300,6 +300,29 @@ public struct ErrorLogger {
         return try operation()
     }
 
+    static func prepareEventForSending(_ event: Event, diagnostics: HangDiagnostics = .shared) -> Event {
+        let mechanisms = event.exceptions?.compactMap { $0.mechanism?.type } ?? []
+        let source: String
+        if mechanisms.contains("AppHang") {
+            var contexts = event.context ?? [:]
+            var hangContext = contexts["macmtp_hang"] ?? [:]
+            hangContext.merge(diagnostics.context()) { _, current in current }
+            hangContext["source_revision"] = AppVersion.sourceRevision
+            contexts["macmtp_hang"] = hangContext
+            event.context = contexts
+            source = "sentry_watchdog"
+        } else if mechanisms.contains("mx_hang_diagnostic") {
+            // MetricKit diagnostics can describe a previous launch. Never add live UI state here.
+            source = "apple_metrickit"
+        } else {
+            return event
+        }
+        var tags = event.tags ?? [:]
+        tags["hang_diagnostic_source"] = source
+        event.tags = tags
+        return event
+    }
+
     private static func ensureStarted() -> Bool {
         guard reportsEnabled, isValidDSN(dsn) else { return false }
 
@@ -314,6 +337,9 @@ public struct ErrorLogger {
                 options.releaseName = AppVersion.sentryRelease
                 options.environment = "production"
                 options.appHangTimeoutInterval = 5.0
+                options.enableMetricKit = true
+                options.enableMetricKitRawPayload = false
+                options.beforeSend = { prepareEventForSending($0) }
             }
         }
         return SentrySDK.isEnabled

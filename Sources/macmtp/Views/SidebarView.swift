@@ -227,6 +227,12 @@ struct SidebarView: View {
     
     
     private func refreshVolumes() {
+        HangDiagnostics.shared.measureMainThread(.volumes) {
+            refreshVolumesFromFileSystem()
+        }
+    }
+
+    private func refreshVolumesFromFileSystem() {
         var detectedVolumes: [SidebarItem] = []
         
         let systemCapacity = getVolumeCapacity(path: "/")
