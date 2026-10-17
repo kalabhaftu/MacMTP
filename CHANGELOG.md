@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7.9 - 2026-10-18
+
+### USB Crash Recovery
+- Skip invalid USB address entries reported by macOS during enumeration instead of letting libusb abort the app.
+- Build the same pinned, patched USB library for Apple Silicon and Intel, and stop packaging if its installation fails.
+- Include libusb debug symbols in Sentry uploads so native failures identify the failing function and source line.
+
 ## 1.7.8 - 2026-10-16
 
 ### Hang Diagnostics

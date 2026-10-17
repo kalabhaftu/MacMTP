@@ -176,12 +176,12 @@ Use the universal build if you are unsure which architecture you need.
 - macOS 14.0+
 - Swift 6.0+ through Xcode or Xcode Command Line Tools
 - Go 1.21+
-- pkg-config and libusb
+- pkg-config and the Xcode C toolchain
 
 Install the local dependencies:
 
 ```bash
-brew install go pkg-config libusb
+brew install go pkg-config
 ```
 
 Clone macMTP and enter the repository:
@@ -213,12 +213,11 @@ automatically.
 
 ### Universal Builds
 
-Universal builds require both Apple Silicon Homebrew and Intel Homebrew under Rosetta, each with `pkg-config` and `libusb` installed:
+The build script downloads and builds the pinned, patched libusb for each target architecture. See `Vendor/libusb/README.md`. Universal builds use both architectures:
 
 ```bash
-brew install pkg-config libusb
+brew install pkg-config
 softwareupdate --install-rosetta --agree-to-license
-arch -x86_64 /usr/local/bin/brew install pkg-config libusb
 
 bash scripts/build.sh release --universal
 ```

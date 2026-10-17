@@ -14,7 +14,7 @@ for env_file in "$PROJECT_ROOT/.env" "$PROJECT_ROOT/.env.sentry"; do
 done
 
 APP_NAME="macMTP"
-VERSION="1.7.8"
+VERSION="1.7.9"
 RELEASE_DIR="$PROJECT_ROOT/release"
 APP_BUNDLE="$PROJECT_ROOT/$APP_NAME.app"
 APP_DSYM="$PROJECT_ROOT/$APP_NAME.app.dSYM"
@@ -137,13 +137,19 @@ package_target() {
 
     set_version
 
+    local symbols=("$APP_DSYM" "$APP_BUNDLE/Contents/MacOS/libusb.dylib")
+    local arch
+    for arch in arm64 x86_64; do
+        if [[ -d "$PROJECT_ROOT/Vendor/libusb/build/$arch/libusb.dylib.dSYM" ]]; then
+            symbols+=("$PROJECT_ROOT/Vendor/libusb/build/$arch/libusb.dylib.dSYM")
+        fi
+    done
     echo "Uploading $target debug symbols to Sentry..."
     sentry-cli debug-files upload \
         --org "$SENTRY_ORG" \
         --project "$SENTRY_PROJECT" \
-        --type dsym \
         --wait-for 60 \
-        "$APP_DSYM"
+        "${symbols[@]}"
 
     echo "Packaging $target DMG..."
     rm -f "$RELEASE_DIR/$dmg_name"

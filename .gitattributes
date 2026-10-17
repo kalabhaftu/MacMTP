@@ -1,1 +1,3 @@
-scripts/release.sh text eol=lf
+scripts/*.sh text eol=lf
+scripts/test-libusb-address-guard.py text eol=lf
+Vendor/libusb/*.patch text eol=lf

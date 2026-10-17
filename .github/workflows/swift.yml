@@ -18,10 +18,6 @@ jobs:
       group: macmtp-ci-${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: true
 
-    env:
-      MACMTP_ARM64_LIBUSB_PKGCONFIG: /opt/homebrew/opt/libusb/lib/pkgconfig
-      MACMTP_X86_64_LIBUSB_PKGCONFIG: /usr/local/opt/libusb/lib/pkgconfig
-
     steps:
     - name: Checkout MacMTP
       uses: actions/checkout@v7
@@ -34,11 +30,12 @@ jobs:
     - name: Install dependencies
       run: |
         brew untap aws/tap 2>/dev/null || true
-        brew install pkg-config libusb
+        brew install pkg-config
 
     - name: Validate scripts
       run: |
         bash -n scripts/*.sh
+        bash scripts/test-libusb-build.sh
         bash scripts/test-native-contract.sh
         git diff --check
 
@@ -49,7 +46,7 @@ jobs:
         scripts/verify-app.sh macMTP.app "$ARCH"
 
     - name: Run tests
-      run: swift test -v
+      run: MACMTP_LIBUSB_LIB_DIR="$PWD/Vendor/libusb/build/$(uname -m)/lib" swift test -v
 
     - name: Upload verified app bundle
       uses: actions/upload-artifact@v7

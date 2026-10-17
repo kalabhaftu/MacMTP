@@ -17,6 +17,7 @@ DerivedData/
 macMTP.app/
 *.app.dSYM/
 release/
+Vendor/libusb/build/
 
 # IDE
 .vscode/

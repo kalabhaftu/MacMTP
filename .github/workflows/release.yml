@@ -17,8 +17,6 @@ jobs:
       cancel-in-progress: false
 
     env:
-      MACMTP_ARM64_LIBUSB_PKGCONFIG: /opt/homebrew/opt/libusb/lib/pkgconfig
-      MACMTP_X86_64_LIBUSB_PKGCONFIG: /usr/local/opt/libusb/lib/pkgconfig
       SENTRY_ORG: ${{ vars.SENTRY_ORG }}
       SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
 
@@ -34,7 +32,7 @@ jobs:
     - name: Install dependencies
       run: |
         brew untap aws/tap 2>/dev/null || true
-        brew install pkg-config libusb create-dmg sentry-cli
+        brew install pkg-config create-dmg sentry-cli
 
     - name: Install x86_64 libusb for cross-compilation
       run: |
@@ -52,6 +50,7 @@ jobs:
           exit 1
         fi
         bash -n scripts/*.sh
+        bash scripts/test-libusb-build.sh
         bash scripts/test-native-contract.sh
 
     - name: Build and verify host release
@@ -61,7 +60,7 @@ jobs:
         scripts/verify-app.sh macMTP.app "$ARCH"
 
     - name: Run tests
-      run: swift test -v
+      run: MACMTP_LIBUSB_LIB_DIR="$PWD/Vendor/libusb/build/$(uname -m)/lib" swift test -v
 
     - name: Build and package all release targets
       run: bash scripts/release.sh "${{ github.ref_name }}" --all

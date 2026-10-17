@@ -89,37 +89,24 @@ triple_for() {
 
 libusb_pc_dir_for() {
     local arch="$1"
-    local candidates=()
-
+    local override=""
     if [[ "$arch" == "arm64" ]]; then
-        candidates+=(
-            "${MACMTP_ARM64_LIBUSB_PKGCONFIG:-}"
-            "/opt/homebrew/opt/libusb/lib/pkgconfig"
-            "/opt/homebrew/lib/pkgconfig"
-        )
+        override="${MACMTP_ARM64_LIBUSB_PKGCONFIG:-}"
     else
-        candidates+=(
-            "${MACMTP_X86_64_LIBUSB_PKGCONFIG:-}"
-            "/usr/local/opt/libusb/lib/pkgconfig"
-            "/usr/local/lib/pkgconfig"
-        )
+        override="${MACMTP_X86_64_LIBUSB_PKGCONFIG:-}"
     fi
-
-    for candidate in "${candidates[@]}"; do
-        if [[ -n "$candidate" && -f "$candidate/libusb-1.0.pc" ]]; then
-            echo "$candidate"
-            return 0
+    if [[ -n "$override" ]]; then
+        if [[ ! -f "$override/libusb-1.0.pc" ]]; then
+            echo "ERROR: libusb pkg-config file not found in $override" >&2
+            return 1
         fi
-    done
-
-    if pkg-config --exists libusb-1.0 2>/dev/null; then
-        pkg-config --variable=pcfiledir libusb-1.0
+        echo "$override"
         return 0
     fi
-
-    echo "ERROR: libusb pkg-config file not found for $arch." >&2
-    echo "Install libusb for that architecture or set MACMTP_${arch}_LIBUSB_PKGCONFIG." >&2
-    exit 1
+    bash "$SCRIPT_DIR/install-libusb.sh" "$arch" >&2 || return $?
+    local pc_dir="$PROJECT_ROOT/Vendor/libusb/build/$arch/lib/pkgconfig"
+    [[ -f "$pc_dir/libusb-1.0.pc" ]] || return 1
+    echo "$pc_dir"
 }
 
 libusb_lib_dir_for() {
@@ -161,7 +148,7 @@ build_kalam_arch() {
     local go_arch pc_dir cflags ldflags sysroot staging_dir build_status
 
     go_arch="$(go_arch_for "$arch")"
-    pc_dir="$(libusb_pc_dir_for "$arch")"
+    pc_dir="$(libusb_pc_dir_for "$arch")" || return $?
     sysroot="$(xcrun --show-sdk-path)"
     cflags="$(PKG_CONFIG_PATH="$pc_dir" pkg-config --cflags libusb-1.0) -arch $arch -mmacosx-version-min=14.0 -isysroot $sysroot"
     ldflags="$(PKG_CONFIG_PATH="$pc_dir" pkg-config --libs libusb-1.0) -arch $arch -mmacosx-version-min=14.0 -isysroot $sysroot"
@@ -195,8 +182,8 @@ build_swift_arch() {
     local config="$2"
     local pc_dir lib_dir triple build_dir
 
-    pc_dir="$(libusb_pc_dir_for "$arch")"
-    lib_dir="$(libusb_lib_dir_for "$pc_dir")"
+    pc_dir="$(libusb_pc_dir_for "$arch")" || return $?
+    lib_dir="$(libusb_lib_dir_for "$pc_dir")" || return $?
     triple="$(triple_for "$arch")"
 
     # SwiftPM does not track the externally rebuilt Go archive as a linker
@@ -222,9 +209,9 @@ copy_libusb_for_bundle() {
     local destination="$2"
     local pc_dir lib_dir dylib
 
-    pc_dir="$(libusb_pc_dir_for "$arch")"
-    lib_dir="$(libusb_lib_dir_for "$pc_dir")"
-    dylib="$(libusb_dylib_for "$lib_dir")"
+    pc_dir="$(libusb_pc_dir_for "$arch")" || return $?
+    lib_dir="$(libusb_lib_dir_for "$pc_dir")" || return $?
+    dylib="$(libusb_dylib_for "$lib_dir")" || return $?
     validate_dylib_arch "$dylib" "$arch"
     cp "$dylib" "$destination"
 }

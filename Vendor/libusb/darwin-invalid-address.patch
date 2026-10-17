@@ -1,0 +1,24 @@
+--- a/libusb/os/darwin_usb.c
++++ b/libusb/os/darwin_usb.c
+@@ -1465,6 +1465,13 @@
+   UInt8 devSpeed;
+   enum libusb_error ret = LIBUSB_SUCCESS;
+ 
++  /* A transient IOKit entry can expose an address outside libusb's range.
++     Skip it before allocating or referencing a device instead of aborting. */
++  if (cached_device->address > UINT8_MAX) {
++    usbi_warn (ctx, "ignoring device with invalid USB address %u", (unsigned int) cached_device->address);
++    return LIBUSB_ERROR_NO_DEVICE;
++  }
++
+   do {
+     /* check current active configuration (and cache the first configuration value--
+        which may be used by claim_interface) */
+@@ -1496,7 +1503,6 @@
+       /* the location ID encodes the path to the device. the top byte of the location ID contains the bus number
+          (numbered from 0). the remaining bytes can be used to construct the device tree for that bus. */
+       dev->bus_number     = cached_device->location >> 24;
+-      assert(cached_device->address <= UINT8_MAX);
+       dev->device_address = (uint8_t)cached_device->address;
+     } else {
+       priv = usbi_get_device_priv(dev);
