@@ -5,12 +5,18 @@ import Foundation
 
 let packageDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
 let env = ProcessInfo.processInfo.environment
-let hostArch = env["HOSTTYPE"] ?? env["RUNNER_ARCH"] ?? env["NATIVE_ARCH"] ?? ""
+#if arch(arm64)
+let nativeHostArch = "arm64"
+#else
+let nativeHostArch = "x86_64"
+#endif
+let hostArch = env["HOSTTYPE"] ?? env["RUNNER_ARCH"] ?? env["NATIVE_ARCH"] ?? nativeHostArch
 let libusbLibDir = env["MACMTP_LIBUSB_LIB_DIR"]
-let defaultLibusbSearchPaths = hostArch.contains("arm64")
-    || hostArch == "ARM64"
-    ? ["/opt/homebrew/lib", "/usr/local/lib"]
-    : ["/usr/local/lib", "/opt/homebrew/lib"]
+let usesArmLibusb = hostArch.contains("arm64") || hostArch == "ARM64"
+let defaultLibusbSearchPaths = ["\(packageDir)/Vendor/libusb/build/\(usesArmLibusb ? "arm64" : "x86_64")/lib"]
+    + (usesArmLibusb
+        ? ["/opt/homebrew/lib", "/usr/local/lib"]
+        : ["/usr/local/lib", "/opt/homebrew/lib"])
 let existingDefaultLibusbSearchPaths = defaultLibusbSearchPaths.filter {
     FileManager.default.fileExists(atPath: $0)
 }
