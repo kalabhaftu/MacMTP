@@ -234,16 +234,11 @@ Release builds require `SENTRY_DSN`, `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, and `SEN
 
 ```text
 release/
+├── latest-mac.yml
 ├── macMTP-1.6.2-mac-arm64.dmg
-├── macMTP-1.6.2-mac-arm64.zip
-├── macMTP-1.6.2-mac-arm64.dSYM.zip
 ├── macMTP-1.6.2-mac-x86_64.dmg
-├── macMTP-1.6.2-mac-x86_64.zip
-├── macMTP-1.6.2-mac-x86_64.dSYM.zip
 ├── macMTP-1.6.2-mac-universal.dmg
-├── macMTP-1.6.2-mac-universal.zip
-├── macMTP-1.6.2-mac-universal.dSYM.zip
-└── latest-mac.yml
+└── SHA256SUMS.txt
 ```
 
 ---
