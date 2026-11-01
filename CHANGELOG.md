@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7.10 - 2026-11-01
+
+### Stability and Download Counts
+- Move mounted-volume enumeration and metadata reads off the main thread, and skip overlapping refreshes so slow external volumes cannot freeze the window.
+- Defer storage-driven SwiftUI state writes off the synchronous Combine callback stack implicated in a connection-time crash.
+- Add a README badge for GitHub release asset downloads and clarify that it does not represent unique users or completed installs.
+
 ## 1.7.9 - 2026-10-18
 
 ### USB Crash Recovery
