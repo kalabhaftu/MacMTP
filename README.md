@@ -22,6 +22,9 @@ Built with <strong>Swift</strong>, SwiftUI, and AppKit-backed file views. The MT
   <a href="https://github.com/kalabhaftu/MacMTP/releases">
     <img src="https://img.shields.io/github/v/release/kalabhaftu/MacMTP" alt="Release">
   </a>
+  <a href="https://github.com/kalabhaftu/MacMTP/releases">
+    <img src="https://img.shields.io/github/downloads/kalabhaftu/MacMTP/total?label=release%20asset%20downloads" alt="GitHub release asset downloads">
+  </a>
   <a href="https://swift.org">
     <img src="https://img.shields.io/badge/Swift-6.0+-F05138.svg" alt="Swift">
   </a>
@@ -29,6 +32,8 @@ Built with <strong>Swift</strong>, SwiftUI, and AppKit-backed file views. The MT
     <img src="https://img.shields.io/badge/Go-1.21+-00ADD8.svg" alt="Go">
   </a>
 </p>
+
+<p align="center"><sub>The download badge counts GitHub release asset downloads across all releases. It is not a count of unique users or successful installs.</sub></p>
 
 ---
 
