@@ -1,7 +1,7 @@
 import SwiftUI
 
 
-public struct SidebarItem: Identifiable, Hashable {
+public struct SidebarItem: Identifiable, Hashable, Sendable {
     public var id: String
     public var name: String
     public var iconName: String
@@ -61,6 +61,8 @@ struct SidebarView: View {
     
     @State private var quickLinks: [SidebarItem] = FinderFavoritesResolver.resolveFavorites()
     @State private var volumes: [SidebarItem] = []
+    @State private var isRefreshingVolumes = false
+    @State private var refreshVolumesAfterCurrentScan = false
     @State private var refreshTimer: Timer? = nil
     
     
@@ -226,13 +228,26 @@ struct SidebarView: View {
     }
     
     
-    private func refreshVolumes() {
-        HangDiagnostics.shared.measureMainThread(.volumes) {
-            refreshVolumesFromFileSystem()
+    private func refreshVolumes(afterCurrentScan: Bool = false) {
+        guard !isRefreshingVolumes else {
+            refreshVolumesAfterCurrentScan = refreshVolumesAfterCurrentScan || afterCurrentScan
+            return
+        }
+        isRefreshingVolumes = true
+        Task { @MainActor in
+            let detectedVolumes = await discoverSidebarVolumesOffMain {
+                Self.refreshVolumesFromFileSystem()
+            }
+            volumes = detectedVolumes
+            isRefreshingVolumes = false
+            if refreshVolumesAfterCurrentScan {
+                refreshVolumesAfterCurrentScan = false
+                refreshVolumes()
+            }
         }
     }
 
-    private func refreshVolumesFromFileSystem() {
+    nonisolated private static func refreshVolumesFromFileSystem() -> [SidebarItem] {
         var detectedVolumes: [SidebarItem] = []
         
         let systemCapacity = getVolumeCapacity(path: "/")
@@ -302,7 +317,7 @@ struct SidebarView: View {
             }
         }
         
-        self.volumes = detectedVolumes
+        return detectedVolumes
     }
     
     
@@ -358,7 +373,7 @@ struct SidebarView: View {
     }
     
     
-    private func getSystemVolumeName() -> String {
+    nonisolated private static func getSystemVolumeName() -> String {
         let url = URL(fileURLWithPath: "/")
         if let name = try? url.resourceValues(forKeys: [.volumeNameKey]).volumeName {
             return name
@@ -366,7 +381,7 @@ struct SidebarView: View {
         return "Macintosh HD"
     }
     
-    private func getVolumeCapacity(path: String) -> (total: Int64, free: Int64) {
+    nonisolated private static func getVolumeCapacity(path: String) -> (total: Int64, free: Int64) {
         let url = URL(fileURLWithPath: path)
         do {
             let values = try url.resourceValues(forKeys: [.volumeTotalCapacityKey, .volumeAvailableCapacityKey])
@@ -398,7 +413,7 @@ struct SidebarView: View {
     private func ejectVolume(path: String) {
         let url = URL(fileURLWithPath: path)
         try? NSWorkspace.shared.unmountAndEjectDevice(at: url)
-        refreshVolumes()
+        refreshVolumes(afterCurrentScan: true)
     }
     
     private func formatBytes(_ bytes: Int64) -> String {
@@ -407,4 +422,12 @@ struct SidebarView: View {
         formatter.countStyle = .file
         return formatter.string(fromByteCount: bytes)
     }
+}
+
+func discoverSidebarVolumesOffMain(
+    _ discover: @escaping @Sendable () -> [SidebarItem]
+) async -> [SidebarItem] {
+    await Task.detached(priority: .utility) {
+        discover()
+    }.value
 }

@@ -342,7 +342,8 @@ struct ContentView: View {
             updateMTPStatusSummary(files: newFiles)
             currentMTPPath = MTPDeviceManager.shared.currentMTPPath
         }
-        .onReceive(MTPDeviceManager.shared.$storages) { storages in
+        // Queue these @State writes after synchronous @Published delivery completes.
+        .onReceive(MTPDeviceManager.shared.$storages.receive(on: DispatchQueue.main)) { storages in
             guard !screenshotMode else { return }
             mtpStorages = storages
             if let first = storages.first {
@@ -353,7 +354,7 @@ struct ContentView: View {
                 mtpFreeBytes = 0
             }
         }
-        .onReceive(MTPDeviceManager.shared.$selectedStorageId) { storageId in
+        .onReceive(MTPDeviceManager.shared.$selectedStorageId.receive(on: DispatchQueue.main)) { storageId in
             guard !screenshotMode else { return }
             mtpSelectedStorageId = storageId
             if let storageId = storageId, let selected = mtpStorages.first(where: { $0.storageId == storageId }) {
