@@ -71,6 +71,7 @@ public final class MTPDeviceManager: ObservableObject {
     func connectDevice(
         selector: MTPDeviceSelector,
         reportFailure: Bool = true,
+        retryPending: Bool = false,
         refreshAfterConnect: Bool = true,
         shouldCancel: () -> Bool = { false }
     ) async -> Bool {
@@ -163,6 +164,15 @@ public final class MTPDeviceManager: ObservableObject {
                         "native_error_type": nativeErrorType(for: error)
                     ]
                 )
+            } else if shouldDeferMTPConnectionFailureReport(error, retryPending: retryPending) {
+                ErrorLogger.logMessage(
+                    "MTP connection attempt failed; automatic retry is pending",
+                    level: .warning,
+                    userInfo: [
+                        "event": "connection_retry_pending",
+                        "native_error_type": nativeErrorType(for: error)
+                    ]
+                )
             } else if !isExpectedUserCondition {
                 ErrorLogger.log(
                     error,
@@ -252,7 +262,7 @@ public final class MTPDeviceManager: ObservableObject {
     }
 
     @discardableResult
-    func switchDevice(to selector: MTPDeviceSelector) async -> Bool {
+    func switchDevice(to selector: MTPDeviceSelector, retryPending: Bool = false) async -> Bool {
         guard !Task.isCancelled else { return false }
         guard !isConnectionRecoveryInFlight else {
             errorMessage = "The previous MTP session is still cleaning up. Try again shortly."
@@ -267,7 +277,7 @@ public final class MTPDeviceManager: ObservableObject {
             await disconnectDevice()
         }
         guard !Task.isCancelled else { return false }
-        return await connectDevice(selector: selector)
+        return await connectDevice(selector: selector, retryPending: retryPending)
     }
 
     func reconnectForTransferDirectoryRetry(

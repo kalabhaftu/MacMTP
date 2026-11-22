@@ -123,6 +123,30 @@ func transportFailureClassificationKeepsContentionSeparateFromBrokenSessions() {
 }
 
 @Test
+func retryableConnectionErrorsStayBreadcrumbsUntilTheAutomaticRetryIsTerminal() {
+    let retryable = KalamError.nativeOperationFailed(
+        operation: "initialize",
+        errorType: "ErrorDeviceSetup",
+        message: "LIBUSB_ERROR_IO"
+    )
+    let deviceDetached = KalamError.nativeOperationFailed(
+        operation: "initialize",
+        errorType: "ErrorDeviceSetup",
+        message: "LIBUSB_ERROR_NO_DEVICE"
+    )
+    let unsupported = KalamError.nativeOperationFailed(
+        operation: "initialize",
+        errorType: "ErrorDeviceInfo",
+        message: "operation not supported"
+    )
+
+    #expect(shouldDeferMTPConnectionFailureReport(retryable, retryPending: true))
+    #expect(!shouldDeferMTPConnectionFailureReport(retryable, retryPending: false))
+    #expect(!shouldDeferMTPConnectionFailureReport(deviceDetached, retryPending: true))
+    #expect(!shouldDeferMTPConnectionFailureReport(unsupported, retryPending: true))
+}
+
+@Test
 func deviceLockedDirectoryFailureIsRecoverableButOnlyTerminalFailuresCreateIssues() {
     let error = KalamError.nativeOperationFailed(
         operation: "make_directory",

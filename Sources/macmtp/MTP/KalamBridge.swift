@@ -245,6 +245,12 @@ func shouldReportMTPTransportFailure(_ error: Error, connectionIsActive: Bool) -
     return !isMTPTransportFailure(error) || connectionIsActive
 }
 
+func shouldDeferMTPConnectionFailureReport(_ error: Error, retryPending: Bool) -> Bool {
+    retryPending
+        && isMTPTransportFailure(error)
+        && !isMTPDeviceUnavailable(error)
+}
+
 func isMTPTransferCancellation(_ error: Error) -> Bool {
     guard case .nativeOperationFailed(_, let errorType, let message) = error as? KalamError else {
         return false

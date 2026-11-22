@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.11 - 2026-11-22
+
+### Connection Reporting
+- Keep retryable USB setup failures as breadcrumbs while the automatic connection retry is pending, and report only terminal failures to Sentry.
+
 ## 1.7.10 - 2026-11-01
 
 ### Stability and Download Counts

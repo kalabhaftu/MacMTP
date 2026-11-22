@@ -394,7 +394,11 @@ final class MTPConnectionCoordinator: ObservableObject {
                     guard !orderedSelectors.isEmpty else { return }
 
                     let candidates = orderedMTPConnectionCandidates(orderedSelectors, failed: self.failedSelectors)
-                    let connected = await self.connectFirstAvailable(candidates, token: token)
+                    let connected = await self.connectFirstAvailable(
+                        candidates,
+                        token: token,
+                        retryPending: attempt < maxAttempts
+                    )
                     guard self.generation == token, !Task.isCancelled else { return }
 
                     if connected {
@@ -444,7 +448,11 @@ final class MTPConnectionCoordinator: ObservableObject {
                         selectorIsPresent($0, in: self.lastUSBInventory)
                     })
                     if !retained.isEmpty {
-                        let connected = await self.connectFirstAvailable(retained, token: token)
+                        let connected = await self.connectFirstAvailable(
+                            retained,
+                            token: token,
+                            retryPending: attempt < maxAttempts
+                        )
                         guard self.generation == token, !Task.isCancelled else { return }
                         if connected {
                             self.state = .connected
@@ -465,10 +473,17 @@ final class MTPConnectionCoordinator: ObservableObject {
         }
     }
 
-    private func connectFirstAvailable(_ candidates: [MTPDeviceSelector], token: UInt64) async -> Bool {
-        for candidate in candidates {
+    private func connectFirstAvailable(
+        _ candidates: [MTPDeviceSelector],
+        token: UInt64,
+        retryPending: Bool
+    ) async -> Bool {
+        for (index, candidate) in candidates.enumerated() {
             guard generation == token, !Task.isCancelled else { return false }
-            let connected = await MTPDeviceManager.shared.switchDevice(to: candidate)
+            let connected = await MTPDeviceManager.shared.switchDevice(
+                to: candidate,
+                retryPending: retryPending || index < candidates.count - 1
+            )
             guard generation == token, !Task.isCancelled else { return false }
             if connected {
                 failedSelectors.remove(candidate)
